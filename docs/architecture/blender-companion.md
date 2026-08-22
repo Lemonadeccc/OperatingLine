@@ -212,7 +212,7 @@ session/step/observation/checkpoint mismatch；直接成功与 `recovered_after_
 阻塞型 `step_observation_failed` 会先提交保留 leaf receipt 的 `next` checkpoint 再上报；恢复后的
 `observation_recovered` 携带 `recheck` checkpoint。`failure-recovery.finalize` 将这两条 report 与审批/receipt
 链绑定，并在同一事务中唯一占用所有组成 report；`failed_rolled_back` 自动补偿路径不保留 leaf，也不会伪造
-新 checkpoint。Guide/Companion `1.5.0` 可把 `rollback_step` 限定为两次或三次总尝试：每次失败先补偿并
+新 checkpoint。Guide/Companion `1.5.0+` 可把 `rollback_step` 限定为两次或三次总尝试：每次失败先补偿并
 发出 `retry_scheduled`，Session 只接受连续 attempt；最终成功才把整轮作为一个 `next` checkpoint 提交，
 耗尽则取消准备中的历史事务并报告 `failed_rolled_back + exhausted`。回退失败或保留现场不会进入自动循环。
 Runtime 只会把唯一匹配 terminal managed-action failure 的 `failed_rolled_back` attestation 交给本地
@@ -228,10 +228,14 @@ lease 的 SHA-256 fingerprint，不把 lease 写进事件。
 
 参数修复接受会原子创建下一 revision 的 GuideRevisionRequest 和 pending GuideProposal，之后仍由 Blender
 现有 Proposal UI 独立预览并 Accept/Reject；审查本身不会安装 Plan、调用 Provider、排队 action 或触发
-Companion timer 执行。discard 不创建 revision 或 Proposal。策略切换在 GuidePlan 尚不能表达 execution track
-时只可 discard；语义候选在没有签名 Provider authority 时也不能接受。候选过期只禁止 accept，当前证据仍
-有效时仍可 discard；Plan、目录、rollback 证据或目标 lease 漂移则 fail closed。见
-[ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md)。
+Companion timer 执行。discard 不创建 revision 或 Proposal。Guide `1.6.0` 可把 proof-backed 策略切换物化为
+严格、仅哈希引用的 `executionTrackOverride`；通用创建/发布路径不能引入它，Proposal accept 前会重验当前
+基线 Plan 和 durable review 到不可变 replay proof 的完整链。当前逐控件 executor 尚不存在，所以 Blender 在 history、
+session 与 action 副作用前锁住 Next，action-level MCP 也拒绝该叶节点；旧 1.5 候选仍只可 discard。语义候选
+在没有签名 Provider authority 时也不能接受。候选过期只禁止 accept，当前证据仍有效时仍可 discard；Plan、
+目录、rollback 证据或目标 lease 漂移则 fail closed。见
+[ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md) 与
+[ADR 0104](../adr/0104-reviewed-execution-track-override.md)。
 见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
@@ -282,7 +286,7 @@ GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor 与已�
 JSON 放入队列。Initial Plan Run 与 Dialogue Run 当前不入队：缺少签署 packet-bound authority 时固定
 禁用，Blender 不构造或 POST 旧 boolean authorization。
 网络线程启动后先使用 Companion Session `1.0.0` 声明宿主/Companion 版本、支持的 Guide 协议、
-ActionCatalog `1.22.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
+ActionCatalog `1.22.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.6.0` 后，UI 才显示
 Connected。Guide、状态与 Proposal decision 请求绑定服务端签发的 lease，线程按协商周期发送严格递增
 心跳；失联、过期、
 Runtime 重启或同实例新会话替代旧 lease 时清空本地会话并自动重新握手。在线发现与持久化快照的边界

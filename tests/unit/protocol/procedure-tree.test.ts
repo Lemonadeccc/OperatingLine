@@ -398,7 +398,7 @@ describe('procedure tree protocol', () => {
     const leaf = plan.steps.find((step) => step.id === 'snowman.head.eyes.left');
 
     expect(plan).toMatchObject({
-      protocolVersion: '1.5.0',
+      protocolVersion: '1.6.0',
       id: 'snowman.eye.left.procedure',
       rootStepId: 'snowman',
     });

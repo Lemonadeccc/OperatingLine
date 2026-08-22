@@ -3032,6 +3032,9 @@ describe('OperatingLine persistence', () => {
       expect(first.getGuideRevisionRequest(revisionRequestId)).toEqual(revision);
       expect(first.getGuideReplanProposalForRequest(revisionRequestId)).toEqual(proposal);
       expect(first.getProcedureExecutionFailureReplanReview(requestId)).toEqual(payload);
+      expect(first.getProcedureExecutionFailureReplanReviewByProposalId(proposalId)).toEqual(
+        payload,
+      );
       expect(
         first.listExecutionEventsByTypes([
           'guide.revision.requested',
@@ -3043,6 +3046,9 @@ describe('OperatingLine persistence', () => {
       first.close();
 
       const reopened = openOperatingLineDatabase(databasePath);
+      expect(reopened.getProcedureExecutionFailureReplanReviewByProposalId(proposalId)).toEqual(
+        payload,
+      );
       expect(reopened.commitProcedureExecutionFailureReplanReview(input)).toEqual({
         result: 'duplicate',
         review: payload,
@@ -3115,6 +3121,7 @@ describe('OperatingLine persistence', () => {
       review: discardPayload,
     });
     expect(database.listLatestGuidePlanRevisions()).toEqual([]);
+    expect(database.getProcedureExecutionFailureReplanReviewByProposalId(randomUUID())).toBeNull();
 
     const acceptRequestId = randomUUID();
     const acceptReviewId = randomUUID();
@@ -3181,6 +3188,7 @@ describe('OperatingLine persistence', () => {
       }),
     ).toEqual({ result: 'conflict', review: null });
     expect(database.getProcedureExecutionFailureReplanReview(acceptRequestId)).toBeNull();
+    expect(database.getProcedureExecutionFailureReplanReviewByProposalId(proposalId)).toBeNull();
     expect(database.getGuideRevisionRequest(revisionRequestId)).toBeNull();
     expect(database.getGuideProposal(proposalId)).toBeNull();
     database.close();

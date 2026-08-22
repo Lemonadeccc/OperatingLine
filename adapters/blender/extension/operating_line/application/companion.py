@@ -1465,7 +1465,7 @@ class CompanionController:
         revision_operation = proposal.get("revisionOperation")
         if (
             revision_request_id is not None
-            and proposal_protocol_version in {"1.4.0", PROTOCOL_VERSION}
+            and proposal_protocol_version in {"1.4.0", "1.5.0", PROTOCOL_VERSION}
             and revision_operation is None
         ):
             raise ValueError(
@@ -1476,7 +1476,7 @@ class CompanionController:
                 raise ValueError(
                     "A standalone proposal cannot declare a revision operation"
                 )
-            if proposal_protocol_version not in {"1.4.0", PROTOCOL_VERSION}:
+            if proposal_protocol_version not in {"1.4.0", "1.5.0", PROTOCOL_VERSION}:
                 raise ValueError("Explicit revision operations require protocol 1.4+")
             validate_revision_operation(
                 revision_operation,
@@ -2242,8 +2242,8 @@ class CompanionController:
             "sequence": last_report.get("sequence"),
         }:
             raise ValueError("Shortcut proof expected state is stale")
-        if last_report.get("protocolVersion") != "1.5.0":
-            raise ValueError("Shortcut proof requires native Undo protocol 1.5")
+        if last_report.get("protocolVersion") not in {"1.5.0", "1.6.0"}:
+            raise ValueError("Shortcut proof requires native Undo protocol 1.5+")
         expected_sequence = delivery["expectedState"]["sequence"]
         if expected_sequence > getattr(transport, "last_delivered_sequence", self.last_delivered_sequence):
             raise ValueError("Shortcut proof expected state was not delivered")
@@ -2828,8 +2828,8 @@ class CompanionController:
                 "sequence": last_report.get("sequence"),
             }:
                 raise ValueError("Action execution expected state is stale")
-            if last_report.get("protocolVersion") != "1.5.0":
-                raise ValueError("Action execution requires native Undo protocol 1.5")
+            if last_report.get("protocolVersion") not in {"1.5.0", "1.6.0"}:
+                raise ValueError("Action execution requires native Undo protocol 1.5+")
             if (
                 isinstance(expected_state.get("sequence"), bool)
                 or not isinstance(expected_state.get("sequence"), int)
@@ -2845,6 +2845,8 @@ class CompanionController:
             if next_index < 0 or next_index >= len(session.steps):
                 raise ValueError("The accepted walkthrough has no next step")
             candidate = session.steps[next_index]
+            if getattr(candidate, "execution_track_override", None) is not None:
+                raise ValueError("execution_track_executor_unavailable")
             source_step = self._source_step(session, candidate.id)
             if source_step is None or source_step != delivered_step:
                 raise ValueError("Action execution step does not match the exact next step")
@@ -4407,7 +4409,7 @@ class CompanionController:
             "observation_recovered": "recheck",
             "step_rolled_back": "back",
         }.get(transition)
-        if protocol_version == "1.5.0" and (
+        if protocol_version in {"1.5.0", "1.6.0"} and (
             expected_checkpoint_operation is not None
             or transition == "current_state_rechecked"
         ):
@@ -4486,7 +4488,13 @@ class CompanionController:
             "error": error,
             "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
-        if report["protocolVersion"] in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}:
+        if report["protocolVersion"] in {
+            "1.2.0",
+            "1.3.0",
+            "1.4.0",
+            "1.5.0",
+            "1.6.0",
+        }:
             report["observationGate"] = gate.report_data() if gate is not None else None
             retry = (
                 session.success_gate_retry_copy(step.id)
@@ -4495,7 +4503,7 @@ class CompanionController:
             )
             if retry is not None:
                 report["observationRetry"] = retry
-        if report["protocolVersion"] == "1.5.0":
+        if report["protocolVersion"] in {"1.5.0", "1.6.0"}:
             report["artifactAttestation"] = (
                 deepcopy(self._artifact_attestation)
                 if phase == "completed" and transition != "current_state_rechecked"

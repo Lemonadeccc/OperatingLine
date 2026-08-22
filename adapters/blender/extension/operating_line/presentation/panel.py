@@ -81,6 +81,7 @@ def _draw_walkthrough_controls(
     forward = controls.row(align=True)
     forward.enabled = (
         next_step is not None
+        and getattr(next_step, "execution_track_override", None) is None
         and not proposal_pending
         and not session.observation_blocked
         and not history_error
@@ -136,7 +137,18 @@ def _draw_guidance_status(layout, session) -> None:
             text=f"Back {session.active_index + 1:02d}  {active.title}",
             icon=STATE_ICONS[GuidanceState.BACK],
         )
-    if session.observation_blocked:
+    if (
+        next_step is not None
+        and getattr(next_step, "execution_track_override", None) is not None
+    ):
+        status.label(
+            text=(
+                f"Next {next_index + 1:02d}  Locked: "
+                "execution track executor unavailable"
+            ),
+            icon="LOCKED",
+        )
+    elif session.observation_blocked:
         status.label(
             text=f"Next {next_index + 1:02d}  Locked by observation gate",
             icon="LOCKED",

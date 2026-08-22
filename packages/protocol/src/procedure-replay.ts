@@ -26,6 +26,7 @@ export const procedureLeafReplayFormatVersion = '1.0.0' as const;
 export const procedureLeafReplayFormatVersionSchema = z.literal(procedureLeafReplayFormatVersion);
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const procedureLeafReplayNativeUndoProtocolVersionSchema = z.enum(['1.5.0', '1.6.0']);
 
 export const procedureLeafReplayActionNameSchema = actionLevelMcpActionNameSchema;
 export type ProcedureLeafReplayActionName = ActionLevelMcpActionName;
@@ -1114,7 +1115,7 @@ const procedureLeafReplayRecoveredGateSchema = companionObservationGateSchema.sa
 });
 
 const procedureLeafReplayFailureReportSchema = companionStateReportSchema.safeExtend({
-  protocolVersion: z.literal('1.5.0'),
+  protocolVersion: procedureLeafReplayNativeUndoProtocolVersionSchema,
   adapterId: z.literal('blender'),
   plan: z.strictObject({
     id: z.string().min(1),
@@ -1133,7 +1134,7 @@ const procedureLeafReplayFailureReportSchema = companionStateReportSchema.safeEx
 });
 
 const procedureLeafReplayRecoveryReportSchema = companionStateReportSchema.safeExtend({
-  protocolVersion: z.literal('1.5.0'),
+  protocolVersion: procedureLeafReplayNativeUndoProtocolVersionSchema,
   adapterId: z.literal('blender'),
   plan: z.strictObject({
     id: z.string().min(1),
@@ -1490,7 +1491,7 @@ export type ProcedureLeafReplayFailureRecoveryFinalizeResult = z.infer<
 >;
 
 const procedureLeafReplayCurrentStateReportSchema = companionStateReportSchema.safeExtend({
-  protocolVersion: z.literal('1.5.0'),
+  protocolVersion: procedureLeafReplayNativeUndoProtocolVersionSchema,
   adapterId: z.literal('blender'),
   transition: z.literal('current_state_rechecked'),
   procedureReplayCurrentStateRequest: companionProcedureReplayCurrentStateRequestSchema,

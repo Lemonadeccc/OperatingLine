@@ -990,7 +990,7 @@ class CompanionTransport:
                 )
         self._poll_revision_history()
         self._poll_revision_branches()
-        if session.negotiated_guide_protocol_version == "1.5.0":
+        if session.negotiated_guide_protocol_version in {"1.5.0", "1.6.0"}:
             self._poll_action_request()
             self._poll_menu_control_proof_request()
             self._poll_shortcut_proof_request()

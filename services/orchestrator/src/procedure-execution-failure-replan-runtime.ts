@@ -47,6 +47,28 @@ export interface ProcedureExecutionFailureReplanRuntimeResolver extends Procedur
   listResolvableRequestIds(): readonly string[];
 }
 
+export interface ProcedureExecutionProofTrackBinding {
+  readonly semanticLeafId: string;
+  readonly recipeId: string;
+  readonly modality: 'menu' | 'shortcut';
+  readonly trackId: string;
+  /** Hash of the strategy wrapper committed by the failure-replan candidate. */
+  readonly verifiedTrackContentSha256: string;
+  /** Hash of the exact materialized ProcedureTrack stored in the replay binding. */
+  readonly trackContentSha256: string;
+  readonly proofExecutionContentSha256: string;
+  readonly observationObligations: readonly {
+    readonly kind: string;
+    readonly parameters: Readonly<Record<string, JsonValue>>;
+  }[];
+}
+
+export interface ProcedureExecutionProofStrategyBinding {
+  readonly currentTrackId: string;
+  readonly currentTrackContentSha256: string;
+  readonly candidates: readonly ProcedureExecutionProofTrackBinding[];
+}
+
 export interface ProcedureExecutionFailureReplanRuntimeResolverOptions {
   readonly database: RuntimeDatabase;
   readonly actionCatalogRegistry: Pick<ActionCatalogRegistry, 'get'>;
@@ -72,6 +94,10 @@ function uuidFromEvidence(namespace: string, value: unknown): string {
     .update(canonicalizeProtocolJsonValue(value))
     .digest('hex');
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+}
+
+function contentSha256(value: unknown): string {
+  return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
 
 function isIdentityArgument(argument: string): boolean {
@@ -263,33 +289,77 @@ function repairPolicy(
   return { repairableArguments, parameterRepairCandidates };
 }
 
-function strategyForLeaf(
-  leaf: ProcedureLeafNode,
-): TrustedProcedureExecutionFailureReplanResolution['strategy'] {
+function strategyTracksForLeaf(leaf: ProcedureLeafNode) {
   const availableMcp = leaf.mcpTracks.filter((track) => track.availability === 'available');
   if (availableMcp.length !== 1) return null;
   const current = availableMcp[0]!;
   const obligations = observationObligations(leaf);
-  const tracks: ProcedureExecutionStrategyTrack[] = [
-    {
-      semanticLeafId: leaf.id,
-      modality: 'mcp',
-      trackId: current.id,
-      trajectory: current.operations.map(jsonValue),
-      observationObligations: obligations,
-    },
-  ];
+  const currentStrategy: ProcedureExecutionStrategyTrack = {
+    semanticLeafId: leaf.id,
+    modality: 'mcp',
+    trackId: current.id,
+    trajectory: current.operations.map(jsonValue),
+    observationObligations: obligations,
+  };
+  const candidates: Array<{
+    strategy: ProcedureExecutionStrategyTrack;
+    trackContentSha256: string;
+    proofExecutionContentSha256: string;
+  }> = [];
   for (const track of [...leaf.menuTracks, ...leaf.shortcutTracks]) {
     if (track.availability !== 'available' || track.proofExecution === undefined) continue;
-    tracks.push({
-      semanticLeafId: leaf.id,
-      modality: track.modality,
-      trackId: track.id,
-      trajectory: track.operations.map(jsonValue),
-      observationObligations: obligations,
+    candidates.push({
+      strategy: {
+        semanticLeafId: leaf.id,
+        modality: track.modality,
+        trackId: track.id,
+        trajectory: track.operations.map(jsonValue),
+        observationObligations: obligations,
+      },
+      trackContentSha256: contentSha256(track),
+      proofExecutionContentSha256: contentSha256(track.proofExecution),
     });
   }
-  return { currentTrackId: current.id, tracks };
+  return { current, currentStrategy, candidates };
+}
+
+function strategyForLeaf(
+  leaf: ProcedureLeafNode,
+): TrustedProcedureExecutionFailureReplanResolution['strategy'] {
+  const resolved = strategyTracksForLeaf(leaf);
+  if (resolved === null) return null;
+  return {
+    currentTrackId: resolved.current.id,
+    tracks: [resolved.currentStrategy, ...resolved.candidates.map(({ strategy }) => strategy)],
+  };
+}
+
+/**
+ * Derive immutable proof-track hashes from the exact materialized replay leaf.
+ * These hashes are review authority only; they do not grant execution authority.
+ */
+export function procedureExecutionProofStrategyBindingForLeaf(
+  leaf: ProcedureLeafNode,
+  recipeId: string,
+): ProcedureExecutionProofStrategyBinding | null {
+  const resolved = strategyTracksForLeaf(leaf);
+  if (resolved === null) return null;
+  return {
+    currentTrackId: resolved.current.id,
+    currentTrackContentSha256: contentSha256(resolved.current),
+    candidates: resolved.candidates.map(
+      ({ strategy, trackContentSha256, proofExecutionContentSha256 }) => ({
+        semanticLeafId: leaf.id,
+        recipeId,
+        modality: strategy.modality as 'menu' | 'shortcut',
+        trackId: strategy.trackId,
+        verifiedTrackContentSha256: contentSha256(strategy),
+        trackContentSha256,
+        proofExecutionContentSha256,
+        observationObligations: strategy.observationObligations,
+      }),
+    ),
+  };
 }
 
 function canonicalFailureEvidence(

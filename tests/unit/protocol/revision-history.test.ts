@@ -170,7 +170,7 @@ describe('guide revision thread history protocol', () => {
     const threadId = randomUUID();
     const sourceThreadId = randomUUID();
     const branchList = {
-      protocolVersion: '1.5.0',
+      protocolVersion: '1.6.0',
       targetAdapterId: 'blender',
       instanceId,
       planId: plan.id,

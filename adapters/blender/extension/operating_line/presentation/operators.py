@@ -85,6 +85,18 @@ def _execute_next(operator, context):
     session = _session()
     next_index = session.active_index + 1
     candidate = session.steps[next_index] if next_index < len(session.steps) else None
+    if (
+        candidate is not None
+        and getattr(candidate, "execution_track_override", None) is not None
+    ):
+        error = "execution_track_executor_unavailable"
+        _companion().report("error", step=candidate, error=error)
+        operator.report(
+            {"ERROR"},
+            "The selected menu or shortcut execution track has no available executor",
+        )
+        refresh_native_menu_guidance()
+        return {"CANCELLED"}
     if not _prepare_history(operator, context, session, "next"):
         return {"CANCELLED"}
     observation_attempt = 1

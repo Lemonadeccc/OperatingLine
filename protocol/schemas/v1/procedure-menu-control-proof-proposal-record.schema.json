@@ -2053,7 +2053,8 @@
                             "1.2.0",
                             "1.3.0",
                             "1.4.0",
-                            "1.5.0"
+                            "1.5.0",
+                            "1.6.0"
                           ]
                         },
                         "catalogVersion": {
@@ -2407,7 +2408,8 @@
                             "1.2.0",
                             "1.3.0",
                             "1.4.0",
-                            "1.5.0"
+                            "1.5.0",
+                            "1.6.0"
                           ]
                         },
                         "catalogVersion": {
@@ -6579,7 +6581,8 @@
                         "1.2.0",
                         "1.3.0",
                         "1.4.0",
-                        "1.5.0"
+                        "1.5.0",
+                        "1.6.0"
                       ]
                     },
                     "id": {
@@ -6901,6 +6904,57 @@
                               }
                             ]
                           },
+                          "executionTrackOverride": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "interaction_catalog_proof"
+                              },
+                              "interactionCatalogVersion": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                              },
+                              "interactionCatalogContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "recipeId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modality": {
+                                "type": "string",
+                                "enum": [
+                                  "menu",
+                                  "shortcut"
+                                ]
+                              },
+                              "trackId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "trackContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "proofExecutionContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "interactionCatalogVersion",
+                              "interactionCatalogContentSha256",
+                              "recipeId",
+                              "modality",
+                              "trackId",
+                              "trackContentSha256",
+                              "proofExecutionContentSha256"
+                            ],
+                            "additionalProperties": false
+                          },
                           "rollback": {
                             "type": "object",
                             "properties": {
@@ -6944,6 +6998,20 @@
                             "if": {
                               "required": [
                                 "observationPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "action": {
+                                  "type": "object"
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": {
+                              "required": [
+                                "executionTrackOverride"
                               ]
                             },
                             "then": {
@@ -7002,7 +7070,8 @@
                               "1.2.0",
                               "1.3.0",
                               "1.4.0",
-                              "1.5.0"
+                              "1.5.0",
+                              "1.6.0"
                             ]
                           }
                         },
@@ -7017,6 +7086,31 @@
                               "not": {
                                 "required": [
                                   "observationPolicy"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "protocolVersion": {
+                            "const": "1.6.0"
+                          }
+                        },
+                        "required": [
+                          "protocolVersion"
+                        ]
+                      },
+                      "else": {
+                        "properties": {
+                          "steps": {
+                            "items": {
+                              "not": {
+                                "required": [
+                                  "executionTrackOverride"
                                 ]
                               }
                             }
@@ -9286,7 +9380,8 @@
                         "1.2.0",
                         "1.3.0",
                         "1.4.0",
-                        "1.5.0"
+                        "1.5.0",
+                        "1.6.0"
                       ]
                     },
                     "id": {
@@ -9608,6 +9703,57 @@
                               }
                             ]
                           },
+                          "executionTrackOverride": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "interaction_catalog_proof"
+                              },
+                              "interactionCatalogVersion": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                              },
+                              "interactionCatalogContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "recipeId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modality": {
+                                "type": "string",
+                                "enum": [
+                                  "menu",
+                                  "shortcut"
+                                ]
+                              },
+                              "trackId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "trackContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "proofExecutionContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "interactionCatalogVersion",
+                              "interactionCatalogContentSha256",
+                              "recipeId",
+                              "modality",
+                              "trackId",
+                              "trackContentSha256",
+                              "proofExecutionContentSha256"
+                            ],
+                            "additionalProperties": false
+                          },
                           "rollback": {
                             "type": "object",
                             "properties": {
@@ -9651,6 +9797,20 @@
                             "if": {
                               "required": [
                                 "observationPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "action": {
+                                  "type": "object"
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": {
+                              "required": [
+                                "executionTrackOverride"
                               ]
                             },
                             "then": {
@@ -9709,7 +9869,8 @@
                               "1.2.0",
                               "1.3.0",
                               "1.4.0",
-                              "1.5.0"
+                              "1.5.0",
+                              "1.6.0"
                             ]
                           }
                         },
@@ -9724,6 +9885,31 @@
                               "not": {
                                 "required": [
                                   "observationPolicy"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "protocolVersion": {
+                            "const": "1.6.0"
+                          }
+                        },
+                        "required": [
+                          "protocolVersion"
+                        ]
+                      },
+                      "else": {
+                        "properties": {
+                          "steps": {
+                            "items": {
+                              "not": {
+                                "required": [
+                                  "executionTrackOverride"
                                 ]
                               }
                             }
@@ -12004,7 +12190,8 @@
                         "1.2.0",
                         "1.3.0",
                         "1.4.0",
-                        "1.5.0"
+                        "1.5.0",
+                        "1.6.0"
                       ]
                     },
                     "id": {
@@ -12326,6 +12513,57 @@
                               }
                             ]
                           },
+                          "executionTrackOverride": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "interaction_catalog_proof"
+                              },
+                              "interactionCatalogVersion": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                              },
+                              "interactionCatalogContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "recipeId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modality": {
+                                "type": "string",
+                                "enum": [
+                                  "menu",
+                                  "shortcut"
+                                ]
+                              },
+                              "trackId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "trackContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "proofExecutionContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "interactionCatalogVersion",
+                              "interactionCatalogContentSha256",
+                              "recipeId",
+                              "modality",
+                              "trackId",
+                              "trackContentSha256",
+                              "proofExecutionContentSha256"
+                            ],
+                            "additionalProperties": false
+                          },
                           "rollback": {
                             "type": "object",
                             "properties": {
@@ -12369,6 +12607,20 @@
                             "if": {
                               "required": [
                                 "observationPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "action": {
+                                  "type": "object"
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": {
+                              "required": [
+                                "executionTrackOverride"
                               ]
                             },
                             "then": {
@@ -12427,7 +12679,8 @@
                               "1.2.0",
                               "1.3.0",
                               "1.4.0",
-                              "1.5.0"
+                              "1.5.0",
+                              "1.6.0"
                             ]
                           }
                         },
@@ -12442,6 +12695,31 @@
                               "not": {
                                 "required": [
                                   "observationPolicy"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "protocolVersion": {
+                            "const": "1.6.0"
+                          }
+                        },
+                        "required": [
+                          "protocolVersion"
+                        ]
+                      },
+                      "else": {
+                        "properties": {
+                          "steps": {
+                            "items": {
+                              "not": {
+                                "required": [
+                                  "executionTrackOverride"
                                 ]
                               }
                             }
@@ -15023,7 +15301,8 @@
                         "1.2.0",
                         "1.3.0",
                         "1.4.0",
-                        "1.5.0"
+                        "1.5.0",
+                        "1.6.0"
                       ]
                     },
                     "id": {
@@ -15345,6 +15624,57 @@
                               }
                             ]
                           },
+                          "executionTrackOverride": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "interaction_catalog_proof"
+                              },
+                              "interactionCatalogVersion": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                              },
+                              "interactionCatalogContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "recipeId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modality": {
+                                "type": "string",
+                                "enum": [
+                                  "menu",
+                                  "shortcut"
+                                ]
+                              },
+                              "trackId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "trackContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "proofExecutionContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "interactionCatalogVersion",
+                              "interactionCatalogContentSha256",
+                              "recipeId",
+                              "modality",
+                              "trackId",
+                              "trackContentSha256",
+                              "proofExecutionContentSha256"
+                            ],
+                            "additionalProperties": false
+                          },
                           "rollback": {
                             "type": "object",
                             "properties": {
@@ -15388,6 +15718,20 @@
                             "if": {
                               "required": [
                                 "observationPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "action": {
+                                  "type": "object"
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": {
+                              "required": [
+                                "executionTrackOverride"
                               ]
                             },
                             "then": {
@@ -15446,7 +15790,8 @@
                               "1.2.0",
                               "1.3.0",
                               "1.4.0",
-                              "1.5.0"
+                              "1.5.0",
+                              "1.6.0"
                             ]
                           }
                         },
@@ -15461,6 +15806,31 @@
                               "not": {
                                 "required": [
                                   "observationPolicy"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "protocolVersion": {
+                            "const": "1.6.0"
+                          }
+                        },
+                        "required": [
+                          "protocolVersion"
+                        ]
+                      },
+                      "else": {
+                        "properties": {
+                          "steps": {
+                            "items": {
+                              "not": {
+                                "required": [
+                                  "executionTrackOverride"
                                 ]
                               }
                             }
@@ -18216,7 +18586,8 @@
                         "1.2.0",
                         "1.3.0",
                         "1.4.0",
-                        "1.5.0"
+                        "1.5.0",
+                        "1.6.0"
                       ]
                     },
                     "id": {
@@ -18538,6 +18909,57 @@
                               }
                             ]
                           },
+                          "executionTrackOverride": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "interaction_catalog_proof"
+                              },
+                              "interactionCatalogVersion": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                              },
+                              "interactionCatalogContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "recipeId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modality": {
+                                "type": "string",
+                                "enum": [
+                                  "menu",
+                                  "shortcut"
+                                ]
+                              },
+                              "trackId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "trackContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "proofExecutionContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "interactionCatalogVersion",
+                              "interactionCatalogContentSha256",
+                              "recipeId",
+                              "modality",
+                              "trackId",
+                              "trackContentSha256",
+                              "proofExecutionContentSha256"
+                            ],
+                            "additionalProperties": false
+                          },
                           "rollback": {
                             "type": "object",
                             "properties": {
@@ -18581,6 +19003,20 @@
                             "if": {
                               "required": [
                                 "observationPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "action": {
+                                  "type": "object"
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": {
+                              "required": [
+                                "executionTrackOverride"
                               ]
                             },
                             "then": {
@@ -18639,7 +19075,8 @@
                               "1.2.0",
                               "1.3.0",
                               "1.4.0",
-                              "1.5.0"
+                              "1.5.0",
+                              "1.6.0"
                             ]
                           }
                         },
@@ -18654,6 +19091,31 @@
                               "not": {
                                 "required": [
                                   "observationPolicy"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "protocolVersion": {
+                            "const": "1.6.0"
+                          }
+                        },
+                        "required": [
+                          "protocolVersion"
+                        ]
+                      },
+                      "else": {
+                        "properties": {
+                          "steps": {
+                            "items": {
+                              "not": {
+                                "required": [
+                                  "executionTrackOverride"
                                 ]
                               }
                             }
@@ -21539,7 +22001,8 @@
             "1.2.0",
             "1.3.0",
             "1.4.0",
-            "1.5.0"
+            "1.5.0",
+            "1.6.0"
           ]
         },
         "proposalId": {
@@ -21567,7 +22030,8 @@
                 "1.2.0",
                 "1.3.0",
                 "1.4.0",
-                "1.5.0"
+                "1.5.0",
+                "1.6.0"
               ]
             },
             "id": {
@@ -21889,6 +22353,57 @@
                       }
                     ]
                   },
+                  "executionTrackOverride": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "interaction_catalog_proof"
+                      },
+                      "interactionCatalogVersion": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                      },
+                      "interactionCatalogContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "recipeId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "modality": {
+                        "type": "string",
+                        "enum": [
+                          "menu",
+                          "shortcut"
+                        ]
+                      },
+                      "trackId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "trackContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "proofExecutionContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "interactionCatalogVersion",
+                      "interactionCatalogContentSha256",
+                      "recipeId",
+                      "modality",
+                      "trackId",
+                      "trackContentSha256",
+                      "proofExecutionContentSha256"
+                    ],
+                    "additionalProperties": false
+                  },
                   "rollback": {
                     "type": "object",
                     "properties": {
@@ -21932,6 +22447,20 @@
                     "if": {
                       "required": [
                         "observationPolicy"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "action": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "required": [
+                        "executionTrackOverride"
                       ]
                     },
                     "then": {
@@ -21990,7 +22519,8 @@
                       "1.2.0",
                       "1.3.0",
                       "1.4.0",
-                      "1.5.0"
+                      "1.5.0",
+                      "1.6.0"
                     ]
                   }
                 },
@@ -22005,6 +22535,31 @@
                       "not": {
                         "required": [
                           "observationPolicy"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "protocolVersion": {
+                    "const": "1.6.0"
+                  }
+                },
+                "required": [
+                  "protocolVersion"
+                ]
+              },
+              "else": {
+                "properties": {
+                  "steps": {
+                    "items": {
+                      "not": {
+                        "required": [
+                          "executionTrackOverride"
                         ]
                       }
                     }
@@ -22550,6 +23105,7 @@
                                     "anchors",
                                     "expectedObservations",
                                     "observationPolicy",
+                                    "executionTrackOverride",
                                     "rollback"
                                   ]
                                 },
@@ -22624,7 +23180,8 @@
                   "1.2.0",
                   "1.3.0",
                   "1.4.0",
-                  "1.5.0"
+                  "1.5.0",
+                  "1.6.0"
                 ]
               }
             },
@@ -22703,7 +23260,8 @@
               "protocolVersion": {
                 "enum": [
                   "1.4.0",
-                  "1.5.0"
+                  "1.5.0",
+                  "1.6.0"
                 ]
               }
             },

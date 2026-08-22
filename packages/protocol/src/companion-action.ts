@@ -42,6 +42,13 @@ const deliveryIdentityShape = {
 } as const;
 
 const managedActionLevelMcpStepSchema = guideStepSchema.superRefine((step, context) => {
+  if (step.executionTrackOverride !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['executionTrackOverride'],
+      message: 'Execution track overrides require a dedicated menu or shortcut executor',
+    });
+  }
   if (
     step.action?.adapterId !== 'blender' ||
     !actionLevelMcpActionNameSchema.safeParse(step.action.name).success
@@ -72,6 +79,10 @@ const managedActionLevelMcpStepJsonSchemaCondition = {
     },
   },
   required: ['step'],
+  not: {
+    properties: { step: { required: ['executionTrackOverride'] } },
+    required: ['step'],
+  },
 } as const;
 
 export const companionActionExecutionCreateRequestSchema = z.strictObject({

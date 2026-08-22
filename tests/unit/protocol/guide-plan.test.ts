@@ -104,6 +104,47 @@ describe('guide plan protocol fixture', () => {
       retryPolicy: { mode: 'automatic_bounded', maxAttempts: 2 },
     };
     expect(guidePlanSchema.safeParse(retrying).success).toBe(false);
+
+    retrying.protocolVersion = '1.6.0';
+    executable!.observationPolicy = {
+      mode: 'success_gate',
+      failureStrategy: 'rollback_step',
+      retryPolicy: { mode: 'automatic_bounded', maxAttempts: 2 },
+    };
+    expect(guidePlanSchema.safeParse(retrying).success).toBe(true);
+  });
+
+  it('versions strict proof-bound menu and shortcut execution track overrides in protocol 1.6', () => {
+    const plan = readFixture() as {
+      protocolVersion: string;
+      steps: Array<Record<string, unknown>>;
+    };
+    plan.protocolVersion = '1.6.0';
+    const executable = plan.steps.find((step) => step.action !== null);
+    const group = plan.steps.find((step) => step.action === null);
+    expect(executable).toBeDefined();
+    expect(group).toBeDefined();
+    const override = {
+      kind: 'interaction_catalog_proof',
+      interactionCatalogVersion: '1.0.0',
+      interactionCatalogContentSha256: 'a'.repeat(64),
+      recipeId: 'recipe.create-eye',
+      modality: 'menu',
+      trackId: 'track.create-eye.menu',
+      trackContentSha256: 'b'.repeat(64),
+      proofExecutionContentSha256: 'c'.repeat(64),
+    };
+    executable!.executionTrackOverride = override;
+    expect(guidePlanSchema.safeParse(plan).success).toBe(true);
+
+    plan.protocolVersion = '1.5.0';
+    expect(guidePlanSchema.safeParse(plan).success).toBe(false);
+    plan.protocolVersion = '1.6.0';
+    executable!.executionTrackOverride = { ...override, untrustedTrajectory: ['Shift+A'] };
+    expect(guidePlanSchema.safeParse(plan).success).toBe(false);
+    executable!.executionTrackOverride = override;
+    group!.executionTrackOverride = { ...override, modality: 'shortcut' };
+    expect(guidePlanSchema.safeParse(plan).success).toBe(false);
   });
 
   it('keeps Zod and the emitted JSON Schema aligned for 3D positions', () => {
@@ -151,7 +192,7 @@ describe('guide plan protocol fixture', () => {
         expect.objectContaining({
           if: expect.objectContaining({
             properties: {
-              protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
+              protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
             },
           }),
         }),

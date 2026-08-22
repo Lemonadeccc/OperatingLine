@@ -187,6 +187,23 @@ export function validateGuideRevisionRequest(
       );
     }
   }
+  for (const edit of request.executionTrackEdits ?? []) {
+    if (!referencedNodeIds.has(edit.nodeId)) {
+      throw new Error(
+        `Guide execution track edit target ${edit.nodeId} must be a direct node reference`,
+      );
+    }
+    const step = steps.get(edit.nodeId);
+    if (step?.action === null || step?.action === undefined) {
+      throw new Error(`Guide execution track edit target ${edit.nodeId} is not an action step`);
+    }
+    if (request.basePlan.steps.some((candidate) => candidate.parentId === edit.nodeId)) {
+      throw new Error(`Guide execution track edit target ${edit.nodeId} is not a leaf step`);
+    }
+    if (step.executionTrackOverride !== undefined) {
+      throw new Error(`Guide execution track edit target ${edit.nodeId} already has an override`);
+    }
+  }
 }
 
 export function validateGuideRevisionThread(

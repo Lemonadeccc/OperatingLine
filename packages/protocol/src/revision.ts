@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   guideNodeNumberSchema,
+  guideExecutionTrackOverrideSchema,
   guidePlanSchema,
   guideProtocolVersionSchema,
   guideStepIdSchema,
@@ -25,6 +26,13 @@ export const guideParameterEditSchema = z.strictObject({
   after: z.json(),
 });
 export type GuideParameterEdit = z.infer<typeof guideParameterEditSchema>;
+
+export const guideExecutionTrackEditSchema = z.strictObject({
+  nodeId: guideStepIdSchema,
+  before: z.null(),
+  after: guideExecutionTrackOverrideSchema,
+});
+export type GuideExecutionTrackEdit = z.infer<typeof guideExecutionTrackEditSchema>;
 
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
@@ -94,6 +102,7 @@ export const guideRevisionRequestSchema = z
     references: z.array(guideNodeReferenceSchema).min(1).max(8),
     message: z.string().trim().max(4_000),
     parameterEdits: z.array(guideParameterEditSchema).min(1).max(64).optional(),
+    executionTrackEdits: z.array(guideExecutionTrackEditSchema).min(1).max(8).optional(),
     revisionThread: guideRevisionThreadSchema.optional(),
     revisionOperation: guideRevisionOperationSchema.optional(),
     occurredAt: z.iso.datetime({ offset: true }),
@@ -120,6 +129,7 @@ export const guideRevisionRequestSchema = z
       request.protocolVersion !== '1.3.0' &&
       request.protocolVersion !== '1.4.0' &&
       request.protocolVersion !== '1.5.0' &&
+      request.protocolVersion !== '1.6.0' &&
       request.parameterEdits !== undefined
     ) {
       context.addIssue({
@@ -129,7 +139,9 @@ export const guideRevisionRequestSchema = z
       });
     }
     if (
-      (request.protocolVersion === '1.4.0' || request.protocolVersion === '1.5.0') &&
+      (request.protocolVersion === '1.4.0' ||
+        request.protocolVersion === '1.5.0' ||
+        request.protocolVersion === '1.6.0') &&
       request.revisionOperation === undefined
     ) {
       context.addIssue({
@@ -141,6 +153,7 @@ export const guideRevisionRequestSchema = z
     if (
       request.protocolVersion !== '1.4.0' &&
       request.protocolVersion !== '1.5.0' &&
+      request.protocolVersion !== '1.6.0' &&
       request.revisionOperation !== undefined
     ) {
       context.addIssue({
@@ -181,19 +194,30 @@ export const guideRevisionRequestSchema = z
           message: 'A merge source must be a different revision thread',
         });
       }
-      if (request.parameterEdits !== undefined) {
+      if (request.parameterEdits !== undefined || request.executionTrackEdits !== undefined) {
         context.addIssue({
           code: 'custom',
-          path: ['parameterEdits'],
-          message: 'A deterministic branch merge cannot include parameter edits',
+          path: request.parameterEdits !== undefined ? ['parameterEdits'] : ['executionTrackEdits'],
+          message: 'A deterministic branch merge cannot include structured edits',
         });
       }
     }
-    if (request.message.length === 0 && request.parameterEdits === undefined) {
+    if (request.protocolVersion !== '1.6.0' && request.executionTrackEdits !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['executionTrackEdits'],
+        message: 'Structured execution track edits require guide protocol 1.6',
+      });
+    }
+    if (
+      request.message.length === 0 &&
+      request.parameterEdits === undefined &&
+      request.executionTrackEdits === undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['message'],
-        message: 'A revision request requires a message or structured parameter edits',
+        message: 'A revision request requires a message or structured edits',
       });
     }
     const references = new Set(request.references.map((reference) => reference.nodeId));
@@ -223,13 +247,56 @@ export const guideRevisionRequestSchema = z
         });
       }
     }
+    const executionTrackEditNodes = new Set<string>();
+    const baseSteps = new Map(request.basePlan.steps.map((step) => [step.id, step]));
+    for (const [index, edit] of (request.executionTrackEdits ?? []).entries()) {
+      if (executionTrackEditNodes.has(edit.nodeId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['executionTrackEdits', index, 'nodeId'],
+          message: `Structured execution track edit repeats ${edit.nodeId}`,
+        });
+      }
+      executionTrackEditNodes.add(edit.nodeId);
+      if (!references.has(edit.nodeId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['executionTrackEdits', index, 'nodeId'],
+          message: 'Structured execution track edits must target directly referenced nodes',
+        });
+      }
+      const baseStep = baseSteps.get(edit.nodeId);
+      if (baseStep?.action == null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['executionTrackEdits', index, 'nodeId'],
+          message: 'Structured execution track edits must target executable base-plan steps',
+        });
+      }
+      if (request.basePlan.steps.some((step) => step.parentId === edit.nodeId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['executionTrackEdits', index, 'nodeId'],
+          message: 'Structured execution track edits must target base-plan leaf steps',
+        });
+      }
+      if (baseStep?.executionTrackOverride !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['executionTrackEdits', index, 'before'],
+          message: 'A null-before execution track edit requires no existing override',
+        });
+      }
+    }
   })
   .meta({
     allOf: [
       {
         if: {
           properties: {
-            protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
+            protocolVersion: {
+              enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'],
+            },
           },
           required: ['protocolVersion'],
         },
@@ -237,27 +304,37 @@ export const guideRevisionRequestSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.3.0', '1.4.0', '1.5.0'] } },
+          properties: {
+            protocolVersion: { enum: ['1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
+          },
           required: ['protocolVersion'],
         },
         then: {
           anyOf: [
             { properties: { message: { minLength: 1 } }, required: ['message'] },
             { required: ['parameterEdits'] },
+            { required: ['executionTrackEdits'] },
           ],
         },
         else: {
           properties: { message: { minLength: 1 } },
-          not: { required: ['parameterEdits'] },
+          not: { anyOf: [{ required: ['parameterEdits'] }, { required: ['executionTrackEdits'] }] },
         },
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0'] } },
+          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0', '1.6.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['revisionOperation'] },
         else: { not: { required: ['revisionOperation'] } },
+      },
+      {
+        if: {
+          properties: { protocolVersion: { const: '1.6.0' } },
+          required: ['protocolVersion'],
+        },
+        else: { not: { required: ['executionTrackEdits'] } },
       },
     ],
   });

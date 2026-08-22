@@ -4,8 +4,10 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   actionCatalogSchema,
   canonicalizeProtocolJsonValue,
+  guideExecutionTrackOverrideSchema,
   guidePlanSchema,
   guideProposalSchema,
+  guideProtocolVersion,
   guideRevisionRequestSchema,
   interactionCatalogSchema,
   validateActionArguments,
@@ -30,6 +32,7 @@ import {
   type ProcedureExecutionFailureProposal,
   type ProcedureExecutionFailureReplanOutcome,
 } from './procedure-execution-failure-replan.js';
+import type { ProcedureExecutionProofStrategyBinding } from './procedure-execution-failure-replan-runtime.js';
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const instantSchema = z.iso.datetime({ offset: true });
@@ -46,9 +49,35 @@ const unavailableReasonSchema = z.enum(['no_proposal', 'stale_current_evidence',
 const acceptanceUnavailableReasonSchema = z.enum([
   'proposal_expired',
   'invalid_parameter_repair',
-  'strategy_track_not_representable_in_guide_protocol',
+  'invalid_strategy_switch',
+  'legacy_strategy_binding_not_execution_authoritative',
   'semantic_replan_requires_signed_provider_authority',
 ]);
+
+const trustedStrategyTrackCandidateSchema = z.strictObject({
+  semanticLeafId: z.string().trim().min(1).max(256),
+  recipeId: z.string().trim().min(1).max(256),
+  modality: z.enum(['menu', 'shortcut']),
+  trackId: z.string().trim().min(1).max(256),
+  verifiedTrackContentSha256: sha256Schema,
+  trackContentSha256: sha256Schema,
+  proofExecutionContentSha256: sha256Schema,
+  observationObligations: z
+    .array(
+      z.strictObject({
+        kind: z.string().trim().min(1).max(256),
+        parameters: z.record(z.string(), z.json()),
+      }),
+    )
+    .min(1)
+    .max(32),
+});
+
+const trustedStrategyBindingSchema = z.strictObject({
+  currentTrackId: z.string().trim().min(1).max(256),
+  currentTrackContentSha256: sha256Schema,
+  candidates: z.array(trustedStrategyTrackCandidateSchema).max(16),
+});
 
 const reviewArtifactsSchema = z.strictObject({
   revisedPlan: guidePlanSchema,
@@ -73,6 +102,13 @@ export const procedureExecutionFailureReplanReviewEvidenceBindingSchema = z.stri
   basePlanId: z.string().trim().min(1),
   basePlanRevision: z.number().int().positive(),
   basePlanContentSha256: sha256Schema,
+  strategyTrackBinding: z
+    .strictObject({
+      currentTrackId: z.string().trim().min(1).max(256),
+      currentTrackContentSha256: sha256Schema,
+      target: trustedStrategyTrackCandidateSchema.omit({ observationObligations: true }),
+    })
+    .optional(),
 });
 export type ProcedureExecutionFailureReplanReviewEvidenceBinding = z.infer<
   typeof procedureExecutionFailureReplanReviewEvidenceBindingSchema
@@ -173,6 +209,13 @@ export const procedureExecutionFailureReplanReviewedEventSchema = z
     finalStatus: z.enum(['accepted', 'discarded']),
     revisionRequestId: z.uuid().nullable(),
     guideProposalId: z.uuid().nullable(),
+    acceptedArtifacts: z
+      .strictObject({
+        revisionRequestContentSha256: sha256Schema,
+        guideProposalContentSha256: sha256Schema,
+        executionTrackOverrideContentSha256: sha256Schema.nullable(),
+      })
+      .optional(),
     proposalCreated: z.boolean(),
     providerCalled: z.literal(false),
     hostExecutionStarted: z.literal(false),
@@ -188,7 +231,8 @@ export const procedureExecutionFailureReplanReviewedEventSchema = z
       accepted !== (event.reviewRequest.decision.kind === 'accept') ||
       accepted !== event.proposalCreated ||
       accepted !== (event.revisionRequestId !== null) ||
-      accepted !== (event.guideProposalId !== null)
+      accepted !== (event.guideProposalId !== null) ||
+      (!accepted && event.acceptedArtifacts !== undefined)
     ) {
       context.addIssue({
         code: 'custom',
@@ -228,6 +272,7 @@ export interface TrustedProcedureExecutionFailureReplanReviewEvidence {
   readonly terminalActionEventContentSha256: string;
   readonly replayBindingContentSha256: string;
   readonly rollbackAttestationContentSha256: string;
+  readonly strategyBinding?: ProcedureExecutionProofStrategyBinding | null;
 }
 
 export interface ProcedureExecutionFailureReplanReviewEvidenceResolver {
@@ -287,6 +332,9 @@ function normalizeEvidence(
       replayBindingContentSha256: input.replayBindingContentSha256,
       rollbackAttestationContentSha256: input.rollbackAttestationContentSha256,
     });
+  const strategyBinding = trustedStrategyBindingSchema
+    .nullable()
+    .safeParse(input.strategyBinding ?? null);
   if (
     !currentPlan.success ||
     !actionCatalog.success ||
@@ -294,7 +342,8 @@ function normalizeEvidence(
     !targetAdapterId.success ||
     !targetInstanceId.success ||
     !failedStepId.success ||
-    !evidenceHashes.success
+    !evidenceHashes.success ||
+    !strategyBinding.success
   ) {
     return null;
   }
@@ -313,11 +362,12 @@ function normalizeEvidence(
     targetInstanceId: targetInstanceId.data,
     actionCatalog: actionCatalog.data,
     interactionCatalog: interactionCatalog.data,
+    strategyBinding: strategyBinding.data,
     ...evidenceHashes.data,
   };
 }
 
-function artifactsFor(
+function parameterArtifactsFor(
   requestId: string,
   proposal: Extract<ProcedureExecutionFailureProposal, { kind: 'parameter_repair' }>,
   evidence: TrustedProcedureExecutionFailureReplanReviewEvidence,
@@ -397,7 +447,7 @@ function artifactsFor(
   const nodeNumber = guidePlanNodeNumbers(currentPlan).get(actionStep.id);
   if (nodeNumber === undefined) return null;
   const revisionRequest = guideRevisionRequestSchema.safeParse({
-    protocolVersion: '1.5.0',
+    protocolVersion: guideProtocolVersion,
     requestId: revisionRequestId,
     adapterId: evidence.targetAdapterId,
     catalogVersion: actionCatalog.catalogVersion,
@@ -424,7 +474,7 @@ function artifactsFor(
     return null;
   }
   const guideProposal = guideProposalSchema.safeParse({
-    protocolVersion: '1.5.0',
+    protocolVersion: guideProtocolVersion,
     proposalId: guideProposalId,
     targetAdapterId: evidence.targetAdapterId,
     targetInstanceId: evidence.targetInstanceId,
@@ -434,6 +484,142 @@ function artifactsFor(
     ...(revisionRequest.data.revisionOperation === undefined
       ? {}
       : { revisionOperation: revisionRequest.data.revisionOperation }),
+    planDiff: computeGuidePlanDiff(currentPlan, revisedPlan.data),
+    catalogVersion: actionCatalog.catalogVersion,
+    proposedAt: proposal.proposedAt,
+  });
+  if (!guideProposal.success) return null;
+  return {
+    revisedPlan: revisedPlan.data,
+    revisionRequest: revisionRequest.data,
+    guideProposal: guideProposal.data,
+  };
+}
+
+function strategyCandidateFor(
+  proposal: Extract<ProcedureExecutionFailureProposal, { kind: 'strategy_switch' }>,
+  evidence: TrustedProcedureExecutionFailureReplanReviewEvidence,
+) {
+  const strategy = evidence.strategyBinding;
+  if (strategy === null || strategy === undefined) return null;
+  if (strategy.currentTrackId !== proposal.diff.fromTrackId) return null;
+  const matches = strategy.candidates.filter(
+    (candidate) =>
+      candidate.semanticLeafId === proposal.diff.semanticLeafId &&
+      candidate.modality === proposal.diff.modality &&
+      candidate.trackId === proposal.diff.toTrackId,
+  );
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+function strategyArtifactsFor(
+  requestId: string,
+  proposal: Extract<ProcedureExecutionFailureProposal, { kind: 'strategy_switch' }>,
+  evidence: TrustedProcedureExecutionFailureReplanReviewEvidence,
+  targetRevision: number,
+): z.infer<typeof reviewArtifactsSchema> | null {
+  const { currentPlan, actionCatalog, interactionCatalog } = evidence;
+  if (
+    currentPlan.protocolVersion !== '1.6.0' ||
+    evidence.targetAdapterId !== actionCatalog.adapterId ||
+    interactionCatalog.adapterId !== actionCatalog.adapterId ||
+    interactionCatalog.actionCatalogVersion !== actionCatalog.catalogVersion ||
+    proposal.catalogs.actionCatalogVersion !== actionCatalog.catalogVersion ||
+    proposal.catalogs.interactionCatalogVersion !== interactionCatalog.catalogVersion ||
+    proposal.base.planId !== currentPlan.id ||
+    proposal.base.revision !== currentPlan.revision ||
+    proposal.base.planContentSha256 !== sha256(currentPlan) ||
+    proposal.diff.semanticLeafId !== evidence.failedStepId ||
+    proposal.diff.modality === 'mcp'
+  ) {
+    return null;
+  }
+  const actionStep = currentPlan.steps.find((candidate) => candidate.id === evidence.failedStepId);
+  if (
+    actionStep?.action === null ||
+    actionStep?.action === undefined ||
+    actionStep.executionTrackOverride !== undefined ||
+    currentPlan.steps.some((candidate) => candidate.parentId === actionStep.id) ||
+    !isDeepStrictEqual(actionStep.expectedObservations, proposal.observationObligations)
+  ) {
+    return null;
+  }
+  const candidate = strategyCandidateFor(proposal, evidence);
+  const recipe =
+    candidate === null
+      ? undefined
+      : interactionCatalog.recipes.find((entry) => entry.id === candidate.recipeId);
+  if (
+    candidate === null ||
+    recipe === undefined ||
+    recipe.actionName !== actionStep.action.name ||
+    candidate.verifiedTrackContentSha256 !== proposal.diff.verifiedTrackContentSha256 ||
+    !isDeepStrictEqual(candidate.observationObligations, proposal.observationObligations)
+  ) {
+    return null;
+  }
+  const executionTrackOverride = guideExecutionTrackOverrideSchema.parse({
+    kind: 'interaction_catalog_proof',
+    interactionCatalogVersion: interactionCatalog.catalogVersion,
+    interactionCatalogContentSha256: sha256(interactionCatalog),
+    recipeId: candidate.recipeId,
+    modality: candidate.modality,
+    trackId: candidate.trackId,
+    trackContentSha256: candidate.trackContentSha256,
+    proofExecutionContentSha256: candidate.proofExecutionContentSha256,
+  });
+  if (!Number.isInteger(targetRevision) || targetRevision <= currentPlan.revision) return null;
+  const revisedPlanInput = structuredClone(currentPlan);
+  revisedPlanInput.revision = targetRevision;
+  const revisedStep = revisedPlanInput.steps.find((entry) => entry.id === actionStep.id)!;
+  revisedStep.executionTrackOverride = executionTrackOverride;
+  const revisedPlan = guidePlanSchema.safeParse(revisedPlanInput);
+  if (!revisedPlan.success) return null;
+  try {
+    validateGuidePlanAgainstActionCatalog(revisedPlan.data, actionCatalog);
+  } catch {
+    return null;
+  }
+  const identityBinding = {
+    requestId,
+    failureProposalId: proposal.proposalId,
+    failureProposalContentSha256: proposal.integrity.contentSha256,
+    basePlanContentSha256: proposal.base.planContentSha256,
+    targetInstanceId: evidence.targetInstanceId,
+  };
+  const revisionRequestId = deterministicUuid('failure-replan-review-revision', identityBinding);
+  const guideProposalId = deterministicUuid('failure-replan-review-proposal', identityBinding);
+  const nodeNumber = guidePlanNodeNumbers(currentPlan).get(actionStep.id);
+  if (nodeNumber === undefined) return null;
+  const revisionRequest = guideRevisionRequestSchema.safeParse({
+    protocolVersion: guideProtocolVersion,
+    requestId: revisionRequestId,
+    adapterId: evidence.targetAdapterId,
+    catalogVersion: actionCatalog.catalogVersion,
+    instanceId: evidence.targetInstanceId,
+    basePlan: currentPlan,
+    references: [{ nodeId: actionStep.id, nodeNumber }],
+    message: `Apply reviewed failure strategy ${proposal.proposalId}.`,
+    executionTrackEdits: [{ nodeId: actionStep.id, before: null, after: executionTrackOverride }],
+    revisionThread: { threadId: revisionRequestId, turn: 1, parentRequestId: null },
+    revisionOperation: { kind: 'revise' as const },
+    occurredAt: proposal.proposedAt,
+  });
+  if (!revisionRequest.success) return null;
+  try {
+    validateGuideRevisionRequest(revisionRequest.data, actionCatalog);
+  } catch {
+    return null;
+  }
+  const guideProposal = guideProposalSchema.safeParse({
+    protocolVersion: guideProtocolVersion,
+    proposalId: guideProposalId,
+    targetAdapterId: evidence.targetAdapterId,
+    targetInstanceId: evidence.targetInstanceId,
+    plan: revisedPlan.data,
+    revisionRequestId,
+    revisionThread: revisionRequest.data.revisionThread,
+    revisionOperation: revisionRequest.data.revisionOperation,
     planDiff: computeGuidePlanDiff(currentPlan, revisedPlan.data),
     catalogVersion: actionCatalog.catalogVersion,
     proposedAt: proposal.proposedAt,
@@ -493,7 +679,7 @@ export function createProcedureExecutionFailureReplanReviewCoordinator(
         ? ({ status: 'unavailable', reason: 'proposal_expired' } as const)
         : proposal.kind === 'parameter_repair'
           ? (() => {
-              const artifacts = artifactsFor(
+              const artifacts = parameterArtifactsFor(
                 request.requestId,
                 proposal,
                 evidence,
@@ -504,14 +690,28 @@ export function createProcedureExecutionFailureReplanReviewCoordinator(
                 : ({ status: 'available', artifacts } as const);
             })()
           : proposal.kind === 'strategy_switch'
-            ? ({
-                status: 'unavailable',
-                reason: 'strategy_track_not_representable_in_guide_protocol',
-              } as const)
+            ? evidence.currentPlan.protocolVersion !== '1.6.0'
+              ? ({
+                  status: 'unavailable',
+                  reason: 'legacy_strategy_binding_not_execution_authoritative',
+                } as const)
+              : (() => {
+                  const artifacts = strategyArtifactsFor(
+                    request.requestId,
+                    proposal,
+                    evidence,
+                    resolveTargetRevision(evidence.currentPlan.id, evidence.currentPlan.revision),
+                  );
+                  return artifacts === null
+                    ? ({ status: 'unavailable', reason: 'invalid_strategy_switch' } as const)
+                    : ({ status: 'available', artifacts } as const);
+                })()
             : ({
                 status: 'unavailable',
                 reason: 'semantic_replan_requires_signed_provider_authority',
               } as const);
+    const strategyCandidate =
+      proposal.kind === 'strategy_switch' ? strategyCandidateFor(proposal, evidence) : null;
     const evidenceBinding = procedureExecutionFailureReplanReviewEvidenceBindingSchema.parse({
       candidateContentSha256: proposal.integrity.contentSha256,
       candidateEventContentSha256: evidence.candidateEventContentSha256,
@@ -529,6 +729,23 @@ export function createProcedureExecutionFailureReplanReviewCoordinator(
       basePlanId: evidence.currentPlan.id,
       basePlanRevision: evidence.currentPlan.revision,
       basePlanContentSha256: sha256(evidence.currentPlan),
+      ...(proposal.kind !== 'strategy_switch' || strategyCandidate === null
+        ? {}
+        : {
+            strategyTrackBinding: {
+              currentTrackId: evidence.strategyBinding!.currentTrackId,
+              currentTrackContentSha256: evidence.strategyBinding!.currentTrackContentSha256,
+              target: {
+                semanticLeafId: strategyCandidate.semanticLeafId,
+                recipeId: strategyCandidate.recipeId,
+                modality: strategyCandidate.modality,
+                trackId: strategyCandidate.trackId,
+                verifiedTrackContentSha256: strategyCandidate.verifiedTrackContentSha256,
+                trackContentSha256: strategyCandidate.trackContentSha256,
+                proofExecutionContentSha256: strategyCandidate.proofExecutionContentSha256,
+              },
+            },
+          }),
     });
     const reviewBindingSha256 = sha256({
       request,

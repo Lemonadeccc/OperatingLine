@@ -2,6 +2,8 @@
 
 - 状态：Accepted
 - 日期：2026-08-21
+- 后续：[ADR 0104](0104-reviewed-execution-track-override.md) 已用 Guide 1.6 取代下述
+  `strategy_switch` 表达限制；语义候选限制保持不变。
 
 ## 背景
 

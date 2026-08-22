@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { catalogVersionSchema } from './version.js';
+
 export const supportedGuideProtocolVersions = [
   '1.0.0',
   '1.1.0',
@@ -7,8 +9,9 @@ export const supportedGuideProtocolVersions = [
   '1.3.0',
   '1.4.0',
   '1.5.0',
+  '1.6.0',
 ] as const;
-export const guideProtocolVersion = '1.5.0' as const;
+export const guideProtocolVersion = '1.6.0' as const;
 export const guideProtocolVersionSchema = z.enum(supportedGuideProtocolVersions);
 
 export const guideStepIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -113,6 +116,20 @@ export const observationPolicySchema = z.discriminatedUnion('mode', [
 ]);
 export type ObservationPolicy = z.infer<typeof observationPolicySchema>;
 
+const guideContentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+
+export const guideExecutionTrackOverrideSchema = z.strictObject({
+  kind: z.literal('interaction_catalog_proof'),
+  interactionCatalogVersion: catalogVersionSchema,
+  interactionCatalogContentSha256: guideContentSha256Schema,
+  recipeId: guideStepIdSchema,
+  modality: z.enum(['menu', 'shortcut']),
+  trackId: guideStepIdSchema,
+  trackContentSha256: guideContentSha256Schema,
+  proofExecutionContentSha256: guideContentSha256Schema,
+});
+export type GuideExecutionTrackOverride = z.infer<typeof guideExecutionTrackOverrideSchema>;
+
 export const guideStepSchema = z
   .strictObject({
     id: guideStepIdSchema,
@@ -127,6 +144,7 @@ export const guideStepSchema = z
     anchors: z.array(semanticAnchorSchema),
     expectedObservations: z.array(observationExpectationSchema),
     observationPolicy: observationPolicySchema.optional(),
+    executionTrackOverride: guideExecutionTrackOverrideSchema.optional(),
     rollback: z.strictObject({
       mode: z.enum(['native_undo', 'checkpoint_restore', 'compensating_action', 'unsupported']),
       checkpointRequired: z.boolean(),
@@ -138,6 +156,13 @@ export const guideStepSchema = z
         code: 'custom',
         path: ['observationPolicy'],
         message: 'Only executable steps can declare an observation policy',
+      });
+    }
+    if (step.executionTrackOverride !== undefined && step.action === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['executionTrackOverride'],
+        message: 'Only executable steps can declare an execution track override',
       });
     }
     if (step.observationPolicy?.mode === 'success_gate' && step.expectedObservations.length === 0) {
@@ -152,6 +177,10 @@ export const guideStepSchema = z
     allOf: [
       {
         if: { required: ['observationPolicy'] },
+        then: { properties: { action: { type: 'object' } } },
+      },
+      {
+        if: { required: ['executionTrackOverride'] },
         then: { properties: { action: { type: 'object' } } },
       },
       {
@@ -184,10 +213,27 @@ export const guidePlanSchema = z
       plan.protocolVersion === '1.2.0' ||
       plan.protocolVersion === '1.3.0' ||
       plan.protocolVersion === '1.4.0' ||
-      plan.protocolVersion === '1.5.0';
+      plan.protocolVersion === '1.5.0' ||
+      plan.protocolVersion === '1.6.0';
+    const parentIds = new Set(
+      plan.steps.flatMap((step) => (step.parentId === null ? [] : [step.parentId])),
+    );
     for (const [index, step] of plan.steps.entries()) {
-      if (step.observationPolicy === undefined) continue;
-      if (!supportsObservationPolicies) {
+      if (step.executionTrackOverride !== undefined && plan.protocolVersion !== '1.6.0') {
+        context.addIssue({
+          code: 'custom',
+          path: ['steps', index, 'executionTrackOverride'],
+          message: 'Execution track overrides require guide protocol 1.6',
+        });
+      }
+      if (step.executionTrackOverride !== undefined && parentIds.has(step.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['steps', index, 'executionTrackOverride'],
+          message: 'Only leaf steps can declare an execution track override',
+        });
+      }
+      if (step.observationPolicy !== undefined && !supportsObservationPolicies) {
         context.addIssue({
           code: 'custom',
           path: ['steps', index, 'observationPolicy'],
@@ -195,14 +241,16 @@ export const guidePlanSchema = z
         });
       }
       if (
+        step.observationPolicy !== undefined &&
         step.observationPolicy.mode === 'success_gate' &&
         step.observationPolicy.retryPolicy !== undefined &&
-        plan.protocolVersion !== '1.5.0'
+        plan.protocolVersion !== '1.5.0' &&
+        plan.protocolVersion !== '1.6.0'
       ) {
         context.addIssue({
           code: 'custom',
           path: ['steps', index, 'observationPolicy', 'retryPolicy'],
-          message: 'Automatic Observation retries require guide protocol 1.5',
+          message: 'Automatic Observation retries require guide protocol 1.5+',
         });
       }
     }
@@ -212,13 +260,24 @@ export const guidePlanSchema = z
       {
         if: {
           properties: {
-            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
+            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
           },
           required: ['protocolVersion'],
         },
         else: {
           properties: {
             steps: { items: { not: { required: ['observationPolicy'] } } },
+          },
+        },
+      },
+      {
+        if: {
+          properties: { protocolVersion: { const: '1.6.0' } },
+          required: ['protocolVersion'],
+        },
+        else: {
+          properties: {
+            steps: { items: { not: { required: ['executionTrackOverride'] } } },
           },
         },
       },

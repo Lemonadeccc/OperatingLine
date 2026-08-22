@@ -410,7 +410,7 @@ describe('companion protocol', () => {
     ).toBe(false);
   });
 
-  it('binds nonce-based replay current-state requests to protocol 1.5 recheck reports', () => {
+  it('binds nonce-based replay current-state requests to protocol 1.5+ recheck reports', () => {
     const report = completedStateReport();
     const request = {
       formatVersion: '1.0.0',
@@ -474,7 +474,7 @@ describe('companion protocol', () => {
     ).toBe(false);
   });
 
-  it('requires an explicit artifact attestation field only from protocol 1.5', () => {
+  it('requires an explicit artifact attestation field from protocol 1.5+', () => {
     const legacy = { ...currentStateReport(), protocolVersion: '1.4.0' };
     delete (legacy as { artifactAttestation?: unknown }).artifactAttestation;
     expect(companionStateReportSchema.safeParse(legacy).success).toBe(true);

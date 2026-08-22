@@ -6,7 +6,11 @@ import {
   blenderActionCatalog,
   blenderInteractionCatalog,
 } from '@operatingline/blender-action-catalog';
-import { canonicalizeProtocolJsonValue, type GuidePlan } from '@operatingline/protocol';
+import {
+  canonicalizeProtocolJsonValue,
+  guidePlanSchema,
+  type GuidePlan,
+} from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -44,8 +48,8 @@ function proposalWithIntegrity<T extends Record<string, unknown>>(content: T) {
   };
 }
 
-function parameterOutcome(): ProcedureExecutionFailureReplanOutcome {
-  const step = fixturePlan.steps.find((candidate) => candidate.id === 'snowman.model.head');
+function parameterOutcome(plan: GuidePlan = fixturePlan): ProcedureExecutionFailureReplanOutcome {
+  const step = plan.steps.find((candidate) => candidate.id === 'snowman.model.head');
   if (step?.action === null || step?.action === undefined) throw new Error('Expected action step');
   const before = step.action.arguments['radius'];
   const after = Number(before) * 0.5;
@@ -58,9 +62,9 @@ function parameterOutcome(): ProcedureExecutionFailureReplanOutcome {
       kind: 'parameter_repair',
       failureEnvelopeSha256: 'a'.repeat(64),
       base: {
-        planId: fixturePlan.id,
-        revision: fixturePlan.revision,
-        planContentSha256: hash(fixturePlan),
+        planId: plan.id,
+        revision: plan.revision,
+        planContentSha256: hash(plan),
       },
       catalogs: {
         actionCatalogVersion: blenderActionCatalog.catalogVersion,
@@ -84,8 +88,8 @@ function parameterOutcome(): ProcedureExecutionFailureReplanOutcome {
   });
 }
 
-function unsupportedOutcome(kind: 'strategy_switch' | 'semantic_replan') {
-  const parameter = parameterOutcome();
+function unsupportedOutcome(kind: 'strategy_switch' | 'semantic_replan', plan = fixturePlan) {
+  const parameter = parameterOutcome(plan);
   if (parameter.kind !== 'parameter_repair_proposed') throw new Error('Expected parameter repair');
   const common = Object.fromEntries(
     Object.entries(parameter.proposal).filter(
@@ -104,6 +108,8 @@ function unsupportedOutcome(kind: 'strategy_switch' | 'semantic_replan') {
             toTrackId: 'alternate.menu',
             verifiedTrackContentSha256: 'b'.repeat(64),
           },
+          observationObligations:
+            plan.steps.find((step) => step.id === 'snowman.model.head')?.expectedObservations ?? [],
         })
       : proposalWithIntegrity({
           ...common,
@@ -268,7 +274,7 @@ describe('procedure execution failure replan review', () => {
           status: 'unavailable',
           reason:
             kind === 'strategy_switch'
-              ? 'strategy_track_not_representable_in_guide_protocol'
+              ? 'legacy_strategy_binding_not_execution_authoritative'
               : 'semantic_replan_requires_signed_provider_authority',
         },
       });
@@ -305,6 +311,125 @@ describe('procedure execution failure replan review', () => {
       ).toMatchObject({ status: 'discarded', reviewId });
     },
   );
+
+  it('materializes one exact proof-backed strategy switch without executing it', () => {
+    const plan = guidePlanSchema.parse({ ...fixturePlan, protocolVersion: '1.6.0' });
+    const outcome = unsupportedOutcome('strategy_switch', plan);
+    if (outcome.kind !== 'strategy_switch_proposed') throw new Error('Expected strategy switch');
+    const obligations = outcome.proposal.observationObligations;
+    const strategyEvidence: TrustedProcedureExecutionFailureReplanReviewEvidence = {
+      ...evidence(plan),
+      strategyBinding: {
+        currentTrackId: 'current.mcp',
+        currentTrackContentSha256: '6'.repeat(64),
+        candidates: [
+          {
+            semanticLeafId: 'snowman.model.head',
+            recipeId: 'blender.mesh.create_uv_sphere.native',
+            modality: 'menu',
+            trackId: 'alternate.menu',
+            verifiedTrackContentSha256: 'b'.repeat(64),
+            trackContentSha256: '7'.repeat(64),
+            proofExecutionContentSha256: '8'.repeat(64),
+            observationObligations: obligations,
+          },
+        ],
+      },
+    };
+    const value = setup({ outcome, evidence: strategyEvidence });
+    const preview = value.coordinator.preview({ requestId });
+    expect(preview.status).toBe('reviewable');
+    if (preview.status !== 'reviewable' || preview.acceptance.status !== 'available') {
+      throw new Error('Expected available strategy review');
+    }
+    const { artifacts } = preview.acceptance;
+    const revisedStep = artifacts.revisedPlan.steps.find(
+      (step) => step.id === 'snowman.model.head',
+    );
+    expect(revisedStep?.action).toEqual(
+      plan.steps.find((step) => step.id === 'snowman.model.head')?.action,
+    );
+    expect(revisedStep?.executionTrackOverride).toEqual({
+      kind: 'interaction_catalog_proof',
+      interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+      interactionCatalogContentSha256: hash(blenderInteractionCatalog),
+      recipeId: 'blender.mesh.create_uv_sphere.native',
+      modality: 'menu',
+      trackId: 'alternate.menu',
+      trackContentSha256: '7'.repeat(64),
+      proofExecutionContentSha256: '8'.repeat(64),
+    });
+    expect(artifacts.revisionRequest).toMatchObject({
+      executionTrackEdits: [
+        {
+          nodeId: 'snowman.model.head',
+          before: null,
+          after: revisedStep?.executionTrackOverride,
+        },
+      ],
+    });
+    expect(artifacts.guideProposal.planDiff?.stepChanges).toEqual([
+      expect.objectContaining({
+        kind: 'updated',
+        stepId: 'snowman.model.head',
+        changes: [
+          expect.objectContaining({
+            field: 'executionTrackOverride',
+            before: null,
+            after: revisedStep?.executionTrackOverride,
+          }),
+        ],
+      }),
+    ]);
+    expect(preview.evidenceBinding.strategyTrackBinding).toMatchObject({
+      currentTrackId: 'current.mcp',
+      target: {
+        trackId: 'alternate.menu',
+        trackContentSha256: '7'.repeat(64),
+        proofExecutionContentSha256: '8'.repeat(64),
+      },
+    });
+
+    const accepted = value.coordinator.review({
+      formatVersion: '1.0.0',
+      requestId,
+      reviewId,
+      proposalId: failureProposalId,
+      reviewBindingSha256: preview.reviewBindingSha256,
+      decision: {
+        kind: 'accept',
+        confirmations: {
+          exactCandidateReviewed: true,
+          exactBasePlanReviewed: true,
+          noProviderCallAcknowledged: true,
+          noHostExecutionAcknowledged: true,
+        },
+      },
+      reviewedAt,
+    });
+    expect(accepted).toMatchObject({
+      status: 'accepted',
+      artifacts: { guideProposal: { proposalId: artifacts.guideProposal.proposalId } },
+    });
+
+    const mismatched = {
+      ...strategyEvidence,
+      strategyBinding: {
+        ...strategyEvidence.strategyBinding!,
+        candidates: strategyEvidence.strategyBinding!.candidates.map((candidate, index) => ({
+          ...candidate,
+          verifiedTrackContentSha256:
+            index === 0 ? '9'.repeat(64) : candidate.verifiedTrackContentSha256,
+        })),
+      },
+    };
+    expect(
+      setup({ outcome, evidence: mismatched }).coordinator.preview({ requestId }),
+    ).toMatchObject({
+      status: 'reviewable',
+      acceptance: { status: 'unavailable', reason: 'invalid_strategy_switch' },
+    });
+  });
 
   it('rejects expiry, stale bases, catalog drift, and changed review bindings', () => {
     const expired = setup({ now: expiresAt });

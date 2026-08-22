@@ -9,6 +9,7 @@ import {
   computeProcedureLeafReplayCurrentStateVerificationContentSha256,
   computeProcedureLeafReplayFailureRecoveryAttestationContentSha256,
   computeProcedureLeafReplayObservationContentSha256,
+  guideProtocolVersion,
   procedureCompoundReplaySchema,
   procedureCompoundCurrentStateSchema,
   verifyProcedureCompoundCurrentStateIntegrity,
@@ -1520,7 +1521,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
   };
   const attestedFailureReport = {
     ...failureReport,
-    protocolVersion: '1.5.0' as const,
+    protocolVersion: guideProtocolVersion,
     adapterId: 'blender' as const,
     plan: { id: proposal.plan.id, revision: proposal.plan.revision },
     planContentSha256: binding.planContentSha256,
@@ -1548,7 +1549,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
       ? null
       : {
           ...recoveryReport,
-          protocolVersion: '1.5.0' as const,
+          protocolVersion: guideProtocolVersion,
           adapterId: 'blender' as const,
           plan: { id: proposal.plan.id, revision: proposal.plan.revision },
           planContentSha256: binding.planContentSha256,
@@ -1728,7 +1729,7 @@ export function buildProcedureLeafReplayCurrentStateVerification(input: {
     );
   }
   if (
-    report.protocolVersion !== '1.5.0' ||
+    report.protocolVersion !== guideProtocolVersion ||
     report.transition !== 'current_state_rechecked' ||
     report.procedureReplayCurrentStateRequest === undefined ||
     !sameCanonicalValue(report.procedureReplayCurrentStateRequest, request) ||
@@ -1802,7 +1803,7 @@ export function buildProcedureLeafReplayCurrentStateVerification(input: {
     request,
     report: {
       ...report,
-      protocolVersion: '1.5.0',
+      protocolVersion: guideProtocolVersion,
       adapterId: 'blender',
       transition: 'current_state_rechecked',
       procedureReplayCurrentStateRequest: request,

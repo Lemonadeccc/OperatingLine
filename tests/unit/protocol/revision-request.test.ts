@@ -224,11 +224,55 @@ describe('guide revision request protocol', () => {
     ).toBe(true);
   });
 
+  it('binds proof-backed execution track edits to executable referenced nodes in protocol 1.6', () => {
+    const request = revisionRequest();
+    const plan = request.basePlan as { steps: Array<Record<string, unknown>> };
+    const executable = plan.steps.find((step) => step.action !== null);
+    expect(executable).toBeDefined();
+    const edit = {
+      nodeId: executable!.id,
+      before: null,
+      after: {
+        kind: 'interaction_catalog_proof',
+        interactionCatalogVersion: '1.0.0',
+        interactionCatalogContentSha256: 'a'.repeat(64),
+        recipeId: 'recipe.create-eye',
+        modality: 'shortcut',
+        trackId: 'track.create-eye.shortcut',
+        trackContentSha256: 'b'.repeat(64),
+        proofExecutionContentSha256: 'c'.repeat(64),
+      },
+    } as const;
+    const candidate = {
+      ...request,
+      protocolVersion: '1.6.0',
+      references: [{ nodeId: executable!.id, nodeNumber: '1.1' }],
+      message: '',
+      executionTrackEdits: [edit],
+    };
+    expect(guideRevisionRequestSchema.safeParse(candidate).success).toBe(true);
+    expect(
+      guideRevisionRequestSchema.safeParse({ ...candidate, protocolVersion: '1.5.0' }).success,
+    ).toBe(false);
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...candidate,
+        references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...candidate,
+        executionTrackEdits: [edit, edit],
+      }).success,
+    ).toBe(false);
+  });
+
   it('emits protocol-version and turn conditions for non-TypeScript hosts', () => {
     const schema = JSON.parse(
       readFileSync(resolve('protocol/schemas/v1/guide-revision-request.schema.json'), 'utf8'),
     ) as { allOf?: unknown[]; properties?: { revisionThread?: { allOf?: unknown[] } } };
-    expect(schema.allOf).toHaveLength(3);
+    expect(schema.allOf).toHaveLength(4);
     expect(schema.properties?.revisionThread?.allOf).toHaveLength(2);
   });
 });

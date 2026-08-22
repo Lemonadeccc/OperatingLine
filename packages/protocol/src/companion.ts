@@ -94,7 +94,7 @@ export const companionGuideDeliverySchema = z
           properties: { procedureReplayCurrentStateRequest: { type: 'object' } },
           required: ['procedureReplayCurrentStateRequest'],
         },
-        then: { properties: { protocolVersion: { const: '1.5.0' } } },
+        then: { properties: { protocolVersion: { enum: ['1.5.0', '1.6.0'] } } },
       },
     ],
   })
@@ -115,12 +115,13 @@ export const companionGuideDeliverySchema = z
     }
     if (
       delivery.procedureReplayCurrentStateRequest != null &&
-      delivery.protocolVersion !== '1.5.0'
+      delivery.protocolVersion !== '1.5.0' &&
+      delivery.protocolVersion !== '1.6.0'
     ) {
       context.addIssue({
         code: 'custom',
         path: ['procedureReplayCurrentStateRequest'],
-        message: 'Replay current-state requests require Guide protocol 1.5',
+        message: 'Replay current-state requests require Guide protocol 1.5+',
       });
     }
   });
@@ -414,7 +415,7 @@ export const companionStateReportSchema = z
         if: { required: ['observationRetry'] },
         then: {
           properties: {
-            protocolVersion: { const: '1.5.0' },
+            protocolVersion: { enum: ['1.5.0', '1.6.0'] },
             transition: { const: 'step_succeeded' },
             observationGate: { type: 'null' },
             observations: {
@@ -511,7 +512,7 @@ export const companionStateReportSchema = z
       {
         if: {
           properties: {
-            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
+            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
           },
           required: ['protocolVersion'],
         },
@@ -520,7 +521,7 @@ export const companionStateReportSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { const: '1.5.0' } },
+          properties: { protocolVersion: { enum: ['1.5.0', '1.6.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['artifactAttestation'] },
@@ -698,7 +699,8 @@ export const companionStateReportSchema = z
       (report.protocolVersion === '1.2.0' ||
         report.protocolVersion === '1.3.0' ||
         report.protocolVersion === '1.4.0' ||
-        report.protocolVersion === '1.5.0') &&
+        report.protocolVersion === '1.5.0' ||
+        report.protocolVersion === '1.6.0') &&
       report.observationGate === undefined
     ) {
       context.addIssue({
@@ -712,6 +714,7 @@ export const companionStateReportSchema = z
       report.protocolVersion !== '1.3.0' &&
       report.protocolVersion !== '1.4.0' &&
       report.protocolVersion !== '1.5.0' &&
+      report.protocolVersion !== '1.6.0' &&
       report.observationGate !== undefined
     ) {
       context.addIssue({
@@ -720,29 +723,37 @@ export const companionStateReportSchema = z
         message: 'Observation gate reports require protocol 1.2+',
       });
     }
-    if (report.protocolVersion === '1.5.0' && report.artifactAttestation === undefined) {
+    if (
+      (report.protocolVersion === '1.5.0' || report.protocolVersion === '1.6.0') &&
+      report.artifactAttestation === undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['artifactAttestation'],
-        message: 'Protocol 1.5 reports require an explicit artifactAttestation field',
+        message: 'Protocol 1.5+ reports require an explicit artifactAttestation field',
       });
     }
-    if (report.protocolVersion !== '1.5.0' && report.artifactAttestation !== undefined) {
+    if (
+      report.protocolVersion !== '1.5.0' &&
+      report.protocolVersion !== '1.6.0' &&
+      report.artifactAttestation !== undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['artifactAttestation'],
-        message: 'Artifact attestation reports require protocol 1.5',
+        message: 'Artifact attestation reports require protocol 1.5+',
       });
     }
     const currentStateRequest = report.procedureReplayCurrentStateRequest;
     if (
       report.transition === 'current_state_rechecked' &&
-      (report.protocolVersion !== '1.5.0' || currentStateRequest === undefined)
+      (currentStateRequest === undefined ||
+        (report.protocolVersion !== '1.5.0' && report.protocolVersion !== '1.6.0'))
     ) {
       context.addIssue({
         code: 'custom',
         path: ['procedureReplayCurrentStateRequest'],
-        message: 'Current-state rechecks require a protocol 1.5 replay verification request',
+        message: 'Current-state rechecks require a protocol 1.5+ replay verification request',
       });
     }
     if (report.transition !== 'current_state_rechecked' && currentStateRequest !== undefined) {
@@ -770,7 +781,7 @@ export const companionStateReportSchema = z
     const gate = report.observationGate;
     if (report.observationRetry !== undefined) {
       if (
-        report.protocolVersion !== '1.5.0' ||
+        (report.protocolVersion !== '1.5.0' && report.protocolVersion !== '1.6.0') ||
         report.transition !== 'step_succeeded' ||
         gate !== null ||
         report.observations.length === 0 ||
@@ -783,11 +794,15 @@ export const companionStateReportSchema = z
         });
       }
     }
-    if (gate?.retry !== undefined && report.protocolVersion !== '1.5.0') {
+    if (
+      gate?.retry !== undefined &&
+      report.protocolVersion !== '1.5.0' &&
+      report.protocolVersion !== '1.6.0'
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['observationGate', 'retry'],
-        message: 'Observation retry attempts require Companion protocol 1.5',
+        message: 'Observation retry attempts require Companion protocol 1.5+',
       });
     }
     const nativeUndoCheckpoint = report.nativeUndoCheckpoint;

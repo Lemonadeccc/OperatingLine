@@ -662,9 +662,13 @@
           POST。accept 原子写入 revision request、下一 revision 的 pending Proposal 与终态收据，discard 无
           Proposal 副作用；两者都不调用 Provider、不接受 Proposal、不执行 Blender。策略/语义接受继续
           fail closed。见 [ADR 0103](adr/0103-human-reviewed-execution-failure-replan.md)。
-    - [ ] 为 GuidePlan 增加可审查的 execution-track 表达，再允许 proof-backed strategy switch 物化；在
-          确定性候选耗尽后复用签名、单次消费的 Provider authority 触发语义局部重规划。自动应用或自动执行
-          仍禁止。
+    - [x] Guide `1.6.0` 的可审查 execution-track 表达：proof-backed strategy switch 只把精确目录、recipe、
+          menu/shortcut track 与 proof execution 摘要物化到失败 action leaf；durable review、revision、候选和
+          replay proof 形成接受前的完整授权链。通用创建/发布与 action-level MCP 均不能绕过；专用逐控件
+          executor 尚未实现，因此 Blender 在任何宿主副作用前锁住 Next。见
+          [ADR 0104](adr/0104-reviewed-execution-track-override.md)。
+    - [ ] 在确定性候选耗尽后复用签名、单次消费的 Provider authority 触发语义局部重规划。自动应用或自动
+          执行仍禁止。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
         证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，
         仅在固定 `0.8` 阈值后进行第二次自动局部树 refinement。完整 Provider tree 经过 scope sanitization、

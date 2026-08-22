@@ -23,6 +23,7 @@ export const guideStepFieldSchema = z.enum([
   'anchors',
   'expectedObservations',
   'observationPolicy',
+  'executionTrackOverride',
   'rollback',
 ]);
 export type GuideStepField = z.infer<typeof guideStepFieldSchema>;

@@ -874,6 +874,7 @@ export interface OperatingLineDatabase {
     input: CommitProcedureExecutionFailureReplanReviewInput,
   ): CommitProcedureExecutionFailureReplanReviewResult;
   getProcedureExecutionFailureReplanReview(requestId: string): unknown | null;
+  getProcedureExecutionFailureReplanReviewByProposalId(proposalId: string): unknown | null;
   listGuideRevisionThreadTurns(
     threadId: string,
     adapterId: string,
@@ -1837,6 +1838,11 @@ export function openOperatingLineDatabase(
     SELECT payload
     FROM procedure_execution_failure_replan_reviews
     WHERE request_id = ?
+  `);
+  const findProcedureExecutionFailureReplanReviewByProposal = sqlite.prepare(`
+    SELECT payload
+    FROM procedure_execution_failure_replan_reviews
+    WHERE proposal_id = ?
   `);
   const insertProcedureExecutionFailureReplanReview = sqlite.prepare(`
     INSERT INTO procedure_execution_failure_replan_reviews (
@@ -4837,6 +4843,15 @@ export function openOperatingLineDatabase(
     },
     getProcedureExecutionFailureReplanReview(requestId) {
       const row = findProcedureExecutionFailureReplanReviewByRequest.get(requestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) return null;
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid failure replan review payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    getProcedureExecutionFailureReplanReviewByProposalId(proposalId) {
+      const row = findProcedureExecutionFailureReplanReviewByProposal.get(proposalId) as
         { payload?: unknown } | undefined;
       if (row === undefined) return null;
       if (typeof row.payload !== 'string') {

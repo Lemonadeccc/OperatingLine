@@ -266,7 +266,10 @@ import {
   procedureExecutionFailureReplanReviewRequestSchema,
   procedureExecutionFailureReplanReviewStatusSchema,
 } from './procedure-execution-failure-replan-review.js';
-import { createProcedureExecutionFailureReplanRuntimeResolver } from './procedure-execution-failure-replan-runtime.js';
+import {
+  createProcedureExecutionFailureReplanRuntimeResolver,
+  procedureExecutionProofStrategyBindingForLeaf,
+} from './procedure-execution-failure-replan-runtime.js';
 import {
   materializeProcedureAuthoringCandidate,
   validateProcedureTreeParameterProjectionCatalog,
@@ -454,6 +457,18 @@ const companionDocumentSessionFingerprintEventSchema = z.strictObject({
   sessionId: z.uuid(),
   documentIncarnationId: z.uuid(),
 });
+
+function guideExecutionTrackOverrideStepIds(plan: GuidePlan): string[] {
+  return plan.steps.flatMap((step) => (step.executionTrackOverride === undefined ? [] : [step.id]));
+}
+
+function rejectUnreviewedExecutionTrackOverrides(plan: GuidePlan, operation: string): void {
+  const stepIds = guideExecutionTrackOverrideStepIds(plan);
+  if (stepIds.length === 0) return;
+  throw new Error(
+    `${operation} cannot introduce execution-track overrides; only an accepted trusted failure-replan review may create them (${stepIds.join(', ')})`,
+  );
+}
 
 function menuDocumentAuthoritySha256(input: {
   readonly adapterId: 'blender';
@@ -2166,6 +2181,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       proposal: GuideProposal;
       planningQuality: PlanningQualityReport;
     } => {
+      rejectUnreviewedExecutionTrackOverrides(input.plan, 'General Guide proposal creation');
       validateProposalTarget(input.plan, input.targetAdapterId);
       const catalog = actionCatalogRegistry.get({
         targetAdapterId: input.targetAdapterId,
@@ -3101,6 +3117,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       ) {
         return null;
       }
+      const replayLeaf = binding.data.materialization.tree.nodes.find(
+        (node) => node.id === binding.data.leafId,
+      );
       return {
         currentPlan: binding.data.proposal.plan,
         failedStepId: stored.envelope.stepId,
@@ -3113,6 +3132,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         terminalActionEventContentSha256: computeProcedureTreeContentSha256(terminal.event),
         replayBindingContentSha256: binding.data.integrity.contentSha256,
         rollbackAttestationContentSha256: attestation.data.integrity.contentSha256,
+        strategyBinding:
+          replayLeaf?.kind === 'leaf'
+            ? procedureExecutionProofStrategyBindingForLeaf(replayLeaf, binding.data.recipeId)
+            : null,
       };
     };
     const procedureExecutionFailureReplanReviewCoordinator =
@@ -3123,6 +3146,187 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         trustedEvidence: { resolve: resolveProcedureExecutionFailureReplanReviewEvidence },
         resolveTargetRevision: resolveNextGuideRevision,
       });
+    const validateExecutionTrackProposalAuthority = (proposal: GuideProposal): void => {
+      const overriddenSteps = proposal.plan.steps.filter(
+        (step) => step.executionTrackOverride !== undefined,
+      );
+      if (overriddenSteps.length === 0) return;
+      const step = overriddenSteps.length === 1 ? overriddenSteps[0]! : null;
+      if (
+        step === null ||
+        step.executionTrackOverride === undefined ||
+        proposal.protocolVersion !== guideProtocolVersion ||
+        proposal.plan.protocolVersion !== guideProtocolVersion ||
+        proposal.targetInstanceId === undefined ||
+        proposal.catalogVersion === undefined ||
+        proposal.revisionRequestId === undefined ||
+        proposal.planDiff === null ||
+        proposal.planDiff === undefined
+      ) {
+        throw new Error('Execution-track proposal lacks its single versioned review envelope');
+      }
+      const reviewInput = database.getProcedureExecutionFailureReplanReviewByProposalId(
+        proposal.proposalId,
+      );
+      const review = procedureExecutionFailureReplanReviewedEventSchema.safeParse(reviewInput);
+      if (
+        !review.success ||
+        review.data.finalStatus !== 'accepted' ||
+        review.data.guideProposalId !== proposal.proposalId ||
+        review.data.revisionRequestId !== proposal.revisionRequestId ||
+        review.data.acceptedArtifacts === undefined ||
+        review.data.acceptedArtifacts.guideProposalContentSha256 !==
+          computeProcedureTreeContentSha256(proposal) ||
+        review.data.acceptedArtifacts.executionTrackOverrideContentSha256 !==
+          computeProcedureTreeContentSha256(step.executionTrackOverride)
+      ) {
+        throw new Error('Execution-track proposal lacks exact durable failure-review authority');
+      }
+      const currentState = listKnownCompanionStates().find(
+        (report) =>
+          report.adapterId === proposal.targetAdapterId &&
+          report.instanceId === proposal.targetInstanceId,
+      );
+      if (
+        currentState?.plan === null ||
+        currentState?.plan === undefined ||
+        currentState.planContentSha256 === null ||
+        currentState.plan.id !== review.data.reviewBinding.basePlanId ||
+        currentState.plan.revision !== review.data.reviewBinding.basePlanRevision ||
+        currentState.planContentSha256 !== review.data.reviewBinding.basePlanContentSha256
+      ) {
+        throw new Error('Execution-track proposal base Plan is no longer current');
+      }
+      const revisionInput = database.getGuideRevisionRequest(proposal.revisionRequestId);
+      const revision = guideRevisionRequestSchema.safeParse(revisionInput);
+      const trackEdit =
+        revision.success && revision.data.executionTrackEdits?.length === 1
+          ? revision.data.executionTrackEdits[0]
+          : undefined;
+      if (
+        !revision.success ||
+        review.data.acceptedArtifacts.revisionRequestContentSha256 !==
+          computeProcedureTreeContentSha256(revision.data) ||
+        revision.data.requestId !== proposal.revisionRequestId ||
+        revision.data.adapterId !== proposal.targetAdapterId ||
+        revision.data.instanceId !== proposal.targetInstanceId ||
+        revision.data.catalogVersion !== proposal.catalogVersion ||
+        revision.data.basePlan.id !== review.data.reviewBinding.basePlanId ||
+        revision.data.basePlan.revision !== review.data.reviewBinding.basePlanRevision ||
+        computePlanContentSha256(revision.data.basePlan) !==
+          review.data.reviewBinding.basePlanContentSha256 ||
+        trackEdit?.nodeId !== step.id ||
+        !isDeepStrictEqual(trackEdit.after, step.executionTrackOverride) ||
+        !isDeepStrictEqual(
+          computeGuidePlanDiff(revision.data.basePlan, proposal.plan),
+          proposal.planDiff,
+        )
+      ) {
+        throw new Error('Execution-track proposal differs from its reviewed revision artifacts');
+      }
+      const reviewedTrack = review.data.reviewBinding.strategyTrackBinding;
+      const override = step.executionTrackOverride;
+      if (
+        reviewedTrack === undefined ||
+        review.data.reviewBinding.adapterId !== proposal.targetAdapterId ||
+        review.data.reviewBinding.instanceId !== proposal.targetInstanceId ||
+        review.data.reviewBinding.actionCatalogVersion !== proposal.catalogVersion ||
+        review.data.reviewBinding.interactionCatalogVersion !==
+          override.interactionCatalogVersion ||
+        review.data.reviewBinding.interactionCatalogContentSha256 !==
+          override.interactionCatalogContentSha256 ||
+        review.data.reviewBinding.failedStepId !== step.id ||
+        reviewedTrack.target.semanticLeafId !== step.id ||
+        reviewedTrack.target.recipeId !== override.recipeId ||
+        reviewedTrack.target.modality !== override.modality ||
+        reviewedTrack.target.trackId !== override.trackId ||
+        reviewedTrack.target.trackContentSha256 !== override.trackContentSha256 ||
+        reviewedTrack.target.proofExecutionContentSha256 !== override.proofExecutionContentSha256
+      ) {
+        throw new Error('Execution-track proposal differs from its reviewed proof-track binding');
+      }
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: proposal.targetAdapterId,
+        catalogVersion: proposal.catalogVersion,
+      });
+      if (
+        actionCatalog.adapterId !== review.data.reviewBinding.adapterId ||
+        actionCatalog.catalogVersion !== review.data.reviewBinding.actionCatalogVersion ||
+        computeProcedureTreeContentSha256(actionCatalog) !==
+          review.data.reviewBinding.actionCatalogContentSha256
+      ) {
+        throw new Error('Execution-track proposal no longer matches its installed action catalog');
+      }
+      validateGuidePlanAgainstActionCatalog(proposal.plan, actionCatalog);
+      const interactionCatalog = interactionCatalogRegistry.get({
+        targetAdapterId: proposal.targetAdapterId,
+        actionCatalogVersion: proposal.catalogVersion,
+        interactionCatalogVersion: override.interactionCatalogVersion,
+      });
+      const recipe = interactionCatalog.recipes.find(
+        (candidate) => candidate.id === override.recipeId,
+      );
+      if (
+        computeProcedureTreeContentSha256(interactionCatalog) !==
+          override.interactionCatalogContentSha256 ||
+        recipe?.actionName !== step.action?.name
+      ) {
+        throw new Error('Execution-track proposal no longer matches its installed catalog recipe');
+      }
+      const storedFailure = procedureExecutionFailureReplanCoordinator.getStored(
+        review.data.requestId,
+      );
+      const outcome = procedureExecutionFailureReplanCoordinator.getRaw(review.data.requestId);
+      if (
+        storedFailure?.envelope === null ||
+        storedFailure?.envelope === undefined ||
+        outcome?.kind !== 'strategy_switch_proposed' ||
+        outcome.proposal.proposalId !== review.data.reviewRequest.proposalId ||
+        outcome.proposal.integrity.contentSha256 !==
+          review.data.reviewBinding.candidateContentSha256 ||
+        outcome.proposal.diff.semanticLeafId !== step.id ||
+        outcome.proposal.diff.modality !== override.modality ||
+        outcome.proposal.diff.fromTrackId !== reviewedTrack.currentTrackId ||
+        outcome.proposal.diff.toTrackId !== override.trackId ||
+        outcome.proposal.diff.verifiedTrackContentSha256 !==
+          reviewedTrack.target.verifiedTrackContentSha256
+      ) {
+        throw new Error('Execution-track proposal lost its exact strategy candidate authority');
+      }
+      const replayBinding = procedureLeafReplayBindingSchema.safeParse(
+        database.getProcedureLeafReplay(storedFailure.envelope.replayId),
+      );
+      const replayLeaf = replayBinding.success
+        ? replayBinding.data.materialization.tree.nodes.find(
+            (node) => node.id === replayBinding.data.leafId,
+          )
+        : undefined;
+      const exactStrategy =
+        replayBinding.success && replayLeaf?.kind === 'leaf'
+          ? procedureExecutionProofStrategyBindingForLeaf(replayLeaf, replayBinding.data.recipeId)
+          : null;
+      const exactCandidate = exactStrategy?.candidates.filter(
+        (candidate) =>
+          candidate.semanticLeafId === step.id &&
+          candidate.recipeId === override.recipeId &&
+          candidate.modality === override.modality &&
+          candidate.trackId === override.trackId,
+      );
+      if (
+        !replayBinding.success ||
+        replayBinding.data.integrity.contentSha256 !==
+          review.data.reviewBinding.replayBindingContentSha256 ||
+        exactStrategy?.currentTrackId !== reviewedTrack.currentTrackId ||
+        exactStrategy.currentTrackContentSha256 !== reviewedTrack.currentTrackContentSha256 ||
+        exactCandidate?.length !== 1 ||
+        exactCandidate[0]?.verifiedTrackContentSha256 !==
+          reviewedTrack.target.verifiedTrackContentSha256 ||
+        exactCandidate[0].trackContentSha256 !== override.trackContentSha256 ||
+        exactCandidate[0].proofExecutionContentSha256 !== override.proofExecutionContentSha256
+      ) {
+        throw new Error('Execution-track proposal no longer matches its immutable replay proof');
+      }
+    };
     const getProcedureExecutionFailureReplanReviewStatus = (requestId: string) => {
       const storedReview = database.getProcedureExecutionFailureReplanReview(requestId);
       return procedureExecutionFailureReplanReviewStatusSchema.parse(
@@ -3261,6 +3465,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         finalStatus: accepted ? 'accepted' : 'discarded',
         revisionRequestId: revisionRequest?.requestId ?? null,
         guideProposalId: guideProposal?.proposalId ?? null,
+        ...(revisionRequest === undefined || guideProposal === undefined
+          ? {}
+          : {
+              acceptedArtifacts: {
+                revisionRequestContentSha256: computeProcedureTreeContentSha256(revisionRequest),
+                guideProposalContentSha256: computeProcedureTreeContentSha256(guideProposal),
+                executionTrackOverrideContentSha256: (() => {
+                  const overrides = guideProposal.plan.steps.flatMap((step) =>
+                    step.executionTrackOverride === undefined ? [] : [step.executionTrackOverride],
+                  );
+                  return overrides.length === 1
+                    ? computeProcedureTreeContentSha256(overrides[0])
+                    : null;
+                })(),
+              },
+            }),
         proposalCreated: accepted,
         providerCalled: false,
         hostExecutionStarted: false,
@@ -7058,6 +7278,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
         async (planInput) => {
           const plan = guidePlanSchema.parse(planInput);
+          rejectUnreviewedExecutionTrackOverrides(plan, 'Direct Guide publication');
           validateGuidePlanStructure(plan);
           const latestRevision = latestPublishedRevisionByPlanId.get(plan.id);
           if (latestRevision !== undefined && plan.revision <= latestRevision) {
@@ -8905,7 +9126,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         }
         try {
           const session = companionLeaseManager.authorize(leaseHeader, adapterId, instanceId);
-          replayCurrentStateAuthorized = session.lease.negotiatedGuideProtocolVersion === '1.5.0';
+          replayCurrentStateAuthorized =
+            session.lease.negotiatedGuideProtocolVersion === guideProtocolVersion;
         } catch (error) {
           if (error instanceof CompanionLeaseError) {
             return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -8976,10 +9198,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedRequest.data.adapterId,
           parsedRequest.data.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'action_execution_protocol_unsupported',
-            message: 'Action execution requires Guide protocol 1.5 native Undo evidence',
+            message: 'Action execution requires the current Guide protocol native Undo evidence',
           });
         }
         const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
@@ -9020,10 +9242,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedResult.data.target.adapterId,
           parsedResult.data.target.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'action_execution_protocol_unsupported',
-            message: 'Action execution results require Guide protocol 1.5 evidence',
+            message: 'Action execution results require the current Guide protocol evidence',
           });
         }
         const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
@@ -9065,11 +9287,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedRequest.data.adapterId,
           parsedRequest.data.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'menu_control_proof_protocol_unsupported',
             message:
-              'Menu-control proof delivery requires Companion session 1.1 and Guide protocol 1.5 native Undo evidence',
+              'Menu-control proof delivery requires Companion session 1.1 and current Guide protocol native Undo evidence',
           });
         }
         const target = {
@@ -9131,7 +9353,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedProgress.data.target.adapterId,
           parsedProgress.data.target.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'menu_control_proof_protocol_unsupported',
             message: 'Menu-control proof progress requires Companion session 1.1 evidence',
@@ -9174,7 +9396,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedResult.data.target.adapterId,
           parsedResult.data.target.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'menu_control_proof_protocol_unsupported',
             message: 'Menu-control proof results require Companion session 1.1 evidence',
@@ -9223,11 +9445,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             parsedReport.data.target.adapterId,
             parsedReport.data.target.instanceId,
           );
-          if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
             return reply.code(409).send({
               error: 'menu_control_proof_protocol_unsupported',
               message:
-                'Menu-control proof history transitions require Companion session 1.1 and Guide protocol 1.5 native Undo evidence',
+                'Menu-control proof history transitions require Companion session 1.1 and current Guide protocol native Undo evidence',
             });
           }
           requireExactMenuDeliveryLease(session, parsedReport.data.currentLease);
@@ -9280,11 +9502,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           recoveryTarget.adapterId,
           recoveryTarget.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'menu_control_proof_protocol_unsupported',
             message:
-              'Menu-control proof recovery requires Companion session 1.1 and Guide protocol 1.5 native Undo evidence',
+              'Menu-control proof recovery requires Companion session 1.1 and current Guide protocol native Undo evidence',
           });
         }
         const target = {
@@ -9341,10 +9563,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedRequest.data.adapterId,
           parsedRequest.data.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'shortcut_proof_protocol_unsupported',
-            message: 'Shortcut proof delivery requires Guide protocol 1.5 native Undo evidence',
+            message: 'Shortcut proof delivery requires current Guide protocol native Undo evidence',
           });
         }
         const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
@@ -9403,10 +9625,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedProgress.data.target.adapterId,
           parsedProgress.data.target.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'shortcut_proof_protocol_unsupported',
-            message: 'Shortcut proof progress requires Guide protocol 1.5 evidence',
+            message: 'Shortcut proof progress requires current Guide protocol evidence',
           });
         }
         const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
@@ -9446,10 +9668,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedResult.data.target.adapterId,
           parsedResult.data.target.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'shortcut_proof_protocol_unsupported',
-            message: 'Shortcut proof results require Guide protocol 1.5 evidence',
+            message: 'Shortcut proof results require current Guide protocol evidence',
           });
         }
         const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
@@ -9495,10 +9717,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           recoveryTarget.adapterId,
           recoveryTarget.instanceId,
         );
-        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'shortcut_proof_protocol_unsupported',
-            message: 'Shortcut proof recovery requires Guide protocol 1.5 native Undo evidence',
+            message: 'Shortcut proof recovery requires current Guide protocol native Undo evidence',
           });
         }
         const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
@@ -9596,6 +9818,38 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             return reply.code(error.statusCode).send({ error: error.code, message: error.message });
           }
           throw error;
+        }
+      }
+      if (parsedDecision.data.decision === 'accepted') {
+        const proposalInput = database.getGuideProposal(parsedDecision.data.proposalId);
+        if (proposalInput !== null) {
+          try {
+            const proposal = guideProposalSchema.parse(proposalInput);
+            if (
+              proposal.targetInstanceId !== undefined &&
+              proposal.targetInstanceId !== parsedDecision.data.instanceId
+            ) {
+              throw new Error('Proposal decision targets a different Companion instance');
+            }
+            const existingDecision = guideProposalDecisionSchema.safeParse(
+              database.getGuideProposalDecision(
+                proposal.proposalId,
+                parsedDecision.data.adapterId,
+                parsedDecision.data.instanceId,
+              ),
+            );
+            if (!existingDecision.success || existingDecision.data.decision !== 'accepted') {
+              validateExecutionTrackProposalAuthority(proposal);
+            }
+          } catch (error) {
+            return reply.code(409).send({
+              error: 'execution_track_authority_rejected',
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'Execution-track proposal authority could not be verified',
+            });
+          }
         }
       }
       const result = database.recordGuideProposalDecision(

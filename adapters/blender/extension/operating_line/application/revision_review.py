@@ -13,8 +13,11 @@ from ..domain import PROTOCOL_VERSION
 
 NODE_NUMBER_PATTERN = re.compile(r"^[1-9]\d*(?:\.[1-9]\d*)*$")
 ARGUMENT_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+CATALOG_VERSION_PATTERN = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
+CONTENT_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REVISION_PROTOCOL_VERSIONS = frozenset(
-    {"1.1.0", "1.2.0", "1.3.0", "1.4.0", PROTOCOL_VERSION}
+    {"1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", PROTOCOL_VERSION}
 )
 PLAN_FIELDS = frozenset({"title", "rootStepId"})
 STEP_FIELDS = frozenset(
@@ -30,6 +33,7 @@ STEP_FIELDS = frozenset(
         "anchors",
         "expectedObservations",
         "observationPolicy",
+        "executionTrackOverride",
         "rollback",
     }
 )
@@ -70,6 +74,49 @@ def _require_nonnegative_integer(value: Any, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{label} must be a non-negative integer")
     return value
+
+
+def _validate_execution_track_override(value: Any) -> None:
+    expected_fields = {
+        "kind",
+        "interactionCatalogVersion",
+        "interactionCatalogContentSha256",
+        "recipeId",
+        "modality",
+        "trackId",
+        "trackContentSha256",
+        "proofExecutionContentSha256",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ValueError("Revision history execution track override is invalid")
+    if value.get("kind") != "interaction_catalog_proof":
+        raise ValueError("Revision history execution track override is invalid")
+    catalog_version = value.get("interactionCatalogVersion")
+    if (
+        not isinstance(catalog_version, str)
+        or CATALOG_VERSION_PATTERN.fullmatch(catalog_version) is None
+    ):
+        raise ValueError("Revision history execution track override is invalid")
+    for field in ("recipeId", "trackId"):
+        identifier = value.get(field)
+        if (
+            not isinstance(identifier, str)
+            or STEP_ID_PATTERN.fullmatch(identifier) is None
+        ):
+            raise ValueError("Revision history execution track override is invalid")
+    if value.get("modality") not in {"menu", "shortcut"}:
+        raise ValueError("Revision history execution track override is invalid")
+    for field in (
+        "interactionCatalogContentSha256",
+        "trackContentSha256",
+        "proofExecutionContentSha256",
+    ):
+        digest = value.get(field)
+        if (
+            not isinstance(digest, str)
+            or CONTENT_SHA256_PATTERN.fullmatch(digest) is None
+        ):
+            raise ValueError("Revision history execution track override is invalid")
 
 
 def _require_positive_integer(value: Any, label: str) -> int:
@@ -378,18 +425,23 @@ def _validate_history_request(
     if protocol_version not in REVISION_PROTOCOL_VERSIONS:
         raise ValueError("Revision history requires protocol 1.1+ requests")
     parameter_edits = value.get("parameterEdits")
+    execution_track_edits = value.get("executionTrackEdits")
     expected_fields = required_fields | (
         {"parameterEdits"} if "parameterEdits" in value else set()
+    ) | (
+        {"executionTrackEdits"} if "executionTrackEdits" in value else set()
     ) | (
         {"revisionOperation"} if "revisionOperation" in value else set()
     )
     if set(value) != expected_fields:
         raise ValueError("Revision history request does not match the protocol")
     if (
-        protocol_version not in {"1.3.0", "1.4.0", PROTOCOL_VERSION}
+        protocol_version not in {"1.3.0", "1.4.0", "1.5.0", PROTOCOL_VERSION}
         and "parameterEdits" in value
     ):
         raise ValueError("Structured revision edits require protocol 1.3+")
+    if protocol_version != PROTOCOL_VERSION and "executionTrackEdits" in value:
+        raise ValueError("Execution track edits require protocol 1.6")
     request_id = _require_uuid(value.get("requestId"), "Revision history request id")
     if value.get("adapterId") != "blender" or value.get("instanceId") != instance_id:
         raise ValueError("Revision history request is outside this Blender instance")
@@ -397,16 +449,16 @@ def _validate_history_request(
     if thread["threadId"] != thread_id or thread["turn"] != turn:
         raise ValueError("Revision history request uses the wrong thread turn")
     operation = value.get("revisionOperation")
-    if protocol_version in {"1.4.0", PROTOCOL_VERSION}:
+    if protocol_version in {"1.4.0", "1.5.0", PROTOCOL_VERSION}:
         validate_revision_operation(operation, thread=thread)
     elif operation is not None:
         raise ValueError("Explicit revision operations require protocol 1.4+")
     if (
         isinstance(operation, dict)
         and operation.get("kind") == "merge"
-        and parameter_edits is not None
+        and (parameter_edits is not None or execution_track_edits is not None)
     ):
-        raise ValueError("A deterministic branch merge cannot include parameter edits")
+        raise ValueError("A deterministic branch merge cannot include structured edits")
     base_plan_value = value.get("basePlan")
     base_plan = _validate_embedded_plan_identity(
         base_plan_value, "Revision history base plan"
@@ -417,7 +469,11 @@ def _validate_history_request(
     if (
         not isinstance(message, str)
         or len(message) > 4000
-        or (not message.strip() and parameter_edits is None)
+        or (
+            not message.strip()
+            and parameter_edits is None
+            and execution_track_edits is None
+        )
     ):
         raise ValueError("Revision history request message is invalid")
     references = value.get("references")
@@ -440,53 +496,87 @@ def _validate_history_request(
         ):
             raise ValueError("Revision history node reference number is invalid")
 
-    if parameter_edits is None:
-        return
-    if not isinstance(parameter_edits, list) or not 1 <= len(parameter_edits) <= 64:
-        raise ValueError("Revision history parameter edits are invalid")
     base_steps = {
         step.get("id"): step
         for step in base_plan_value.get("steps", [])
         if isinstance(step, dict) and isinstance(step.get("id"), str)
     }
-    edit_keys: set[tuple[str, str]] = set()
-    for edit in parameter_edits:
-        if not isinstance(edit, dict) or set(edit) != {
-            "nodeId",
-            "argumentName",
-            "before",
-            "after",
-        }:
-            raise ValueError("Revision history parameter edit does not match the protocol")
+    if parameter_edits is not None:
+        if not isinstance(parameter_edits, list) or not 1 <= len(parameter_edits) <= 64:
+            raise ValueError("Revision history parameter edits are invalid")
+        edit_keys: set[tuple[str, str]] = set()
+        for edit in parameter_edits:
+            if not isinstance(edit, dict) or set(edit) != {
+                "nodeId",
+                "argumentName",
+                "before",
+                "after",
+            }:
+                raise ValueError("Revision history parameter edit does not match the protocol")
+            node_id = edit.get("nodeId")
+            argument_name = edit.get("argumentName")
+            if node_id not in referenced_node_ids:
+                raise ValueError("Revision history parameter edit requires a direct reference")
+            if (
+                not isinstance(argument_name, str)
+                or len(argument_name) > 180
+                or ARGUMENT_NAME_PATTERN.fullmatch(argument_name) is None
+            ):
+                raise ValueError("Revision history parameter argument name is invalid")
+            edit_key = (node_id, argument_name)
+            if edit_key in edit_keys:
+                raise ValueError("Revision history parameter edits must be unique")
+            edit_keys.add(edit_key)
+            before = _canonical_json(edit.get("before"), "Revision parameter before")
+            after = _canonical_json(edit.get("after"), "Revision parameter after")
+            if before == after:
+                raise ValueError("Revision history parameter edit must change its value")
+            base_step = base_steps.get(node_id)
+            if base_step is None:
+                continue
+            action = base_step.get("action")
+            arguments = action.get("arguments") if isinstance(action, dict) else None
+            if not isinstance(arguments, dict) or argument_name not in arguments:
+                raise ValueError("Revision history parameter edit targets an unknown argument")
+            if _canonical_json(
+                arguments[argument_name], "Revision parameter base value"
+            ) != before:
+                raise ValueError("Revision history parameter before value does not match the base")
+
+    if execution_track_edits is None:
+        return
+    if (
+        not isinstance(execution_track_edits, list)
+        or not 1 <= len(execution_track_edits) <= 8
+    ):
+        raise ValueError("Revision history execution track edits are invalid")
+    edited_node_ids: set[str] = set()
+    child_parent_ids = {
+        step.get("parentId")
+        for step in base_plan_value.get("steps", [])
+        if isinstance(step, dict) and isinstance(step.get("parentId"), str)
+    }
+    for edit in execution_track_edits:
+        if not isinstance(edit, dict) or set(edit) != {"nodeId", "before", "after"}:
+            raise ValueError("Revision history execution track edit does not match the protocol")
         node_id = edit.get("nodeId")
-        argument_name = edit.get("argumentName")
         if node_id not in referenced_node_ids:
-            raise ValueError("Revision history parameter edit requires a direct reference")
-        if (
-            not isinstance(argument_name, str)
-            or len(argument_name) > 180
-            or ARGUMENT_NAME_PATTERN.fullmatch(argument_name) is None
-        ):
-            raise ValueError("Revision history parameter argument name is invalid")
-        edit_key = (node_id, argument_name)
-        if edit_key in edit_keys:
-            raise ValueError("Revision history parameter edits must be unique")
-        edit_keys.add(edit_key)
-        before = _canonical_json(edit.get("before"), "Revision parameter before")
-        after = _canonical_json(edit.get("after"), "Revision parameter after")
-        if before == after:
-            raise ValueError("Revision history parameter edit must change its value")
+            raise ValueError("Revision history execution track edit requires a direct reference")
+        if node_id in edited_node_ids:
+            raise ValueError("Revision history execution track edits must be unique")
+        edited_node_ids.add(node_id)
+        if edit.get("before") is not None:
+            raise ValueError("Revision history execution track edit must have a null base")
+        _validate_execution_track_override(edit.get("after"))
         base_step = base_steps.get(node_id)
         if base_step is None:
-            continue
-        action = base_step.get("action")
-        arguments = action.get("arguments") if isinstance(action, dict) else None
-        if not isinstance(arguments, dict) or argument_name not in arguments:
-            raise ValueError("Revision history parameter edit targets an unknown argument")
-        if _canonical_json(
-            arguments[argument_name], "Revision parameter base value"
-        ) != before:
-            raise ValueError("Revision history parameter before value does not match the base")
+            raise ValueError("Revision history execution track edit targets an unknown step")
+        if not isinstance(base_step.get("action"), dict):
+            raise ValueError("Revision history execution track edit requires an action step")
+        if "executionTrackOverride" in base_step:
+            raise ValueError("Revision history execution track edit base already has an override")
+        if node_id in child_parent_ids:
+            raise ValueError("Revision history execution track edit requires a leaf step")
 
 
 def _validate_history_proposal(
@@ -563,7 +653,39 @@ def _validate_history_proposal(
     )
     if plan_reference["id"] != plan_id:
         raise ValueError("Revision history proposal cannot change plan id")
-    validate_plan_diff(value.get("planDiff"), plan)
+    plan_diff = validate_plan_diff(value.get("planDiff"), plan)
+    execution_track_edits = request.get("executionTrackEdits")
+    if execution_track_edits is None:
+        return
+    plan_steps = {
+        step.get("id"): step
+        for step in plan.get("steps", [])
+        if isinstance(step, dict) and isinstance(step.get("id"), str)
+    }
+    for edit in execution_track_edits:
+        node_id = edit["nodeId"]
+        target_step = plan_steps.get(node_id)
+        if target_step is None or _canonical_json(
+            target_step.get("executionTrackOverride"),
+            "Revision proposal execution track override",
+        ) != _canonical_json(edit["after"], "Revision execution track edit target"):
+            raise ValueError("Revision history proposal does not apply its execution track edit")
+        matching_changes = [
+            change
+            for step_change in plan_diff["stepChanges"]
+            if step_change.get("kind") == "updated"
+            and step_change.get("stepId") == node_id
+            for change in step_change.get("changes", [])
+            if change.get("field") == "executionTrackOverride"
+            and change.get("before") is None
+            and _canonical_json(
+                change.get("after"),
+                "Revision execution track diff target",
+            )
+            == _canonical_json(edit["after"], "Revision execution track edit target")
+        ]
+        if len(matching_changes) != 1:
+            raise ValueError("Revision history proposal diff omits its execution track edit")
 
 
 def _validate_history_decision(

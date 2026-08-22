@@ -58,6 +58,7 @@ const stepFields = [
   'anchors',
   'expectedObservations',
   'observationPolicy',
+  'executionTrackOverride',
   'rollback',
 ] as const satisfies readonly (keyof GuideStep)[];
 

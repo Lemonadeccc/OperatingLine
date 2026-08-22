@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,6 +8,7 @@ import {
   blenderInteractionCatalog,
 } from '@operatingline/blender-action-catalog';
 import {
+  actionCatalogSchema,
   canonicalizeProtocolJsonValue,
   companionActionExecutionStatusSchema,
   compileProcedureTreeToGuidePlan,
@@ -23,7 +24,10 @@ import { createActionCatalogRegistry } from '../../../services/orchestrator/src/
 import { createInteractionCatalogRegistry } from '../../../services/orchestrator/src/interaction-catalogs.js';
 import { materializeProcedureAuthoringCandidate } from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
 import { createProcedureExecutionFailureReplanCoordinator } from '../../../services/orchestrator/src/procedure-execution-failure-replan.js';
-import { createProcedureExecutionFailureReplanRuntimeResolver } from '../../../services/orchestrator/src/procedure-execution-failure-replan-runtime.js';
+import {
+  createProcedureExecutionFailureReplanRuntimeResolver,
+  procedureExecutionProofStrategyBindingForLeaf,
+} from '../../../services/orchestrator/src/procedure-execution-failure-replan-runtime.js';
 import { buildProcedureLeafReplayBinding } from '../../../services/orchestrator/src/procedure-replay.js';
 import { startRuntime } from '../../../services/orchestrator/src/index.js';
 
@@ -52,7 +56,24 @@ function hash(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
 
-function candidate(): ProcedureAuthoringCandidateTree {
+function strategyActionCatalog() {
+  const catalog = structuredClone(blenderActionCatalog);
+  const action = catalog.actions.find(
+    (candidateAction) => candidateAction.name === 'blender.mesh.create_uv_sphere',
+  );
+  if (action === undefined) throw new Error('Expected managed UV Sphere action');
+  const radius = (action.argumentsSchema.properties as Record<string, Record<string, unknown>>)[
+    'radius'
+  ];
+  if (radius === undefined) throw new Error('Expected UV Sphere radius schema');
+  radius['minimum'] = 1.5;
+  radius['maximum'] = 1.5;
+  return actionCatalogSchema.parse(catalog);
+}
+
+function candidate(
+  options: { readonly proofBackedStrategy?: boolean } = {},
+): ProcedureAuthoringCandidateTree {
   const tree = JSON.parse(
     readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
   ) as Record<string, unknown>;
@@ -65,6 +86,14 @@ function candidate(): ProcedureAuthoringCandidateTree {
     const action = node['action'] as
       { name?: string; arguments?: Record<string, unknown> } | undefined;
     if (action?.name === 'blender.mesh.create_uv_sphere' && action.arguments !== undefined) {
+      if (options.proofBackedStrategy === true) {
+        action.arguments = {
+          resourceId: 'proof.uv_sphere.eye',
+          objectName: 'OperatingLine.TutorialEye',
+          radius: 1.5,
+          location: [1.25, -2, 0.75],
+        };
+      }
       node['expectedObservations'] = [
         {
           kind: 'uv_sphere_ready',
@@ -94,8 +123,14 @@ function candidate(): ProcedureAuthoringCandidateTree {
   return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
-function fixture() {
-  const tree = candidate();
+function fixture(
+  options: {
+    readonly proofBackedStrategy?: boolean;
+    readonly actionCatalog?: typeof blenderActionCatalog;
+  } = {},
+) {
+  const tree = candidate(options);
+  const actionCatalog = options.actionCatalog ?? blenderActionCatalog;
   const leaf = tree.nodes.find((node) => node.kind === 'leaf');
   if (leaf?.kind !== 'leaf' || leaf.action === null) throw new Error('Expected managed leaf');
   const packet = {
@@ -114,7 +149,7 @@ function fixture() {
       },
       catalogBinding: {
         adapterId: tree.adapterId,
-        actionCatalog: withoutKey(blenderActionCatalog, 'adapterId'),
+        actionCatalog: withoutKey(actionCatalog, 'adapterId'),
         interactionCatalog: withoutKey(
           withoutKey(blenderInteractionCatalog, 'adapterId'),
           'actionCatalogVersion',
@@ -163,7 +198,7 @@ function fixture() {
   } as const;
   const grounded = materializeProcedureAuthoringCandidate(
     tree,
-    blenderActionCatalog,
+    actionCatalog,
     blenderInteractionCatalog,
   );
   const plan = compileProcedureTreeToGuidePlan(grounded.tree);
@@ -212,7 +247,7 @@ function fixture() {
     targetInstanceId: ids.instance,
     plan,
     planDiff: null,
-    catalogVersion: blenderActionCatalog.catalogVersion,
+    catalogVersion: actionCatalog.catalogVersion,
     proposedAt: requestedAt,
   } as const;
   const binding = buildProcedureLeafReplayBinding({
@@ -362,6 +397,236 @@ function fixture() {
   return { binding, attestation, execution, groundedLeaf };
 }
 
+function companionHello(instanceId: string) {
+  return {
+    contractVersion: '1.0.0',
+    adapterId: 'blender',
+    instanceId,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.3',
+    supportedGuideProtocolVersions: [blenderActionCatalog.protocolVersion, '1.6.0'],
+    catalogVersion: blenderActionCatalog.catalogVersion,
+    capabilities: {
+      presentation: {
+        taskTree: 'native',
+        viewportOverlay: 'native',
+        interactiveAnchors: 'emulated',
+      },
+      execution: {
+        inspect: 'native',
+        invokeActions: 'native',
+        screenshot: 'native',
+        rollbackModes: ['compensating_action', 'native_undo'],
+      },
+      runtime: {
+        dispatch: 'main_thread_serial',
+        network: 'native',
+        persistentProjectState: 'native',
+      },
+    },
+  };
+}
+
+function seedFinalizedFailure(databasePath: string, base: ReturnType<typeof fixture>): void {
+  const sessionFingerprintSha256 = 'c'.repeat(64);
+  const terminal = companionActionExecutionStatusSchema.parse(base.execution);
+  const immutable = {
+    formatVersion: terminal.formatVersion,
+    requestId: terminal.requestId,
+    replayId: terminal.replayId,
+    target: terminal.target,
+    proposalId: terminal.proposalId,
+    plan: terminal.plan,
+    planContentSha256: terminal.planContentSha256,
+    executionId: terminal.executionId,
+    expectedState: terminal.expectedState,
+    step: terminal.step,
+    requestedAt: terminal.requestedAt,
+  } as const;
+  const queued = companionActionExecutionStatusSchema.parse({
+    ...immutable,
+    status: 'queued',
+    updatedAt: terminal.requestedAt,
+  });
+  const dispatched = companionActionExecutionStatusSchema.parse({
+    ...immutable,
+    deliveryId: terminal.deliveryId,
+    dispatchedAt: terminal.dispatchedAt,
+    status: 'dispatched',
+    updatedAt: terminal.dispatchedAt,
+  });
+  const database = openOperatingLineDatabase(databasePath);
+  try {
+    expect(
+      database.recordProcedureLeafReplayProposal(base.binding.proposal, {
+        replayId: base.binding.replayId,
+        proposalId: base.binding.proposal.proposalId,
+        treeId: base.binding.materialization.tree.id,
+        treeRevision: base.binding.materialization.tree.revision,
+        leafId: base.binding.leafId,
+        adapterId: base.binding.materialization.tree.adapterId,
+        instanceId: base.binding.targetInstanceId,
+        bindingContentSha256: base.binding.integrity.contentSha256,
+        payload: base.binding,
+        createdAt: base.binding.createdAt,
+      }),
+    ).toBe('accepted');
+    expect(
+      database.recordGuideProposalDecision(base.attestation.decision, {
+        sessionFingerprintSha256,
+      }),
+    ).toBe('accepted');
+    expect(
+      database.recordCompanionState(base.attestation.failureReport, {
+        sessionFingerprintSha256,
+      }),
+    ).toBe('accepted');
+    expect(
+      database.recordProcedureLeafReplayAttestation({
+        attestationId: base.attestation.attestationId,
+        replayId: base.attestation.replayId,
+        reportId: base.attestation.failureReport.reportId,
+        evidenceReportIds: [base.attestation.failureReport.reportId],
+        executionId: base.attestation.execution.execution.id,
+        contentSha256: base.attestation.integrity.contentSha256,
+        payload: base.attestation,
+        attestedAt: base.attestation.attestedAt,
+      }),
+    ).toBe('accepted');
+    for (const [eventType, execution] of [
+      ['blender.action-execution.queued', queued],
+      ['blender.action-execution.dispatched', dispatched],
+      ['blender.action-execution.completed', terminal],
+    ] as const) {
+      database.appendEvent({
+        id: `strategy:${terminal.requestId}:${execution.status}`,
+        eventType,
+        payload: { execution, sessionFingerprintSha256 },
+        createdAt: execution.updatedAt,
+      });
+    }
+  } finally {
+    database.close();
+  }
+}
+
+async function reviewStrategyProposal(runtime: { readonly baseUrl: string }) {
+  const authorization = 'Bearer failure-replan-strategy-token';
+  const headers = { authorization, 'content-type': 'application/json' };
+  const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(companionHello(ids.instance)),
+  });
+  expect(sessionResponse.status).toBe(200);
+  const session = (await sessionResponse.json()) as { leaseId: string };
+  const leaseHeaders = {
+    ...headers,
+    'x-operatingline-companion-lease': session.leaseId,
+  };
+  const failureUrl = new URL('/api/v1/procedure/failure-replan', runtime.baseUrl);
+  failureUrl.searchParams.set('requestId', ids.request);
+  const failureResponse = await fetch(failureUrl, { headers });
+  expect(failureResponse.status).toBe(200);
+  await expect(failureResponse.json()).resolves.toMatchObject({
+    kind: 'strategy_switch_proposed',
+  });
+
+  const reviewUrl = new URL('/api/v1/procedure/failure-replan/review', runtime.baseUrl);
+  reviewUrl.searchParams.set('requestId', ids.request);
+  const previewResponse = await fetch(reviewUrl, { headers });
+  expect(previewResponse.status).toBe(200);
+  const preview = (await previewResponse.json()) as {
+    state: 'pending';
+    preview: {
+      proposal: { proposalId: string };
+      reviewBindingSha256: string;
+      acceptance: {
+        status: 'available';
+        artifacts: { guideProposal: { proposalId: string } };
+      };
+    };
+  };
+  expect(preview).toMatchObject({
+    state: 'pending',
+    preview: {
+      acceptance: {
+        status: 'available',
+        artifacts: {
+          guideProposal: {
+            proposalId: expect.any(String),
+          },
+        },
+      },
+    },
+  });
+  const reviewResponse = await fetch(reviewUrl, {
+    method: 'POST',
+    headers: leaseHeaders,
+    body: JSON.stringify({
+      formatVersion: '1.0.0',
+      requestId: ids.request,
+      reviewId: randomUUID(),
+      proposalId: preview.preview.proposal.proposalId,
+      reviewBindingSha256: preview.preview.reviewBindingSha256,
+      decision: {
+        kind: 'accept',
+        confirmations: {
+          exactCandidateReviewed: true,
+          exactBasePlanReviewed: true,
+          noProviderCallAcknowledged: true,
+          noHostExecutionAcknowledged: true,
+        },
+      },
+      reviewedAt: new Date().toISOString(),
+    }),
+  });
+  expect(reviewResponse.status, JSON.stringify(await reviewResponse.clone().json())).toBe(200);
+  await expect(reviewResponse.json()).resolves.toMatchObject({
+    result: 'accepted',
+    review: {
+      finalStatus: 'accepted',
+      guideProposalId: preview.preview.acceptance.artifacts.guideProposal.proposalId,
+      acceptedArtifacts: {
+        guideProposalContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        revisionRequestContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        executionTrackOverrideContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      },
+    },
+  });
+  return {
+    guideProposalId: preview.preview.acceptance.artifacts.guideProposal.proposalId,
+    leaseHeaders,
+  };
+}
+
+async function companionLeaseHeaders(runtime: { readonly baseUrl: string }) {
+  const headers = {
+    authorization: 'Bearer failure-replan-strategy-token',
+    'content-type': 'application/json',
+  };
+  const response = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(companionHello(ids.instance)),
+  });
+  expect(response.status).toBe(200);
+  const session = (await response.json()) as { leaseId: string };
+  return { ...headers, 'x-operatingline-companion-lease': session.leaseId };
+}
+
+function acceptedTrackDecision(proposalId: string) {
+  return {
+    protocolVersion: '1.6.0',
+    decisionId: randomUUID(),
+    proposalId,
+    adapterId: 'blender',
+    instanceId: ids.instance,
+    decision: 'accepted',
+    occurredAt: new Date().toISOString(),
+  } as const;
+}
+
 function harness(
   overrides: {
     binding?: unknown;
@@ -373,6 +638,7 @@ function harness(
       revision: number;
       contentSha256: string;
     } | null;
+    actionCatalog?: typeof blenderActionCatalog;
   } = {},
 ) {
   const base = fixture();
@@ -394,7 +660,9 @@ function harness(
       createdAt: occurredAt,
     })),
   );
-  const actionCatalogRegistry = createActionCatalogRegistry([blenderActionCatalog]);
+  const actionCatalogRegistry = createActionCatalogRegistry([
+    overrides.actionCatalog ?? blenderActionCatalog,
+  ]);
   const interactionCatalogRegistry = createInteractionCatalogRegistry(
     [blenderInteractionCatalog],
     actionCatalogRegistry,
@@ -507,6 +775,127 @@ describe('procedure execution failure replan runtime resolver', () => {
     );
   });
 
+  it('binds exact materialized proof tracks separately from the strategy wrapper', () => {
+    const input = structuredClone(candidate());
+    const inputLeaf = input.nodes.find((node) => node.kind === 'leaf');
+    if (inputLeaf?.kind !== 'leaf' || inputLeaf.action === null) {
+      throw new Error('Expected managed leaf');
+    }
+    inputLeaf.action.arguments = {
+      resourceId: 'proof.uv_sphere.eye',
+      objectName: 'OperatingLine.TutorialEye',
+      radius: 1.5,
+      location: [1.25, -2, 0.75],
+    };
+    inputLeaf.expectedObservations = [
+      {
+        kind: 'uv_sphere_ready',
+        parameters: {
+          resourceId: 'proof.uv_sphere.eye',
+          objectName: 'OperatingLine.TutorialEye',
+          radius: 1.5,
+          location: [1.25, -2, 0.75],
+        },
+      },
+    ];
+    const grounded = materializeProcedureAuthoringCandidate(
+      procedureAuthoringCandidateTreeSchema.parse(input),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = grounded.tree.nodes.find((node) => node.id === inputLeaf.id);
+    const coverage = grounded.coverage.find((entry) => entry.leafId === inputLeaf.id);
+    if (leaf?.kind !== 'leaf' || coverage?.recipeId === null || coverage?.recipeId === undefined) {
+      throw new Error('Expected exact proof-backed materialization');
+    }
+    const binding = procedureExecutionProofStrategyBindingForLeaf(leaf, coverage.recipeId);
+    const menuTrack = leaf.menuTracks.find(
+      (track) => track.availability === 'available' && track.proofExecution !== undefined,
+    );
+    expect(binding).not.toBeNull();
+    expect(binding?.currentTrackId).toBe(
+      leaf.mcpTracks.find((track) => track.availability === 'available')?.id,
+    );
+    expect(binding?.candidates).toEqual([
+      expect.objectContaining({
+        semanticLeafId: leaf.id,
+        recipeId: coverage.recipeId,
+        modality: 'menu',
+        trackId: menuTrack?.id,
+        trackContentSha256: hash(menuTrack),
+        proofExecutionContentSha256: hash(
+          menuTrack?.availability === 'available' ? menuTrack.proofExecution : undefined,
+        ),
+        verifiedTrackContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      }),
+    ]);
+    expect(binding?.candidates[0]?.trackContentSha256).not.toBe(
+      binding?.candidates[0]?.verifiedTrackContentSha256,
+    );
+  });
+
+  it('derives a strategy switch when a proof-backed alternate exists and no parameter repair applies', () => {
+    const actionCatalog = strategyActionCatalog();
+    const base = fixture({ proofBackedStrategy: true, actionCatalog });
+    const runtimeHarness = harness({
+      binding: base.binding,
+      attestation: base.attestation,
+      events: [base.execution],
+      actionCatalog,
+      currentAcceptedPlan: {
+        id: base.execution.plan.id,
+        revision: base.execution.plan.revision,
+        contentSha256: base.execution.planContentSha256,
+      },
+    });
+    const resolution = runtimeHarness.resolver.resolve(ids.request);
+    expect(resolution?.parameterRepairCandidates).toEqual([]);
+    expect(resolution?.strategy?.tracks).toEqual([
+      expect.objectContaining({ modality: 'mcp' }),
+      expect.objectContaining({ modality: 'menu' }),
+    ]);
+
+    const storedEvents: Array<{
+      sequence: number;
+      id: string;
+      eventType: string;
+      payload: unknown;
+      createdAt: string;
+    }> = [];
+    const coordinator = createProcedureExecutionFailureReplanCoordinator({
+      database: {
+        appendEvent: (event) => {
+          const stored = {
+            sequence: storedEvents.length + 1,
+            id: event.id,
+            eventType: event.eventType,
+            payload: event.payload,
+            createdAt: event.createdAt ?? attestedAt,
+          };
+          storedEvents.push(stored);
+          return stored;
+        },
+        listExecutionEventsByTypes: (types) =>
+          storedEvents.filter((event) => types.includes(event.eventType)),
+      },
+      trustedResolver: runtimeHarness.resolver,
+      now: () => attestedAt,
+      createId: () => 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    });
+    expect(coordinator.derive({ requestId: ids.request })).toMatchObject({
+      kind: 'strategy_switch_proposed',
+      proposal: {
+        diff: {
+          semanticLeafId: base.binding.leafId,
+          modality: 'menu',
+          fromTrackId: expect.any(String),
+          toTrackId: expect.any(String),
+          verifiedTrackContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        },
+      },
+    });
+  });
+
   it('preserves the trusted exhausted retry count in canonical failure evidence', () => {
     const base = fixture();
     const attestationContent = {
@@ -607,6 +996,174 @@ describe('procedure execution failure replan runtime resolver', () => {
     });
     expect(driftResolver.resolve(ids.request)).toBeNull();
     expect(driftResolver.listResolvableRequestIds()).toEqual([]);
+  });
+
+  it('accepts a proof-backed execution-track proposal only after its durable review chain exists', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-strategy-review-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const reviewed = await reviewStrategyProposal(runtime);
+      const decision = acceptedTrackDecision(reviewed.guideProposalId);
+      const response = await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+        method: 'POST',
+        headers: reviewed.leaseHeaders,
+        body: JSON.stringify(decision),
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ result: 'accepted' });
+
+      const duplicateResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        {
+          method: 'POST',
+          headers: reviewed.leaseHeaders,
+          body: JSON.stringify(decision),
+        },
+      );
+      expect(duplicateResponse.status).toBe(200);
+      await expect(duplicateResponse.json()).resolves.toEqual({ result: 'duplicate' });
+
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          database.getGuideProposalDecision(reviewed.guideProposalId, 'blender', ids.instance),
+        ).toMatchObject({ decisionId: decision.decisionId, decision: 'accepted' });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a reviewed execution-track proposal when the current Companion Plan has drifted', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-strategy-plan-drift-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    const base = fixture({ proofBackedStrategy: true, actionCatalog });
+    seedFinalizedFailure(databasePath, base);
+    const firstRuntime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    const reviewed = await reviewStrategyProposal(firstRuntime);
+    await firstRuntime.stop();
+
+    const database = openOperatingLineDatabase(databasePath);
+    try {
+      expect(
+        database.recordCompanionState(
+          {
+            ...base.attestation.failureReport,
+            reportId: randomUUID(),
+            sequence: base.attestation.failureReport.sequence + 1,
+            plan: {
+              id: base.attestation.failureReport.plan.id,
+              revision: base.attestation.failureReport.plan.revision + 1,
+            },
+            planContentSha256: 'f'.repeat(64),
+            occurredAt: new Date().toISOString(),
+          },
+          { sessionFingerprintSha256: 'd'.repeat(64) },
+        ),
+      ).toBe('accepted');
+    } finally {
+      database.close();
+    }
+
+    const secondRuntime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const headers = await companionLeaseHeaders(secondRuntime);
+      const decision = acceptedTrackDecision(reviewed.guideProposalId);
+      const response = await fetch(`${secondRuntime.baseUrl}/api/v1/companion/proposal-decision`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(decision),
+      });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: 'execution_track_authority_rejected',
+        message: 'Execution-track proposal base Plan is no longer current',
+      });
+
+      const inspected = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          inspected.getGuideProposalDecision(reviewed.guideProposalId, 'blender', ids.instance),
+        ).toBeNull();
+      } finally {
+        inspected.close();
+      }
+    } finally {
+      await secondRuntime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a reviewed execution-track proposal when same-version ActionCatalog content drifts', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-strategy-catalog-drift-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const firstRuntime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    const reviewed = await reviewStrategyProposal(firstRuntime);
+    await firstRuntime.stop();
+
+    expect(blenderActionCatalog.catalogVersion).toBe(actionCatalog.catalogVersion);
+    expect(hash(blenderActionCatalog)).not.toBe(hash(actionCatalog));
+    const secondRuntime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const headers = await companionLeaseHeaders(secondRuntime);
+      const decision = acceptedTrackDecision(reviewed.guideProposalId);
+      const response = await fetch(`${secondRuntime.baseUrl}/api/v1/companion/proposal-decision`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(decision),
+      });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: 'execution_track_authority_rejected',
+        message: 'Execution-track proposal no longer matches its installed action catalog',
+      });
+
+      const inspected = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          inspected.getGuideProposalDecision(reviewed.guideProposalId, 'blender', ids.instance),
+        ).toBeNull();
+      } finally {
+        inspected.close();
+      }
+    } finally {
+      await secondRuntime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
   });
 
   it('backfills a finalized safe failure exactly once across runtime restarts', async () => {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import { CompanionLeaseError, createCompanionLeaseManager } from '@operatingline/orchestrator';
+import { guideProtocolVersion } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
 
 const capabilities = {
@@ -30,7 +31,7 @@ function hello(instanceId = randomUUID()) {
     instanceId,
     companionVersion: '0.1.0',
     hostVersion: '4.5.3',
-    supportedGuideProtocolVersions: ['1.1.0', '1.4.0', '1.5.0'],
+    supportedGuideProtocolVersions: ['1.1.0', '1.4.0', '1.5.0', guideProtocolVersion],
     catalogVersion: blenderActionCatalog.catalogVersion,
     capabilities,
   };
@@ -91,7 +92,7 @@ describe('companion lease manager', () => {
     const lease = manager.establish(request, blenderActionCatalog);
 
     expect(lease).toMatchObject({
-      negotiatedGuideProtocolVersion: '1.5.0',
+      negotiatedGuideProtocolVersion: guideProtocolVersion,
       catalogVersion: blenderActionCatalog.catalogVersion,
       capabilities,
       heartbeatIntervalMs: 100,

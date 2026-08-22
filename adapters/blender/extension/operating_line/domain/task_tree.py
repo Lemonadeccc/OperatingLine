@@ -11,6 +11,7 @@ RESOURCE_PATH = Path(__file__).parents[1] / "resources" / "snowman.plan.json"
 ACTION_CATALOG_PATH = Path(__file__).parents[1] / "resources" / "action-catalog.json"
 STEP_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
 CATALOG_VERSION_PATTERN = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
+CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,18 @@ class ObservationPolicySpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionTrackOverrideSpec:
+    kind: str
+    interaction_catalog_version: str
+    interaction_catalog_content_sha256: str
+    recipe_id: str
+    modality: str
+    track_id: str
+    track_content_sha256: str
+    proof_execution_content_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class TaskNode:
     id: str
     number: str
@@ -39,6 +52,7 @@ class TaskNode:
     anchors: tuple[dict[str, Any], ...] = ()
     expected_observations: tuple[dict[str, Any], ...] = ()
     observation_policy: ObservationPolicySpec | None = None
+    execution_track_override: ExecutionTrackOverrideSpec | None = None
     children: tuple["TaskNode", ...] = ()
 
 
@@ -176,7 +190,13 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
         observation_policy_raw = raw.get("observationPolicy")
         observation_policy = None
         if observation_policy_present:
-            if protocol_version not in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}:
+            if protocol_version not in {
+                "1.2.0",
+                "1.3.0",
+                "1.4.0",
+                "1.5.0",
+                "1.6.0",
+            }:
                 raise ValueError("Observation policies require guide protocol 1.2+")
             if action is None:
                 raise ValueError(
@@ -199,7 +219,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
                 if "retryPolicy" in observation_policy_raw:
                     retry_policy = observation_policy_raw.get("retryPolicy")
                     if (
-                        protocol_version != "1.5.0"
+                        protocol_version not in {"1.5.0", "1.6.0"}
                         or failure_strategy != "rollback_step"
                         or not isinstance(retry_policy, dict)
                         or set(retry_policy) != {"mode", "maxAttempts"}
@@ -222,6 +242,72 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
                 )
             else:
                 raise ValueError(f"Invalid observationPolicy on step: {step_id}")
+        execution_track_override = None
+        if "executionTrackOverride" in raw:
+            override_raw = raw.get("executionTrackOverride")
+            expected_override_fields = {
+                "kind",
+                "interactionCatalogVersion",
+                "interactionCatalogContentSha256",
+                "recipeId",
+                "modality",
+                "trackId",
+                "trackContentSha256",
+                "proofExecutionContentSha256",
+            }
+            if protocol_version != "1.6.0":
+                raise ValueError("Execution track overrides require guide protocol 1.6")
+            if action is None:
+                raise ValueError(
+                    f"Only executable steps can declare an execution track override: {step_id}"
+                )
+            if (
+                not isinstance(override_raw, dict)
+                or set(override_raw) != expected_override_fields
+            ):
+                raise ValueError(f"Invalid executionTrackOverride on step: {step_id}")
+            if override_raw.get("kind") != "interaction_catalog_proof":
+                raise ValueError(f"Invalid executionTrackOverride on step: {step_id}")
+            catalog_version = override_raw.get("interactionCatalogVersion")
+            if (
+                not isinstance(catalog_version, str)
+                or CATALOG_VERSION_PATTERN.fullmatch(catalog_version) is None
+            ):
+                raise ValueError(f"Invalid executionTrackOverride on step: {step_id}")
+            for identifier_field in ("recipeId", "trackId"):
+                identifier = override_raw.get(identifier_field)
+                if (
+                    not isinstance(identifier, str)
+                    or STEP_ID_PATTERN.fullmatch(identifier) is None
+                ):
+                    raise ValueError(f"Invalid executionTrackOverride on step: {step_id}")
+            if override_raw.get("modality") not in {"menu", "shortcut"}:
+                raise ValueError(f"Invalid executionTrackOverride on step: {step_id}")
+            for hash_field in (
+                "interactionCatalogContentSha256",
+                "trackContentSha256",
+                "proofExecutionContentSha256",
+            ):
+                digest = override_raw.get(hash_field)
+                if (
+                    not isinstance(digest, str)
+                    or CONTENT_SHA256_PATTERN.fullmatch(digest) is None
+                ):
+                    raise ValueError(f"Invalid executionTrackOverride on step: {step_id}")
+            execution_track_override = ExecutionTrackOverrideSpec(
+                kind="interaction_catalog_proof",
+                interaction_catalog_version=catalog_version,
+                interaction_catalog_content_sha256=override_raw[
+                    "interactionCatalogContentSha256"
+                ],
+                recipe_id=override_raw["recipeId"],
+                modality=override_raw["modality"],
+                track_id=override_raw["trackId"],
+                track_content_sha256=override_raw["trackContentSha256"],
+                proof_execution_content_sha256=override_raw[
+                    "proofExecutionContentSha256"
+                ],
+            )
         return TaskNode(
             id=step_id,
             number=number,
@@ -232,6 +318,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
             anchors=tuple(dict(item) for item in anchors),
             expected_observations=tuple(dict(item) for item in expected_observations),
             observation_policy=observation_policy,
+            execution_track_override=execution_track_override,
             children=children,
         )
 

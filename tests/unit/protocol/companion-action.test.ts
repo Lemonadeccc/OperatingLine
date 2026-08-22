@@ -205,9 +205,57 @@ describe('companion action execution protocol', () => {
       { ...request, planContentSha256: 'A'.repeat(64) },
       { ...request, dispatchedAt: '2026-08-20T10:00:01' },
       { ...request, python: 'exec(request.step)' },
+      {
+        ...request,
+        step: {
+          ...request.step,
+          executionTrackOverride: {
+            kind: 'interaction_catalog_proof',
+            interactionCatalogVersion: '1.0.0',
+            interactionCatalogContentSha256: 'a'.repeat(64),
+            recipeId: 'recipe.create-eye',
+            modality: 'menu',
+            trackId: 'track.create-eye.menu',
+            trackContentSha256: 'b'.repeat(64),
+            proofExecutionContentSha256: 'c'.repeat(64),
+          },
+        },
+      },
     ]) {
       expect(companionActionExecutionDeliverySchema.safeParse(invalid).success).toBe(false);
     }
+  });
+
+  it('keeps proof-bound execution tracks out of the public action-level delivery schema', async () => {
+    const request = delivery();
+    const withOverride = {
+      ...request,
+      step: {
+        ...request.step,
+        executionTrackOverride: {
+          kind: 'interaction_catalog_proof',
+          interactionCatalogVersion: '1.0.0',
+          interactionCatalogContentSha256: 'a'.repeat(64),
+          recipeId: 'recipe.create-eye',
+          modality: 'shortcut',
+          trackId: 'track.create-eye.shortcut',
+          trackContentSha256: 'b'.repeat(64),
+          proofExecutionContentSha256: 'c'.repeat(64),
+        },
+      },
+    } as const;
+    expect(companionActionExecutionDeliverySchema.safeParse(withOverride).success).toBe(false);
+
+    const publicSchema = JSON.parse(
+      readFileSync(
+        resolve('protocol/schemas/v1/companion-action-execution-delivery.schema.json'),
+        'utf8',
+      ),
+    ) as object;
+    await validatePublicJsonSchemaCases(publicSchema, [
+      { value: request, accepted: true },
+      { value: withOverride, accepted: false },
+    ]);
   });
 
   it('requires the exact strong managed Solidify replay observation', () => {

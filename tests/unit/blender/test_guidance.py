@@ -709,7 +709,7 @@ class ObservationGateSessionTests(unittest.TestCase):
 
     def test_retry_policy_is_strict_bounded_and_rollback_only(self) -> None:
         plan = {
-            "protocolVersion": "1.5.0",
+            "protocolVersion": domain.PROTOCOL_VERSION,
             "rootStepId": "step",
             "steps": [
                 {
@@ -1413,7 +1413,7 @@ class RevisionContractTests(unittest.TestCase):
         instance_id = str(uuid.uuid4())
         accepted_plan = {"id": "snowman", "revision": 4}
         branches = {
-            "protocolVersion": "1.5.0",
+            "protocolVersion": domain.PROTOCOL_VERSION,
             "targetAdapterId": "blender",
             "instanceId": instance_id,
             "planId": "snowman",
@@ -1719,6 +1719,143 @@ class RevisionContractTests(unittest.TestCase):
                 broken_proposal_chain,
                 instance_id=instance_id,
             )
+
+    def test_revision_history_binds_guide_1_6_execution_track_edits(self) -> None:
+        thread_id = str(uuid.uuid4())
+        proposal_id = str(uuid.uuid4())
+        instance_id = str(uuid.uuid4())
+        override = {
+            "kind": "interaction_catalog_proof",
+            "interactionCatalogVersion": "1.42.0",
+            "interactionCatalogContentSha256": "a" * 64,
+            "recipeId": "blender.mesh.create_uv_sphere.native",
+            "modality": "menu",
+            "trackId": "blender.mesh.create_uv_sphere.native",
+            "trackContentSha256": "b" * 64,
+            "proofExecutionContentSha256": "c" * 64,
+        }
+        base_step = {
+            "id": "head",
+            "parentId": None,
+            "order": 1,
+            "title": "Create head",
+            "action": {
+                "adapterId": "blender",
+                "name": "blender.mesh.create_uv_sphere",
+                "arguments": {"radius": 1.5},
+            },
+        }
+        target_step = {**base_step, "executionTrackOverride": override}
+        base_plan = {"id": "snowman", "revision": 1, "steps": [base_step]}
+        target_plan = {"id": "snowman", "revision": 2, "steps": [target_step]}
+        request = {
+            "protocolVersion": "1.6.0",
+            "requestId": thread_id,
+            "adapterId": "blender",
+            "catalogVersion": "1.22.0",
+            "instanceId": instance_id,
+            "basePlan": base_plan,
+            "references": [{"nodeId": "head", "nodeNumber": "1"}],
+            "message": "Apply the reviewed proof-backed menu track.",
+            "executionTrackEdits": [
+                {"nodeId": "head", "before": None, "after": override}
+            ],
+            "revisionThread": {
+                "threadId": thread_id,
+                "turn": 1,
+                "parentRequestId": None,
+            },
+            "revisionOperation": {"kind": "revise"},
+            "occurredAt": "2026-08-21T10:00:00Z",
+        }
+        snapshot = {
+            "stepId": "head",
+            "nodeNumber": "1",
+            "parentId": None,
+            "order": 1,
+            "title": "Create head",
+        }
+        proposal = {
+            "protocolVersion": "1.6.0",
+            "proposalId": proposal_id,
+            "targetAdapterId": "blender",
+            "targetInstanceId": instance_id,
+            "plan": target_plan,
+            "revisionRequestId": thread_id,
+            "revisionThread": request["revisionThread"],
+            "revisionOperation": {"kind": "revise"},
+            "planDiff": {
+                "basePlan": {"id": "snowman", "revision": 1},
+                "targetPlan": {"id": "snowman", "revision": 2},
+                "summary": {
+                    "planFields": 0,
+                    "addedSteps": 0,
+                    "removedSteps": 0,
+                    "updatedSteps": 1,
+                    "movedSteps": 0,
+                },
+                "planChanges": [],
+                "stepChanges": [
+                    {
+                        "kind": "updated",
+                        "stepId": "head",
+                        "before": snapshot,
+                        "after": snapshot,
+                        "changes": [
+                            {
+                                "field": "executionTrackOverride",
+                                "before": None,
+                                "after": override,
+                            }
+                        ],
+                    }
+                ],
+            },
+            "catalogVersion": "1.22.0",
+            "proposedAt": "2026-08-21T10:01:00Z",
+        }
+        history = {
+            "protocolVersion": "1.6.0",
+            "threadId": thread_id,
+            "targetAdapterId": "blender",
+            "instanceId": instance_id,
+            "planId": "snowman",
+            "latestTurn": 1,
+            "status": "awaiting_decision",
+            "turns": [
+                {
+                    "turn": 1,
+                    "state": "awaiting_decision",
+                    "request": request,
+                    "proposal": proposal,
+                    "decision": None,
+                }
+            ],
+            "page": {
+                "beforeTurn": None,
+                "nextBeforeTurn": None,
+                "hasMore": False,
+            },
+        }
+
+        validated = validate_revision_thread_history(history, instance_id=instance_id)
+
+        self.assertEqual(
+            validated["turns"][0]["request"]["executionTrackEdits"][0]["after"],
+            override,
+        )
+        legacy = deepcopy(history)
+        legacy["protocolVersion"] = "1.5.0"
+        legacy["turns"][0]["request"]["protocolVersion"] = "1.5.0"
+        legacy["turns"][0]["proposal"]["protocolVersion"] = "1.5.0"
+        with self.assertRaisesRegex(ValueError, "require protocol 1.6"):
+            validate_revision_thread_history(legacy, instance_id=instance_id)
+        mismatched = deepcopy(history)
+        del mismatched["turns"][0]["proposal"]["plan"]["steps"][0][
+            "executionTrackOverride"
+        ]
+        with self.assertRaisesRegex(ValueError, "does not apply"):
+            validate_revision_thread_history(mismatched, instance_id=instance_id)
 
 
 if __name__ == "__main__":

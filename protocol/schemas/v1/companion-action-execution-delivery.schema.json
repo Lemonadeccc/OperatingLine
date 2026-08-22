@@ -392,6 +392,57 @@
             }
           ]
         },
+        "executionTrackOverride": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "interaction_catalog_proof"
+            },
+            "interactionCatalogVersion": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+            },
+            "interactionCatalogContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "recipeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "modality": {
+              "type": "string",
+              "enum": [
+                "menu",
+                "shortcut"
+              ]
+            },
+            "trackId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "trackContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "proofExecutionContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "kind",
+            "interactionCatalogVersion",
+            "interactionCatalogContentSha256",
+            "recipeId",
+            "modality",
+            "trackId",
+            "trackContentSha256",
+            "proofExecutionContentSha256"
+          ],
+          "additionalProperties": false
+        },
         "rollback": {
           "type": "object",
           "properties": {
@@ -435,6 +486,20 @@
           "if": {
             "required": [
               "observationPolicy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "action": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "executionTrackOverride"
             ]
           },
           "then": {
@@ -538,7 +603,19 @@
       },
       "required": [
         "step"
-      ]
+      ],
+      "not": {
+        "properties": {
+          "step": {
+            "required": [
+              "executionTrackOverride"
+            ]
+          }
+        },
+        "required": [
+          "step"
+        ]
+      }
     }
   ],
   "$id": "https://operatingline.dev/schema/v1/companion-action-execution-delivery.json"

@@ -17,6 +17,8 @@ import { openOperatingLineDatabase } from '@operatingline/persistence';
 import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
 import {
   canonicalizeProtocolJsonValue,
+  guidePlanSchema,
+  guideProposalSchema,
   guideProtocolVersion,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringPromptPacketSchema,
@@ -40,6 +42,7 @@ import {
 
 import {
   computeEvalContentSha256,
+  computeGuidePlanDiff,
   computePlanContentSha256,
   startRuntime,
   type ProcedureTutorialYoutubeCaptionSource,
@@ -246,7 +249,7 @@ function companionHello(instanceId: string) {
     instanceId,
     companionVersion: '0.1.0',
     hostVersion: '4.5.3',
-    supportedGuideProtocolVersions: ['1.1.0', '1.4.0', '1.5.0'],
+    supportedGuideProtocolVersions: ['1.1.0', '1.4.0', '1.5.0', guideProtocolVersion],
     catalogVersion,
     capabilities: {
       presentation: {
@@ -1087,6 +1090,43 @@ describe('OperatingLine runtime', () => {
       });
       expect(unknownArgument.result).toMatchObject({ isError: true });
       expect(unknownArgument.result?.content?.[0]?.text).toContain('unknown python');
+
+      const injectedTrackPlan = structuredClone(plan) as GuidePlan;
+      injectedTrackPlan.id = 'unreviewed-execution-track-demo';
+      injectedTrackPlan.protocolVersion = guideProtocolVersion;
+      const injectedStep = injectedTrackPlan.steps.find((step) => step.id === 'snowman.model.head');
+      if (injectedStep?.action === null || injectedStep?.action === undefined) {
+        throw new Error('Snowman fixture lacks its action leaf');
+      }
+      injectedStep.executionTrackOverride = {
+        kind: 'interaction_catalog_proof',
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        interactionCatalogContentSha256: 'a'.repeat(64),
+        recipeId: 'blender.mesh.create_uv_sphere.native',
+        modality: 'menu',
+        trackId: 'blender.mesh.create_uv_sphere.native',
+        trackContentSha256: 'b'.repeat(64),
+        proofExecutionContentSha256: 'c'.repeat(64),
+      };
+      const injectedProposal = await callMcpTool(runtime, 17, 'operatingline.guide.propose', {
+        targetAdapterId: 'blender',
+        catalogVersion,
+        plan: injectedTrackPlan,
+      });
+      expect(injectedProposal.result).toMatchObject({ isError: true });
+      expect(injectedProposal.result?.content?.[0]?.text).toContain(
+        'only an accepted trusted failure-replan review may create them',
+      );
+      const injectedPublication = await callMcpTool(
+        runtime,
+        18,
+        'operatingline.guide.publish',
+        injectedTrackPlan,
+      );
+      expect(injectedPublication.result).toMatchObject({ isError: true });
+      expect(injectedPublication.result?.content?.[0]?.text).toContain(
+        'only an accepted trusted failure-replan review may create them',
+      );
     } finally {
       await runtime.stop();
     }
@@ -4591,7 +4631,7 @@ describe('OperatingLine runtime', () => {
         leaseTtlMs: number;
       };
       expect(session).toMatchObject({
-        negotiatedGuideProtocolVersion: '1.5.0',
+        negotiatedGuideProtocolVersion: guideProtocolVersion,
         heartbeatIntervalMs: 100,
         leaseTtlMs: 300,
       });
@@ -4605,7 +4645,9 @@ describe('OperatingLine runtime', () => {
           },
         },
       );
-      await expect(negotiatedGuide.json()).resolves.toMatchObject({ protocolVersion: '1.5.0' });
+      await expect(negotiatedGuide.json()).resolves.toMatchObject({
+        protocolVersion: guideProtocolVersion,
+      });
 
       const wrongLeaseGuide = await fetch(
         `${runtime.baseUrl}/api/v1/companion/guide?adapterId=blender&instanceId=${instanceId}`,
@@ -4620,7 +4662,7 @@ describe('OperatingLine runtime', () => {
 
       const report = {
         ...companionReport(instanceId, 1),
-        protocolVersion: '1.5.0',
+        protocolVersion: guideProtocolVersion,
         adapterId: 'blender',
         hostVersion: '4.5.3',
         observationGate: null,
@@ -4689,6 +4731,104 @@ describe('OperatingLine runtime', () => {
       await expect(downgrade.json()).resolves.toMatchObject({ error: 'lease_not_current' });
     } finally {
       await runtime.stop();
+    }
+  });
+
+  it('rejects execution-track acceptance without durable failure-review authority', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-track-authority-test-'));
+    const databasePath = join(directory, 'events.db');
+    const instanceId = randomUUID();
+    const revisionRequestId = randomUUID();
+    const basePlan = guidePlanSchema.parse(
+      JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8')),
+    );
+    const revisedPlan = guidePlanSchema.parse({
+      ...basePlan,
+      protocolVersion: guideProtocolVersion,
+      revision: basePlan.revision + 1,
+      steps: basePlan.steps.map((step) =>
+        step.id !== 'snowman.model.head'
+          ? step
+          : {
+              ...step,
+              executionTrackOverride: {
+                kind: 'interaction_catalog_proof',
+                interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+                interactionCatalogContentSha256: 'a'.repeat(64),
+                recipeId: 'blender.mesh.create_uv_sphere.native',
+                modality: 'menu',
+                trackId: 'blender.mesh.create_uv_sphere.native',
+                trackContentSha256: 'b'.repeat(64),
+                proofExecutionContentSha256: 'c'.repeat(64),
+              },
+            },
+      ),
+    });
+    const proposal = guideProposalSchema.parse({
+      protocolVersion: guideProtocolVersion,
+      proposalId: randomUUID(),
+      targetAdapterId: 'blender',
+      targetInstanceId: instanceId,
+      plan: revisedPlan,
+      revisionRequestId,
+      revisionThread: { threadId: revisionRequestId, turn: 1, parentRequestId: null },
+      revisionOperation: { kind: 'revise' },
+      planDiff: computeGuidePlanDiff(basePlan, revisedPlan),
+      catalogVersion,
+      proposedAt: new Date().toISOString(),
+    });
+    const database = openOperatingLineDatabase(databasePath);
+    database.recordGuideProposal(proposal);
+    database.close();
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    try {
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(companionHello(instanceId)),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as { leaseId: string };
+      const decisionUrl = `${runtime.baseUrl}/api/v1/companion/proposal-decision`;
+      const decision = {
+        protocolVersion: guideProtocolVersion,
+        decisionId: randomUUID(),
+        proposalId: proposal.proposalId,
+        adapterId: 'blender',
+        instanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      };
+      const accepted = await fetch(decisionUrl, {
+        method: 'POST',
+        headers: { ...headers, 'x-operatingline-companion-lease': session.leaseId },
+        body: JSON.stringify(decision),
+      });
+      expect(accepted.status).toBe(409);
+      await expect(accepted.json()).resolves.toMatchObject({
+        error: 'execution_track_authority_rejected',
+        message: 'Execution-track proposal lacks exact durable failure-review authority',
+      });
+
+      const rejected = await fetch(decisionUrl, {
+        method: 'POST',
+        headers: { ...headers, 'x-operatingline-companion-lease': session.leaseId },
+        body: JSON.stringify({ ...decision, decisionId: randomUUID(), decision: 'rejected' }),
+      });
+      expect(rejected.status).toBe(200);
+      await expect(rejected.json()).resolves.toEqual({ result: 'accepted' });
+    } finally {
+      await runtime.stop();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

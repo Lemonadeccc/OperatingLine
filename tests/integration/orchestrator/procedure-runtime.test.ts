@@ -10285,7 +10285,7 @@ describe('procedure compilation runtime', () => {
           interactionTracks: 'structural_only',
         },
         plan: {
-          protocolVersion: '1.5.0',
+          protocolVersion: guideProtocolVersion,
           rootStepId: 'snowman',
         },
         proposalCreated: false,

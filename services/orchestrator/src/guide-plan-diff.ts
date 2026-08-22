@@ -21,6 +21,7 @@ const stepFields = [
   'anchors',
   'expectedObservations',
   'observationPolicy',
+  'executionTrackOverride',
   'rollback',
 ] as const satisfies readonly GuideStepField[];
 

@@ -595,10 +595,16 @@ GET 只读取预览或终态收据；审查决策只允许由精确目标实例�
 在 `BEGIN IMMEDIATE` 事务内再次检查当前 Plan、下一 revision、活动对话、现有修订请求和待审 Proposal，然后
 原子写入 GuideRevisionRequest、pending GuideProposal 与唯一终态审查事件。该接受不是 GuideProposal
 acceptance，也不会投递或执行 Blender action。discard 只写审查记录；重复的完全相同请求返回 duplicate，
-不同决策或绑定冲突。`strategy_switch` 在 GuidePlan 可表达 execution track 前不能接受，语义候选在取得签名、
-单次消费的 Provider authority 前不能接受。见
+不同决策或绑定冲突。Guide `1.6.0` 允许经审查的 proof-backed `strategy_switch` 只在失败 action leaf 上增加
+严格 `executionTrackOverride`：它绑定 InteractionCatalog、recipe、menu/shortcut track 与 proof execution 的
+独立内容摘要，不携带 trajectory、按键、operator 或 arguments。通用 goal/replan/proposal 与直接 publish
+不能创建该字段；Companion 接受 Proposal 前重验当前基线 Plan、durable review、revision、候选、安装目录和
+不可变 replay proof 的完整授权链。当前还没有逐控件执行器，因此 Blender 在原生 Undo checkpoint、session 推进和 action
+dispatch 之前以 `execution_track_executor_unavailable` 锁住 Next，action-level MCP 也拒绝该叶节点。旧 1.5
+策略候选仍只能 discard。语义候选在取得签名、单次消费的 Provider authority 前不能接受。见
 [ADR 0102](../adr/0102-trusted-execution-failure-replan.md) 与
-[ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md)。
+[ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md) 与
+[ADR 0104](../adr/0104-reviewed-execution-track-override.md)。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
 hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。Subdivision Surface `1.39.0` 的执行权

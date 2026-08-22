@@ -62,7 +62,7 @@ class GoalRequestPayloadTests(unittest.TestCase):
                 "occurredAt",
             },
         )
-        self.assertEqual(payload["protocolVersion"], "1.5.0")
+        self.assertEqual(payload["protocolVersion"], "1.6.0")
         self.assertEqual(payload["adapterId"], "blender")
         self.assertEqual(
             payload["catalogVersion"], domain.BLENDER_ACTION_CATALOG_VERSION
@@ -532,6 +532,13 @@ class GoalRequestTransportTests(unittest.TestCase):
                 candidate["action"]["name"] = action_name
                 with self.assertRaisesRegex(ValueError, "approved action-level MCP allowlist"):
                     CompanionTransport._validate_action_step(candidate)
+
+        overridden = deepcopy(step)
+        overridden["executionTrackOverride"] = {
+            "kind": "interaction_catalog_proof",
+        }
+        with self.assertRaisesRegex(ValueError, "invalid fields"):
+            CompanionTransport._validate_action_step(overridden)
 
     def test_action_result_waits_for_state_delivery_and_flushes_on_shutdown(self) -> None:
         instance_id = str(uuid.uuid4())

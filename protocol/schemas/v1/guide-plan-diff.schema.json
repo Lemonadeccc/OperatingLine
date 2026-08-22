@@ -342,6 +342,7 @@
                         "anchors",
                         "expectedObservations",
                         "observationPolicy",
+                        "executionTrackOverride",
                         "rollback"
                       ]
                     },
