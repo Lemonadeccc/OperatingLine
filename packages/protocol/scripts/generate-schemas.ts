@@ -16,6 +16,16 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  companionExecutionTrackPreflightBindingSchema,
+  companionExecutionTrackPreflightCreateRequestSchema,
+  companionExecutionTrackPreflightDeliverySchema,
+  companionExecutionTrackPreflightLeaseSchema,
+  companionExecutionTrackPreflightPollDeliverySchema,
+  companionExecutionTrackPreflightPollRequestSchema,
+  companionExecutionTrackPreflightResultAckSchema,
+  companionExecutionTrackPreflightResultSchema,
+  companionExecutionTrackPreflightStatusRequestSchema,
+  companionExecutionTrackPreflightStatusSchema,
   companionDialogueRunCreateRequestSchema,
   companionDialogueRunSchema,
   companionDialogueRunStatusRequestSchema,
@@ -559,6 +569,56 @@ const schemas = [
     'companion-action-result-ack.schema.json',
     'https://operatingline.dev/schema/v1/companion-action-result-ack.json',
     companionActionResultAckSchema,
+  ],
+  [
+    'companion-execution-track-preflight-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-create-request.json',
+    companionExecutionTrackPreflightCreateRequestSchema,
+  ],
+  [
+    'companion-execution-track-preflight-binding.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-binding.json',
+    companionExecutionTrackPreflightBindingSchema,
+  ],
+  [
+    'companion-execution-track-preflight-lease.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-lease.json',
+    companionExecutionTrackPreflightLeaseSchema,
+  ],
+  [
+    'companion-execution-track-preflight-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-delivery.json',
+    companionExecutionTrackPreflightDeliverySchema,
+  ],
+  [
+    'companion-execution-track-preflight-result.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-result.json',
+    companionExecutionTrackPreflightResultSchema,
+  ],
+  [
+    'companion-execution-track-preflight-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-status-request.json',
+    companionExecutionTrackPreflightStatusRequestSchema,
+  ],
+  [
+    'companion-execution-track-preflight-status.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-status.json',
+    companionExecutionTrackPreflightStatusSchema,
+  ],
+  [
+    'companion-execution-track-preflight-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-poll-request.json',
+    companionExecutionTrackPreflightPollRequestSchema,
+  ],
+  [
+    'companion-execution-track-preflight-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-poll-delivery.json',
+    companionExecutionTrackPreflightPollDeliverySchema,
+  ],
+  [
+    'companion-execution-track-preflight-result-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-execution-track-preflight-result-ack.json',
+    companionExecutionTrackPreflightResultAckSchema,
   ],
   [
     'procedure-tree-editor-branch-create-request.schema.json',
@@ -1795,6 +1855,21 @@ function documentMenuControlProofSemanticGate(
   }
 }
 
+function documentExecutionTrackPreflightSemanticGate(
+  filename: string,
+  schema: Record<string, unknown>,
+): void {
+  if (
+    filename.startsWith('companion-execution-track-preflight-') &&
+    ['binding', 'delivery', 'result', 'status'].some((kind) =>
+      filename.includes(`-${kind}.schema.json`),
+    )
+  ) {
+    schema['$comment'] =
+      'Canonical binding integrity, exact replay/Guide/source-leaf/selected-track authority, lease identity, and temporal ordering require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.';
+  }
+}
+
 for (const [filename, id, schema] of schemas) {
   if (onlyFilename !== undefined && filename !== onlyFilename) continue;
   const draft7TupleSchema =
@@ -1812,6 +1887,7 @@ for (const [filename, id, schema] of schemas) {
   documentExecutionDecisionSemanticGate(filename, jsonSchema);
   documentTutorialMediaRecognitionSemanticGate(filename, jsonSchema);
   documentMenuControlProofSemanticGate(filename, jsonSchema);
+  documentExecutionTrackPreflightSemanticGate(filename, jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {
