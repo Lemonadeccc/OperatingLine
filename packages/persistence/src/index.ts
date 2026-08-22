@@ -98,6 +98,7 @@ export interface GuideProposalInput {
   targetAdapterId: string;
   targetInstanceId?: string | undefined;
   goalRequestId?: string | undefined;
+  revisionRequestId?: string | undefined;
   catalogVersion?: string | undefined;
   proposedAt: string;
   plan: {
@@ -136,6 +137,47 @@ export interface GuideRevisionRequestInput {
 }
 
 export type RecordGuideRevisionRequestResult = 'accepted' | 'duplicate' | 'conflict';
+
+export interface ProcedureExecutionFailureReplanReviewRecordInput {
+  requestId: string;
+  reviewId: string;
+  decision: 'accept' | 'discard';
+  requestFingerprintSha256: string;
+  candidateContentSha256: string;
+  sourceBindingSha256: string;
+  reviewEvidenceBindingSha256: string;
+  adapterId: string;
+  instanceId: string;
+  basePlanId: string;
+  basePlanRevision: number;
+  basePlanContentSha256: string;
+  reviewerSessionFingerprintSha256: string;
+  revisionRequestId?: string | undefined;
+  proposalId?: string | undefined;
+  reviewedAt: string;
+  payload: unknown;
+}
+
+export interface CommitProcedureExecutionFailureReplanReviewInput {
+  review: ProcedureExecutionFailureReplanReviewRecordInput;
+  candidateEvent: ExecutionEventInput & { createdAt: string };
+  currentPlan?:
+    | {
+        adapterId: string;
+        instanceId: string;
+        planId: string;
+        revision: number;
+        contentSha256: string;
+      }
+    | undefined;
+  revisionRequest?: GuideRevisionRequestInput | undefined;
+  proposal?: GuideProposalInput | undefined;
+}
+
+export interface CommitProcedureExecutionFailureReplanReviewResult {
+  result: 'accepted' | 'duplicate' | 'conflict';
+  review: unknown | null;
+}
 
 export interface GuideGoalRequestInput {
   requestId: string;
@@ -828,6 +870,10 @@ export interface OperatingLineDatabase {
     adapterId: string,
     instanceId: string,
   ): unknown | null;
+  commitProcedureExecutionFailureReplanReview(
+    input: CommitProcedureExecutionFailureReplanReviewInput,
+  ): CommitProcedureExecutionFailureReplanReviewResult;
+  getProcedureExecutionFailureReplanReview(requestId: string): unknown | null;
   listGuideRevisionThreadTurns(
     threadId: string,
     adapterId: string,
@@ -1695,6 +1741,58 @@ export function openOperatingLineDatabase(
     VALUES (19, datetime('now'));
   `);
 
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS procedure_execution_failure_replan_reviews (
+      request_id TEXT PRIMARY KEY,
+      review_id TEXT NOT NULL UNIQUE,
+      decision TEXT NOT NULL CHECK (decision IN ('accept', 'discard')),
+      request_fingerprint_sha256 TEXT NOT NULL CHECK (
+        length(request_fingerprint_sha256) = 64
+        AND request_fingerprint_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      candidate_content_sha256 TEXT NOT NULL CHECK (
+        length(candidate_content_sha256) = 64
+        AND candidate_content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      source_binding_sha256 TEXT NOT NULL CHECK (
+        length(source_binding_sha256) = 64
+        AND source_binding_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      review_evidence_binding_sha256 TEXT NOT NULL CHECK (
+        length(review_evidence_binding_sha256) = 64
+        AND review_evidence_binding_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      adapter_id TEXT NOT NULL CHECK (adapter_id <> ''),
+      instance_id TEXT NOT NULL CHECK (instance_id <> ''),
+      base_plan_id TEXT NOT NULL CHECK (base_plan_id <> ''),
+      base_plan_revision INTEGER NOT NULL CHECK (base_plan_revision > 0),
+      base_plan_content_sha256 TEXT NOT NULL CHECK (
+        length(base_plan_content_sha256) = 64
+        AND base_plan_content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      reviewer_session_fingerprint_sha256 TEXT NOT NULL CHECK (
+        length(reviewer_session_fingerprint_sha256) = 64
+        AND reviewer_session_fingerprint_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      revision_request_id TEXT UNIQUE,
+      proposal_id TEXT UNIQUE,
+      reviewed_at TEXT NOT NULL CHECK (reviewed_at <> ''),
+      payload TEXT NOT NULL CHECK (json_valid(payload)),
+      CHECK (
+        (decision = 'accept' AND revision_request_id IS NOT NULL AND proposal_id IS NOT NULL)
+        OR (decision = 'discard' AND revision_request_id IS NULL AND proposal_id IS NULL)
+      ),
+      FOREIGN KEY (revision_request_id) REFERENCES guide_revision_requests(request_id),
+      FOREIGN KEY (proposal_id) REFERENCES guide_proposals(proposal_id)
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS procedure_execution_failure_replan_reviews_target
+    ON procedure_execution_failure_replan_reviews (adapter_id, instance_id, reviewed_at);
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (20, datetime('now'));
+  `);
+
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
     VALUES (?, ?, ?, ?)
@@ -1711,6 +1809,55 @@ export function openOperatingLineDatabase(
     SELECT sequence, id, event_type, payload, created_at
     FROM execution_events
     WHERE id = ?
+  `);
+  const findProcedureExecutionFailureReplanReviews = sqlite.prepare(`
+    SELECT
+      request_id,
+      review_id,
+      decision,
+      request_fingerprint_sha256,
+      candidate_content_sha256,
+      source_binding_sha256,
+      review_evidence_binding_sha256,
+      adapter_id,
+      instance_id,
+      base_plan_id,
+      base_plan_revision,
+      base_plan_content_sha256,
+      reviewer_session_fingerprint_sha256,
+      revision_request_id,
+      proposal_id,
+      reviewed_at,
+      payload
+    FROM procedure_execution_failure_replan_reviews
+    WHERE request_id = ? OR review_id = ?
+    ORDER BY request_id, review_id
+  `);
+  const findProcedureExecutionFailureReplanReviewByRequest = sqlite.prepare(`
+    SELECT payload
+    FROM procedure_execution_failure_replan_reviews
+    WHERE request_id = ?
+  `);
+  const insertProcedureExecutionFailureReplanReview = sqlite.prepare(`
+    INSERT INTO procedure_execution_failure_replan_reviews (
+      request_id,
+      review_id,
+      decision,
+      request_fingerprint_sha256,
+      candidate_content_sha256,
+      source_binding_sha256,
+      review_evidence_binding_sha256,
+      adapter_id,
+      instance_id,
+      base_plan_id,
+      base_plan_revision,
+      base_plan_content_sha256,
+      reviewer_session_fingerprint_sha256,
+      revision_request_id,
+      proposal_id,
+      reviewed_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const findGuideProposalPayload = sqlite.prepare(`
     SELECT payload FROM guide_proposals WHERE proposal_id = ?
@@ -2518,6 +2665,11 @@ export function openOperatingLineDatabase(
     GROUP BY plan_id
     ORDER BY plan_id
   `);
+  const findLatestGuideRevisionForPlan = sqlite.prepare(`
+    SELECT MAX(plan_revision) AS revision
+    FROM guide_proposals
+    WHERE plan_id = ?
+  `);
   const findGuideProposalTarget = sqlite.prepare(`
     SELECT target_adapter_id
     FROM guide_proposals
@@ -2600,6 +2752,11 @@ export function openOperatingLineDatabase(
   `);
   const findLatestState = sqlite.prepare(`
     SELECT report_id, sequence
+    FROM companion_latest_states
+    WHERE adapter_id = ? AND instance_id = ?
+  `);
+  const findLatestStatePayload = sqlite.prepare(`
+    SELECT report_id, sequence, payload
     FROM companion_latest_states
     WHERE adapter_id = ? AND instance_id = ?
   `);
@@ -4423,6 +4580,267 @@ export function openOperatingLineDatabase(
       }
       if (typeof row.payload !== 'string') {
         throw new Error('SQLite returned an invalid guide proposal decision payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    commitProcedureExecutionFailureReplanReview(input) {
+      const { review } = input;
+      const reviewPayload = canonicalJson(review.payload);
+      const candidatePayload = canonicalJson(input.candidateEvent.payload);
+      const revisionRequestPayload =
+        input.revisionRequest === undefined ? null : canonicalJson(input.revisionRequest);
+      const proposalPayload = input.proposal === undefined ? null : canonicalJson(input.proposal);
+      const acceptedShape =
+        review.decision === 'accept' &&
+        review.revisionRequestId !== undefined &&
+        review.proposalId !== undefined &&
+        input.currentPlan !== undefined &&
+        input.revisionRequest !== undefined &&
+        input.proposal !== undefined &&
+        input.revisionRequest.requestId === review.revisionRequestId &&
+        input.proposal.proposalId === review.proposalId &&
+        input.proposal.revisionRequestId === review.revisionRequestId &&
+        input.revisionRequest.adapterId === review.adapterId &&
+        input.revisionRequest.instanceId === review.instanceId &&
+        input.revisionRequest.catalogVersion === input.proposal.catalogVersion &&
+        input.revisionRequest.basePlan.id === review.basePlanId &&
+        input.revisionRequest.basePlan.revision === review.basePlanRevision &&
+        input.proposal.targetAdapterId === review.adapterId &&
+        input.proposal.targetInstanceId === review.instanceId &&
+        input.proposal.plan.id === review.basePlanId &&
+        input.currentPlan.adapterId === review.adapterId &&
+        input.currentPlan.instanceId === review.instanceId &&
+        input.currentPlan.planId === review.basePlanId &&
+        input.currentPlan.revision === review.basePlanRevision &&
+        input.currentPlan.contentSha256 === review.basePlanContentSha256;
+      const discardedShape =
+        review.decision === 'discard' &&
+        review.revisionRequestId === undefined &&
+        review.proposalId === undefined &&
+        input.currentPlan === undefined &&
+        input.revisionRequest === undefined &&
+        input.proposal === undefined;
+      if (
+        (!acceptedShape && !discardedShape) ||
+        input.candidateEvent.id !== `procedure-execution-failure-replan:${review.requestId}` ||
+        input.candidateEvent.eventType !== 'procedure.execution-failure-replan.completed'
+      ) {
+        return { result: 'conflict', review: null };
+      }
+
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingRows = findProcedureExecutionFailureReplanReviews.all(
+          review.requestId,
+          review.reviewId,
+        ) as Array<{
+          request_id: string;
+          review_id: string;
+          decision: string;
+          request_fingerprint_sha256: string;
+          candidate_content_sha256: string;
+          source_binding_sha256: string;
+          review_evidence_binding_sha256: string;
+          adapter_id: string;
+          instance_id: string;
+          base_plan_id: string;
+          base_plan_revision: number;
+          base_plan_content_sha256: string;
+          reviewer_session_fingerprint_sha256: string;
+          revision_request_id: string | null;
+          proposal_id: string | null;
+          reviewed_at: string;
+          payload: string;
+        }>;
+        if (existingRows.length > 0) {
+          const existing = existingRows[0]!;
+          const exact =
+            existingRows.length === 1 &&
+            existing.request_id === review.requestId &&
+            existing.review_id === review.reviewId &&
+            existing.decision === review.decision &&
+            existing.request_fingerprint_sha256 === review.requestFingerprintSha256 &&
+            existing.candidate_content_sha256 === review.candidateContentSha256 &&
+            existing.source_binding_sha256 === review.sourceBindingSha256 &&
+            existing.review_evidence_binding_sha256 === review.reviewEvidenceBindingSha256 &&
+            existing.adapter_id === review.adapterId &&
+            existing.instance_id === review.instanceId &&
+            existing.base_plan_id === review.basePlanId &&
+            existing.base_plan_revision === review.basePlanRevision &&
+            existing.base_plan_content_sha256 === review.basePlanContentSha256 &&
+            existing.reviewer_session_fingerprint_sha256 ===
+              review.reviewerSessionFingerprintSha256 &&
+            existing.revision_request_id === (review.revisionRequestId ?? null) &&
+            existing.proposal_id === (review.proposalId ?? null) &&
+            existing.reviewed_at === review.reviewedAt &&
+            existing.payload === reviewPayload;
+          sqlite.exec('COMMIT;');
+          return {
+            result: exact ? 'duplicate' : 'conflict',
+            review: exact ? (JSON.parse(existing.payload) as unknown) : null,
+          };
+        }
+
+        const candidateEvent = findEvent.get(input.candidateEvent.id) as
+          { id: string; event_type: string; payload: string; created_at: string } | undefined;
+        if (
+          candidateEvent === undefined ||
+          candidateEvent.id !== input.candidateEvent.id ||
+          candidateEvent.event_type !== input.candidateEvent.eventType ||
+          candidateEvent.payload !== candidatePayload ||
+          candidateEvent.created_at !== input.candidateEvent.createdAt
+        ) {
+          sqlite.exec('COMMIT;');
+          return { result: 'conflict', review: null };
+        }
+
+        if (review.decision === 'accept') {
+          const currentPlan = input.currentPlan!;
+          const revisionRequest = input.revisionRequest!;
+          const proposal = input.proposal!;
+          const latestState = findLatestStatePayload.get(review.adapterId, review.instanceId) as
+            { report_id: string; sequence: number; payload: string } | undefined;
+          let latestStatePayload: unknown = null;
+          try {
+            latestStatePayload = latestState === undefined ? null : JSON.parse(latestState.payload);
+          } catch {
+            latestStatePayload = null;
+          }
+          const latestStateRecord =
+            latestStatePayload !== null &&
+            typeof latestStatePayload === 'object' &&
+            !Array.isArray(latestStatePayload)
+              ? (latestStatePayload as Record<string, unknown>)
+              : null;
+          const latestPlan =
+            latestStateRecord?.['plan'] !== null &&
+            typeof latestStateRecord?.['plan'] === 'object' &&
+            !Array.isArray(latestStateRecord?.['plan'])
+              ? (latestStateRecord['plan'] as Record<string, unknown>)
+              : null;
+          if (
+            latestState === undefined ||
+            latestStateRecord?.['adapterId'] !== currentPlan.adapterId ||
+            latestStateRecord['instanceId'] !== currentPlan.instanceId ||
+            latestPlan?.['id'] !== currentPlan.planId ||
+            latestPlan['revision'] !== currentPlan.revision ||
+            latestStateRecord['planContentSha256'] !== currentPlan.contentSha256 ||
+            findRevisionRequest.get(revisionRequest.requestId) !== undefined ||
+            findCompanionDialogueRunByRevisionRequest.get(revisionRequest.requestId) !==
+              undefined ||
+            findActiveCompanionDialogueRun.get(review.adapterId, review.instanceId) !== undefined ||
+            findGuideProposalForReplay.get(
+              proposal.proposalId,
+              proposal.plan.id,
+              proposal.plan.revision,
+            ) !== undefined ||
+            findPendingGuideProposal.get(
+              review.adapterId,
+              review.instanceId,
+              review.adapterId,
+              review.instanceId,
+            ) !== undefined
+          ) {
+            sqlite.exec('COMMIT;');
+            return { result: 'conflict', review: null };
+          }
+          const latestRevisionRow = findLatestGuideRevisionForPlan.get(proposal.plan.id) as
+            { revision: number | null } | undefined;
+          const latestRevision = Math.max(
+            review.basePlanRevision,
+            latestRevisionRow?.revision ?? 0,
+          );
+          if (proposal.plan.revision !== latestRevision + 1) {
+            sqlite.exec('COMMIT;');
+            return { result: 'conflict', review: null };
+          }
+
+          insertRevisionRequest.run(
+            revisionRequest.requestId,
+            revisionRequest.adapterId,
+            revisionRequest.instanceId,
+            revisionRequest.basePlan.id,
+            revisionRequest.basePlan.revision,
+            revisionRequest.occurredAt,
+            revisionRequestPayload,
+          );
+          insertEvent.run(
+            `guide-revision-request:${revisionRequest.requestId}`,
+            'guide.revision.requested',
+            revisionRequestPayload,
+            review.reviewedAt,
+          );
+          insertGuideProposal.run(
+            proposal.proposalId,
+            proposal.targetAdapterId,
+            proposal.plan.id,
+            proposal.plan.revision,
+            proposal.proposedAt,
+            proposalPayload,
+          );
+          insertEvent.run(
+            `guide-proposal:${proposal.proposalId}`,
+            'guide.proposal.created',
+            proposalPayload,
+            review.reviewedAt,
+          );
+          insertRevisionRequestProposal.run(
+            revisionRequest.requestId,
+            proposal.proposalId,
+            review.reviewedAt,
+          );
+          insertEvent.run(
+            `guide-revision-proposal:${revisionRequest.requestId}`,
+            'guide.revision.proposed',
+            canonicalJson({
+              requestId: revisionRequest.requestId,
+              proposalId: proposal.proposalId,
+            }),
+            review.reviewedAt,
+          );
+        }
+
+        insertProcedureExecutionFailureReplanReview.run(
+          review.requestId,
+          review.reviewId,
+          review.decision,
+          review.requestFingerprintSha256,
+          review.candidateContentSha256,
+          review.sourceBindingSha256,
+          review.reviewEvidenceBindingSha256,
+          review.adapterId,
+          review.instanceId,
+          review.basePlanId,
+          review.basePlanRevision,
+          review.basePlanContentSha256,
+          review.reviewerSessionFingerprintSha256,
+          review.revisionRequestId ?? null,
+          review.proposalId ?? null,
+          review.reviewedAt,
+          reviewPayload,
+        );
+        insertEvent.run(
+          `procedure-execution-failure-replan-reviewed:${review.reviewId}`,
+          'procedure.execution-failure-replan.reviewed',
+          reviewPayload,
+          review.reviewedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return { result: 'accepted', review: JSON.parse(reviewPayload) as unknown };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+          return { result: 'conflict', review: null };
+        }
+        throw error;
+      }
+    },
+    getProcedureExecutionFailureReplanReview(requestId) {
+      const row = findProcedureExecutionFailureReplanReviewByRequest.get(requestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) return null;
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid failure replan review payload');
       }
       return JSON.parse(row.payload) as unknown;
     },

@@ -2922,6 +2922,270 @@ describe('OperatingLine persistence', () => {
     database.close();
   });
 
+  it('atomically consumes one failure replan review into a revision request and proposal', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-failure-replan-review-'));
+    const databasePath = join(directory, 'state.db');
+    const requestId = randomUUID();
+    const reviewId = randomUUID();
+    const revisionRequestId = randomUUID();
+    const proposalId = randomUUID();
+    const instanceId = randomUUID();
+    const reviewedAt = '2026-08-21T10:00:00.000Z';
+    const candidateContentSha256 = 'a'.repeat(64);
+    const sourceBindingSha256 = 'b'.repeat(64);
+    const basePlanContentSha256 = 'c'.repeat(64);
+    const candidateEvent = {
+      id: `procedure-execution-failure-replan:${requestId}`,
+      eventType: 'procedure.execution-failure-replan.completed',
+      payload: {
+        requestSha256: 'd'.repeat(64),
+        sourceBindingSha256,
+        envelope: { requestId },
+        outcome: {
+          kind: 'parameter_repair_proposed',
+          proposal: {
+            integrity: { algorithm: 'sha256', contentSha256: candidateContentSha256 },
+          },
+        },
+      },
+      createdAt: '2026-08-21T09:59:00.000Z',
+    };
+    const revision = {
+      ...revisionRequest(revisionRequestId),
+      protocolVersion: '1.5.0',
+      instanceId,
+      basePlan: { id: 'snowman', revision: 3 },
+      revisionThread: { threadId: revisionRequestId, turn: 1, parentRequestId: null },
+      revisionOperation: { kind: 'revise' },
+      occurredAt: reviewedAt,
+    };
+    const proposal = {
+      ...guideProposal('snowman', 4),
+      protocolVersion: '1.5.0',
+      proposalId,
+      targetInstanceId: instanceId,
+      revisionRequestId,
+      catalogVersion: revision.catalogVersion,
+      proposedAt: reviewedAt,
+    };
+    const payload = {
+      formatVersion: '1.0.0',
+      requestId,
+      reviewId,
+      finalStatus: 'accepted',
+      revisionRequestId,
+      guideProposalId: proposalId,
+      proposalCreated: true,
+      providerCalled: false,
+      hostExecutionStarted: false,
+      occurredAt: reviewedAt,
+    };
+    const input = {
+      review: {
+        requestId,
+        reviewId,
+        decision: 'accept' as const,
+        requestFingerprintSha256: 'e'.repeat(64),
+        candidateContentSha256,
+        sourceBindingSha256,
+        reviewEvidenceBindingSha256: 'f'.repeat(64),
+        adapterId: 'blender',
+        instanceId,
+        basePlanId: 'snowman',
+        basePlanRevision: 3,
+        basePlanContentSha256,
+        reviewerSessionFingerprintSha256: '1'.repeat(64),
+        revisionRequestId,
+        proposalId,
+        reviewedAt,
+        payload,
+      },
+      candidateEvent,
+      currentPlan: {
+        adapterId: 'blender',
+        instanceId,
+        planId: 'snowman',
+        revision: 3,
+        contentSha256: basePlanContentSha256,
+      },
+      revisionRequest: revision,
+      proposal,
+    };
+
+    try {
+      const first = openOperatingLineDatabase(databasePath);
+      first.appendEvent(candidateEvent);
+      expect(
+        first.recordCompanionState({
+          reportId: randomUUID(),
+          adapterId: 'blender',
+          instanceId,
+          sequence: 1,
+          plan: { id: 'snowman', revision: 3 },
+          planContentSha256: basePlanContentSha256,
+        }),
+      ).toBe('accepted');
+      expect(first.commitProcedureExecutionFailureReplanReview(input)).toEqual({
+        result: 'accepted',
+        review: payload,
+      });
+      expect(first.getGuideRevisionRequest(revisionRequestId)).toEqual(revision);
+      expect(first.getGuideReplanProposalForRequest(revisionRequestId)).toEqual(proposal);
+      expect(first.getProcedureExecutionFailureReplanReview(requestId)).toEqual(payload);
+      expect(
+        first.listExecutionEventsByTypes([
+          'guide.revision.requested',
+          'guide.proposal.created',
+          'guide.revision.proposed',
+          'procedure.execution-failure-replan.reviewed',
+        ]),
+      ).toHaveLength(4);
+      first.close();
+
+      const reopened = openOperatingLineDatabase(databasePath);
+      expect(reopened.commitProcedureExecutionFailureReplanReview(input)).toEqual({
+        result: 'duplicate',
+        review: payload,
+      });
+      expect(
+        reopened.commitProcedureExecutionFailureReplanReview({
+          ...input,
+          review: {
+            ...input.review,
+            reviewId: randomUUID(),
+            decision: 'discard',
+            revisionRequestId: undefined,
+            proposalId: undefined,
+            payload: { ...payload, finalStatus: 'discarded' },
+          },
+          currentPlan: undefined,
+          revisionRequest: undefined,
+          proposal: undefined,
+        }),
+      ).toEqual({ result: 'conflict', review: null });
+      reopened.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('records discard without proposal side effects and rolls back stale-plan acceptance', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const discardRequestId = randomUUID();
+    const discardReviewId = randomUUID();
+    const discardedAt = '2026-08-21T10:01:00.000Z';
+    const discardEvent = database.appendEvent({
+      id: `procedure-execution-failure-replan:${discardRequestId}`,
+      eventType: 'procedure.execution-failure-replan.completed',
+      payload: { candidate: 'discard-me' },
+      createdAt: '2026-08-21T10:00:00.000Z',
+    });
+    const discardPayload = {
+      requestId: discardRequestId,
+      reviewId: discardReviewId,
+      finalStatus: 'discarded',
+      proposalCreated: false,
+    };
+    const discardInput = {
+      review: {
+        requestId: discardRequestId,
+        reviewId: discardReviewId,
+        decision: 'discard' as const,
+        requestFingerprintSha256: '2'.repeat(64),
+        candidateContentSha256: '3'.repeat(64),
+        sourceBindingSha256: '4'.repeat(64),
+        reviewEvidenceBindingSha256: '5'.repeat(64),
+        adapterId: 'blender',
+        instanceId: randomUUID(),
+        basePlanId: 'snowman',
+        basePlanRevision: 3,
+        basePlanContentSha256: '6'.repeat(64),
+        reviewerSessionFingerprintSha256: '7'.repeat(64),
+        reviewedAt: discardedAt,
+        payload: discardPayload,
+      },
+      candidateEvent: discardEvent,
+    };
+    expect(database.commitProcedureExecutionFailureReplanReview(discardInput)).toEqual({
+      result: 'accepted',
+      review: discardPayload,
+    });
+    expect(database.commitProcedureExecutionFailureReplanReview(discardInput)).toEqual({
+      result: 'duplicate',
+      review: discardPayload,
+    });
+    expect(database.listLatestGuidePlanRevisions()).toEqual([]);
+
+    const acceptRequestId = randomUUID();
+    const acceptReviewId = randomUUID();
+    const revisionRequestId = randomUUID();
+    const proposalId = randomUUID();
+    const instanceId = randomUUID();
+    const candidateEvent = database.appendEvent({
+      id: `procedure-execution-failure-replan:${acceptRequestId}`,
+      eventType: 'procedure.execution-failure-replan.completed',
+      payload: { candidate: 'stale-plan' },
+      createdAt: '2026-08-21T10:02:00.000Z',
+    });
+    database.recordCompanionState({
+      reportId: randomUUID(),
+      adapterId: 'blender',
+      instanceId,
+      sequence: 1,
+      plan: { id: 'snowman', revision: 4 },
+      planContentSha256: '8'.repeat(64),
+    });
+    const revision = {
+      ...revisionRequest(revisionRequestId),
+      instanceId,
+      basePlan: { id: 'snowman', revision: 3 },
+    };
+    const proposal = {
+      ...guideProposal('snowman', 4),
+      proposalId,
+      targetInstanceId: instanceId,
+      revisionRequestId,
+      catalogVersion: revision.catalogVersion,
+    };
+    expect(
+      database.commitProcedureExecutionFailureReplanReview({
+        review: {
+          requestId: acceptRequestId,
+          reviewId: acceptReviewId,
+          decision: 'accept',
+          requestFingerprintSha256: '9'.repeat(64),
+          candidateContentSha256: 'a'.repeat(64),
+          sourceBindingSha256: 'b'.repeat(64),
+          reviewEvidenceBindingSha256: 'c'.repeat(64),
+          adapterId: 'blender',
+          instanceId,
+          basePlanId: 'snowman',
+          basePlanRevision: 3,
+          basePlanContentSha256: 'd'.repeat(64),
+          reviewerSessionFingerprintSha256: 'e'.repeat(64),
+          revisionRequestId,
+          proposalId,
+          reviewedAt: '2026-08-21T10:03:00.000Z',
+          payload: { requestId: acceptRequestId, reviewId: acceptReviewId },
+        },
+        candidateEvent,
+        currentPlan: {
+          adapterId: 'blender',
+          instanceId,
+          planId: 'snowman',
+          revision: 3,
+          contentSha256: 'd'.repeat(64),
+        },
+        revisionRequest: revision,
+        proposal,
+      }),
+    ).toEqual({ result: 'conflict', review: null });
+    expect(database.getProcedureExecutionFailureReplanReview(acceptRequestId)).toBeNull();
+    expect(database.getGuideRevisionRequest(revisionRequestId)).toBeNull();
+    expect(database.getGuideProposal(proposalId)).toBeNull();
+    database.close();
+  });
+
   it('stores one pending goal request per instance and atomically links its targeted proposal', () => {
     const database = openOperatingLineDatabase(':memory:');
     const request = goalRequest();
@@ -3204,7 +3468,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 19,
+        count: 20,
       });
       expect(
         inspected.prepare("PRAGMA table_list('procedure_leaf_replay_attestation_reports')").get(),

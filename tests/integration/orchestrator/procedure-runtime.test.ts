@@ -7332,6 +7332,261 @@ describe('procedure compilation runtime', () => {
       expect(injectedFailureReplanMcp.result?.content?.[0]?.text).toContain(
         'invalid_procedure_execution_failure_replan_request',
       );
+      const failureReplanReviewUrl = new URL(
+        '/api/v1/procedure/failure-replan/review',
+        runtime.baseUrl,
+      );
+      failureReplanReviewUrl.searchParams.set('requestId', rolledBackActionRequest.requestId);
+      const failureReplanReviewPreviewResponse = await fetch(failureReplanReviewUrl, {
+        headers,
+      });
+      expect(failureReplanReviewPreviewResponse.status).toBe(200);
+      const failureReplanReviewPreview = (await failureReplanReviewPreviewResponse.json()) as {
+        state: 'pending';
+        preview: {
+          status: 'reviewable';
+          requestId: string;
+          proposal: { proposalId: string };
+          evidenceBinding: {
+            candidateContentSha256: string;
+            candidateEventContentSha256: string;
+            sourceBindingSha256: string;
+            terminalActionEventContentSha256: string;
+            replayBindingContentSha256: string;
+            rollbackAttestationContentSha256: string;
+            actionCatalogVersion: string;
+            actionCatalogContentSha256: string;
+            interactionCatalogVersion: string;
+            interactionCatalogContentSha256: string;
+            adapterId: string;
+            instanceId: string;
+            failedStepId: string;
+            basePlanId: string;
+            basePlanRevision: number;
+            basePlanContentSha256: string;
+          };
+          reviewBindingSha256: string;
+          acceptance:
+            | {
+                status: 'available';
+                artifacts: {
+                  revisedPlan: { id: string; revision: number };
+                  revisionRequest: { requestId: string };
+                  guideProposal: {
+                    proposalId: string;
+                    targetInstanceId: string;
+                    plan: { id: string; revision: number };
+                  };
+                };
+              }
+            | { status: 'unavailable'; reason: string };
+        };
+      };
+      expect(failureReplanReviewPreview).toMatchObject({
+        state: 'pending',
+        preview: {
+          status: 'reviewable',
+          requestId: rolledBackActionRequest.requestId,
+          proposal: { proposalId: automaticFailureReplan.proposal.proposalId },
+          evidenceBinding: {
+            candidateContentSha256: automaticFailureReplan.proposal.integrity.contentSha256,
+            candidateEventContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            sourceBindingSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            terminalActionEventContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            replayBindingContentSha256: rolledBack.proposed.binding.integrity.contentSha256,
+            rollbackAttestationContentSha256:
+              automaticallyRolledBack.attestation.integrity.contentSha256,
+            actionCatalogVersion: blenderActionCatalog.catalogVersion,
+            actionCatalogContentSha256: createHash('sha256')
+              .update(canonicalizeProtocolJsonValue(blenderActionCatalog))
+              .digest('hex'),
+            interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+            interactionCatalogContentSha256: createHash('sha256')
+              .update(canonicalizeProtocolJsonValue(blenderInteractionCatalog))
+              .digest('hex'),
+            adapterId: 'blender',
+            instanceId: targetInstanceId,
+            failedStepId: rolledBack.replayRequest.leafId,
+            basePlanId: rolledBack.proposal.plan.id,
+            basePlanRevision: rolledBack.proposal.plan.revision,
+            basePlanContentSha256: rolledBackPlanSha256,
+          },
+          acceptance: {
+            status: 'available',
+            artifacts: {
+              revisedPlan: {
+                id: rolledBack.proposal.plan.id,
+                revision: expect.any(Number),
+              },
+              guideProposal: { targetInstanceId },
+            },
+          },
+        },
+      });
+      if (failureReplanReviewPreview.preview.acceptance.status !== 'available') {
+        throw new Error('Expected a materializable failure-replan parameter repair');
+      }
+      expect(
+        failureReplanReviewPreview.preview.acceptance.artifacts.revisedPlan.revision,
+      ).toBeGreaterThan(rolledBack.proposal.plan.revision);
+      const failureReplanReviewMcp = await callMcpTool(
+        runtime,
+        924,
+        'operatingline.procedure.failure-replan.review.get',
+        { requestId: rolledBackActionRequest.requestId },
+      );
+      expect(
+        failureReplanReviewMcp.result?.isError,
+        failureReplanReviewMcp.result?.content?.[0]?.text,
+      ).not.toBe(true);
+      expect(failureReplanReviewMcp.result?.structuredContent).toEqual(failureReplanReviewPreview);
+      const failureReplanReviewRequest = {
+        formatVersion: '1.0.0',
+        requestId: rolledBackActionRequest.requestId,
+        reviewId: randomUUID(),
+        proposalId: failureReplanReviewPreview.preview.proposal.proposalId,
+        reviewBindingSha256: failureReplanReviewPreview.preview.reviewBindingSha256,
+        decision: {
+          kind: 'accept',
+          confirmations: {
+            exactCandidateReviewed: true,
+            exactBasePlanReviewed: true,
+            noProviderCallAcknowledged: true,
+            noHostExecutionAcknowledged: true,
+          },
+        },
+        reviewedAt: new Date().toISOString(),
+      } as const;
+      const unauthenticatedFailureReplanReview = await fetch(failureReplanReviewUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(failureReplanReviewRequest),
+      });
+      expect(unauthenticatedFailureReplanReview.status).toBe(409);
+      await expect(unauthenticatedFailureReplanReview.json()).resolves.toMatchObject({
+        error: 'companion_lease_required',
+      });
+      const injectedFailureReplanReview = await fetch(failureReplanReviewUrl, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify({
+          ...failureReplanReviewRequest,
+          actionArguments: { radius: 999 },
+        }),
+      });
+      expect(injectedFailureReplanReview.status).toBe(400);
+      await expect(injectedFailureReplanReview.json()).resolves.toMatchObject({
+        error: 'invalid_procedure_execution_failure_replan_review_request',
+      });
+      const acceptedFailureReplanReviewResponse = await fetch(failureReplanReviewUrl, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(failureReplanReviewRequest),
+      });
+      expect(
+        acceptedFailureReplanReviewResponse.status,
+        JSON.stringify(await acceptedFailureReplanReviewResponse.clone().json()),
+      ).toBe(200);
+      const acceptedFailureReplanReview = (await acceptedFailureReplanReviewResponse.json()) as {
+        result: 'accepted' | 'duplicate';
+        review: Record<string, unknown> & {
+          guideProposalId: string | null;
+          revisionRequestId: string | null;
+        };
+      };
+      expect(acceptedFailureReplanReview).toMatchObject({
+        result: 'accepted',
+        review: {
+          requestId: rolledBackActionRequest.requestId,
+          reviewId: failureReplanReviewRequest.reviewId,
+          reviewRequest: failureReplanReviewRequest,
+          finalStatus: 'accepted',
+          revisionRequestId:
+            failureReplanReviewPreview.preview.acceptance.artifacts.revisionRequest.requestId,
+          guideProposalId:
+            failureReplanReviewPreview.preview.acceptance.artifacts.guideProposal.proposalId,
+          proposalCreated: true,
+          providerCalled: false,
+          hostExecutionStarted: false,
+          reviewBinding: {
+            reviewer: {
+              authentication: 'negotiated_companion_lease',
+              sessionFingerprintSha256: createHash('sha256').update(session.leaseId).digest('hex'),
+            },
+          },
+        },
+      });
+      const reviewedGuideResponse = await fetch(recoveredGuideUrl, { headers: leaseHeaders });
+      expect(reviewedGuideResponse.status).toBe(200);
+      await expect(reviewedGuideResponse.json()).resolves.toMatchObject({
+        proposal: failureReplanReviewPreview.preview.acceptance.artifacts.guideProposal,
+        proposalPlanContentSha256: computePlanContentSha256(
+          failureReplanReviewPreview.preview.acceptance.artifacts.guideProposal.plan,
+        ),
+      });
+      const duplicateFailureReplanReviewResponse = await fetch(failureReplanReviewUrl, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(failureReplanReviewRequest),
+      });
+      expect(duplicateFailureReplanReviewResponse.status).toBe(200);
+      await expect(duplicateFailureReplanReviewResponse.json()).resolves.toEqual({
+        result: 'duplicate',
+        review: acceptedFailureReplanReview.review,
+      });
+      const conflictingFailureReplanReviewResponse = await fetch(failureReplanReviewUrl, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify({
+          ...failureReplanReviewRequest,
+          reviewId: randomUUID(),
+          decision: { kind: 'discard', reason: 'Conflicting terminal review.' },
+        }),
+      });
+      expect(conflictingFailureReplanReviewResponse.status).toBe(409);
+      await expect(conflictingFailureReplanReviewResponse.json()).resolves.toMatchObject({
+        error: 'procedure_execution_failure_replan_review_conflict',
+      });
+      const reviewedFailureReplanStatus = await (
+        await fetch(failureReplanReviewUrl, { headers })
+      ).json();
+      expect(reviewedFailureReplanStatus).toEqual({
+        state: 'reviewed',
+        review: acceptedFailureReplanReview.review,
+      });
+      const reviewedFailureReplanMcp = await callMcpTool(
+        runtime,
+        925,
+        'operatingline.procedure.failure-replan.review.get',
+        { requestId: rolledBackActionRequest.requestId },
+      );
+      expect(reviewedFailureReplanMcp.result?.isError).not.toBe(true);
+      expect(reviewedFailureReplanMcp.result?.structuredContent).toEqual(
+        reviewedFailureReplanStatus,
+      );
+      const noReviewActionDelivery = companionActionPollDeliverySchema.parse(
+        await (await fetch(rolledBackActionPollUrl, { headers: leaseHeaders })).json(),
+      );
+      expect(noReviewActionDelivery.request).toBeNull();
+      const reviewedProposalRejection = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify({
+            protocolVersion: guideProtocolVersion,
+            decisionId: randomUUID(),
+            proposalId:
+              failureReplanReviewPreview.preview.acceptance.artifacts.guideProposal.proposalId,
+            adapterId: 'blender',
+            instanceId: targetInstanceId,
+            decision: 'rejected',
+            occurredAt: new Date().toISOString(),
+          }),
+        },
+      );
+      expect(reviewedProposalRejection.status).toBe(200);
+      await expect(reviewedProposalRejection.json()).resolves.toEqual({ result: 'accepted' });
       const duplicateRolledBack = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
         {
@@ -7351,7 +7606,7 @@ describe('procedure compilation runtime', () => {
       );
       const rolledBackActionStatus = await callMcpTool(
         runtime,
-        924,
+        926,
         'operatingline.blender.action.status',
         { requestId: rolledBackActionRequest.requestId },
       );
@@ -7382,7 +7637,8 @@ describe('procedure compilation runtime', () => {
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
           goal: '最多尝试两次创建 UV Sphere，每次失败后先自动回退。',
           treeId: 'snowman.eye.left.procedure',
-          revision: 3,
+          revision:
+            failureReplanReviewPreview.preview.acceptance.artifacts.revisedPlan.revision + 1,
           locale: 'zh-CN',
         }),
       });

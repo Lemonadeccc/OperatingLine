@@ -385,13 +385,15 @@ export interface ProcedureExecutionFailurePolicyEvidenceResolver {
   resolve(requestId: string): TrustedProcedureExecutionFailureReplanResolution | null;
 }
 
-const storedFailureReplanSchema = z.strictObject({
+export const storedProcedureExecutionFailureReplanSchema = z.strictObject({
   requestSha256: sha256Schema,
   sourceBindingSha256: sha256Schema.optional(),
   envelope: procedureExecutionFailureEnvelopeSchema.nullable(),
   outcome: procedureExecutionFailureReplanOutcomeSchema,
 });
-type StoredFailureReplan = z.infer<typeof storedFailureReplanSchema>;
+export type StoredProcedureExecutionFailureReplan = z.infer<
+  typeof storedProcedureExecutionFailureReplanSchema
+>;
 
 type FailureReplanDatabase = Pick<
   OperatingLineDatabase,
@@ -986,11 +988,11 @@ export function createProcedureExecutionFailureReplanCoordinator(
       'Failure replan Proposal TTL must be between one millisecond and fifteen minutes',
     );
   }
-  const stored = new Map<string, StoredFailureReplan>();
+  const stored = new Map<string, StoredProcedureExecutionFailureReplan>();
   for (const event of options.database.listExecutionEventsByTypes([failureReplanEventType])) {
     const prefix = 'procedure-execution-failure-replan:';
     if (!event.id.startsWith(prefix)) throw new Error('Stored failure replan event id is invalid');
-    const payload = storedFailureReplanSchema.parse(event.payload);
+    const payload = storedProcedureExecutionFailureReplanSchema.parse(event.payload);
     const requestId = event.id.slice(prefix.length);
     if (payload.envelope !== null && payload.envelope.requestId !== requestId) {
       throw new Error('Stored failure replan envelope requestId is invalid');
@@ -1005,7 +1007,9 @@ export function createProcedureExecutionFailureReplanCoordinator(
     stored.set(requestId, deepFreeze(payload));
   }
 
-  const currentOutcome = (record: StoredFailureReplan): ProcedureExecutionFailureReplanOutcome =>
+  const currentOutcome = (
+    record: StoredProcedureExecutionFailureReplan,
+  ): ProcedureExecutionFailureReplanOutcome =>
     record.outcome.kind !== 'no_repair_available' &&
     Date.parse(record.outcome.proposal.expiresAt) <= Date.parse(now())
       ? { kind: 'no_repair_available', reason: 'proposal_expired' }
@@ -1041,7 +1045,7 @@ export function createProcedureExecutionFailureReplanCoordinator(
       ),
     );
     const payload = deepFreeze(
-      storedFailureReplanSchema.parse({
+      storedProcedureExecutionFailureReplanSchema.parse({
         requestSha256,
         sourceBindingSha256: sha256({
           request,
@@ -1080,6 +1084,8 @@ export function createProcedureExecutionFailureReplanCoordinator(
       const record = stored.get(requestId);
       return record === undefined ? null : currentOutcome(record);
     },
+    getRaw: (requestId: string) => stored.get(requestId)?.outcome ?? null,
+    getStored: (requestId: string) => stored.get(requestId) ?? null,
   };
 }
 

@@ -437,6 +437,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.replay.finalize' },
             { name: 'operatingline.procedure.replay.failure-recovery.finalize' },
             { name: 'operatingline.procedure.failure-replan.get' },
+            { name: 'operatingline.procedure.failure-replan.review.get' },
             { name: 'operatingline.procedure.replay.current-state.request' },
             { name: 'operatingline.procedure.replay.current-state.get' },
             { name: 'operatingline.procedure.compile' },
@@ -619,6 +620,23 @@ describe('OperatingLine runtime', () => {
         required: ['requestId'],
         additionalProperties: false,
       });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.failure-replan.review.get',
+        ),
+      ).toMatchObject({
+        description: expect.stringContaining('read-only'),
+        inputSchema: {
+          type: 'object',
+          required: ['requestId'],
+          additionalProperties: false,
+        },
+      });
+      expect(
+        toolsPayload.result?.tools
+          ?.map((tool) => tool.name)
+          .filter((name) => name?.startsWith('operatingline.procedure.failure-replan.review')),
+      ).toEqual(['operatingline.procedure.failure-replan.review.get']);
       expect(
         toolsPayload.result?.tools?.find(
           (tool) => tool.name === 'operatingline.procedure.shortcut-proof.propose',

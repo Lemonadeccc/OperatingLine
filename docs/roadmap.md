@@ -656,8 +656,15 @@
           选择携带 `proofExecution` 的备用轨迹；启动可幂等补齐，只读查询不接受 caller evidence，不调用 Provider、
           不创建/接受 Proposal、不执行 Blender。见
           [ADR 0102](adr/0102-trusted-execution-failure-replan.md)。
-    - [ ] 将失败候选经带人工身份的一次性审查事务转为 GuideProposal，并在确定性候选耗尽后复用签名
-          Provider authority 触发语义局部重规划；自动应用或自动执行仍禁止。
+    - [x] 将确定性参数修复候选经带人工身份的一次性审查事务转为待审 GuideProposal：只读 MCP/HTTP 预览
+          通过严格 `evidenceBinding` 明示并绑定候选、当前 Plan identity/content hash、目录版本/content hash
+          与完整失败证据 hash；唯一 mutation 使用目标 Companion 当前 lease 的 HTTP
+          POST。accept 原子写入 revision request、下一 revision 的 pending Proposal 与终态收据，discard 无
+          Proposal 副作用；两者都不调用 Provider、不接受 Proposal、不执行 Blender。策略/语义接受继续
+          fail closed。见 [ADR 0103](adr/0103-human-reviewed-execution-failure-replan.md)。
+    - [ ] 为 GuidePlan 增加可审查的 execution-track 表达，再允许 proof-backed strategy switch 物化；在
+          确定性候选耗尽后复用签名、单次消费的 Provider authority 触发语义局部重规划。自动应用或自动执行
+          仍禁止。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
         证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，
         仅在固定 `0.8` 阈值后进行第二次自动局部树 refinement。完整 Provider tree 经过 scope sanitization、

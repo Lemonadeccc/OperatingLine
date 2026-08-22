@@ -258,6 +258,14 @@ import {
   procedureExecutionFailureReplanOutcomeSchema,
   procedureExecutionFailureReplanRequestSchema,
 } from './procedure-execution-failure-replan.js';
+import {
+  createProcedureExecutionFailureReplanReviewCoordinator,
+  procedureExecutionFailureReplanReviewedEventSchema,
+  procedureExecutionFailureReplanReviewCommitResponseSchema,
+  procedureExecutionFailureReplanReviewPreviewRequestSchema,
+  procedureExecutionFailureReplanReviewRequestSchema,
+  procedureExecutionFailureReplanReviewStatusSchema,
+} from './procedure-execution-failure-replan-review.js';
 import { createProcedureExecutionFailureReplanRuntimeResolver } from './procedure-execution-failure-replan-runtime.js';
 import {
   materializeProcedureAuthoringCandidate,
@@ -3026,6 +3034,295 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       procedureExecutionFailureReplanCoordinator.derive({ requestId });
     }
 
+    const resolveNextGuideRevision = (planId: string, baseRevision: number): number =>
+      Math.max(
+        baseRevision,
+        latestPublishedRevisionByPlanId.get(planId) ?? 0,
+        latestProposedRevisionByPlanId.get(planId) ?? 0,
+        activePlan?.id === planId ? activePlan.revision : 0,
+      ) + 1;
+    const storedFailureActionEventSchema = z.strictObject({
+      execution: companionActionExecutionStatusSchema,
+      sessionFingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+    });
+    const resolveProcedureExecutionFailureReplanReviewEvidence = (requestId: string) => {
+      const resolution = procedureExecutionFailureReplanResolver.resolve(requestId);
+      const stored = procedureExecutionFailureReplanCoordinator.getStored(requestId);
+      const candidateEvent = database.getExecutionEvent(
+        `procedure-execution-failure-replan:${requestId}`,
+      );
+      if (
+        resolution === null ||
+        stored === null ||
+        stored.sourceBindingSha256 === undefined ||
+        stored.envelope === null ||
+        candidateEvent === null ||
+        candidateEvent.eventType !== 'procedure.execution-failure-replan.completed' ||
+        !isDeepStrictEqual(candidateEvent.payload, stored)
+      ) {
+        return null;
+      }
+      const terminalEvents = database
+        .listExecutionEventsByTypes(['blender.action-execution.completed'])
+        .flatMap((event) => {
+          const parsed = storedFailureActionEventSchema.safeParse(event.payload);
+          return parsed.success && parsed.data.execution.requestId === requestId
+            ? [{ event, payload: parsed.data }]
+            : [];
+        });
+      if (terminalEvents.length !== 1) return null;
+      const terminal = terminalEvents[0]!;
+      const binding = procedureLeafReplayBindingSchema.safeParse(
+        database.getProcedureLeafReplay(stored.envelope.replayId),
+      );
+      const attestation = procedureLeafReplayFailureRecoveryAttestationSchema.safeParse(
+        database.getProcedureLeafReplayAttestation(stored.envelope.replayId),
+      );
+      const currentState = listKnownCompanionStates().find(
+        (report) =>
+          report.adapterId === terminal.payload.execution.target.adapterId &&
+          report.instanceId === terminal.payload.execution.target.instanceId,
+      );
+      if (
+        !binding.success ||
+        !attestation.success ||
+        currentState?.plan === null ||
+        currentState?.plan === undefined ||
+        currentState.planContentSha256 === null ||
+        computePlanContentSha256(binding.data.proposal.plan) !== currentState.planContentSha256 ||
+        currentState.plan.id !== stored.envelope.planId ||
+        currentState.plan.revision !== stored.envelope.planRevision ||
+        currentState.planContentSha256 !== stored.envelope.planContentSha256 ||
+        resolution.currentPlanContentSha256 !== currentState.planContentSha256 ||
+        resolution.currentAcceptedRevision !== currentState.plan.revision ||
+        binding.data.integrity.contentSha256 !== attestation.data.bindingContentSha256 ||
+        attestation.data.outcome !== 'automatically_rolled_back' ||
+        !isDeepStrictEqual(terminal.payload.execution, resolution.failureEvidence.execution)
+      ) {
+        return null;
+      }
+      return {
+        currentPlan: binding.data.proposal.plan,
+        failedStepId: stored.envelope.stepId,
+        targetAdapterId: terminal.payload.execution.target.adapterId,
+        targetInstanceId: terminal.payload.execution.target.instanceId,
+        actionCatalog: resolution.actionCatalog,
+        interactionCatalog: resolution.interactionCatalog,
+        candidateEventContentSha256: computeProcedureTreeContentSha256(candidateEvent),
+        sourceBindingSha256: stored.sourceBindingSha256,
+        terminalActionEventContentSha256: computeProcedureTreeContentSha256(terminal.event),
+        replayBindingContentSha256: binding.data.integrity.contentSha256,
+        rollbackAttestationContentSha256: attestation.data.integrity.contentSha256,
+      };
+    };
+    const procedureExecutionFailureReplanReviewCoordinator =
+      createProcedureExecutionFailureReplanReviewCoordinator({
+        outcomes: {
+          get: (requestId) => procedureExecutionFailureReplanCoordinator.getRaw(requestId),
+        },
+        trustedEvidence: { resolve: resolveProcedureExecutionFailureReplanReviewEvidence },
+        resolveTargetRevision: resolveNextGuideRevision,
+      });
+    const getProcedureExecutionFailureReplanReviewStatus = (requestId: string) => {
+      const storedReview = database.getProcedureExecutionFailureReplanReview(requestId);
+      return procedureExecutionFailureReplanReviewStatusSchema.parse(
+        storedReview === null
+          ? {
+              state: 'pending',
+              preview: procedureExecutionFailureReplanReviewCoordinator.preview({ requestId }),
+            }
+          : { state: 'reviewed', review: storedReview },
+      );
+    };
+    const commitProcedureExecutionFailureReplanReview = (
+      reviewRequest: ReturnType<typeof procedureExecutionFailureReplanReviewRequestSchema.parse>,
+      reviewerSessionFingerprintSha256: string,
+    ) => {
+      const existingReviewInput = database.getProcedureExecutionFailureReplanReview(
+        reviewRequest.requestId,
+      );
+      if (existingReviewInput !== null) {
+        const existingReview =
+          procedureExecutionFailureReplanReviewedEventSchema.parse(existingReviewInput);
+        if (
+          !isDeepStrictEqual(existingReview.reviewRequest, reviewRequest) ||
+          existingReview.reviewBinding.reviewer.sessionFingerprintSha256 !==
+            reviewerSessionFingerprintSha256
+        ) {
+          throw new Error('Failure replan candidate already has a different terminal review');
+        }
+        return procedureExecutionFailureReplanReviewCommitResponseSchema.parse({
+          result: 'duplicate',
+          review: existingReview,
+        });
+      }
+
+      const evidence = resolveProcedureExecutionFailureReplanReviewEvidence(
+        reviewRequest.requestId,
+      );
+      const stored = procedureExecutionFailureReplanCoordinator.getStored(reviewRequest.requestId);
+      const outcome = procedureExecutionFailureReplanCoordinator.getRaw(reviewRequest.requestId);
+      const candidateEvent = database.getExecutionEvent(
+        `procedure-execution-failure-replan:${reviewRequest.requestId}`,
+      );
+      if (
+        evidence === null ||
+        stored === null ||
+        stored.sourceBindingSha256 === undefined ||
+        stored.envelope === null ||
+        outcome === null ||
+        outcome.kind === 'no_repair_available' ||
+        candidateEvent === null
+      ) {
+        throw new Error('Failure replan review lost its exact trusted candidate evidence');
+      }
+      const reviewResult = procedureExecutionFailureReplanReviewCoordinator.review(reviewRequest);
+      const accepted = reviewResult.status === 'accepted';
+      const revisionRequest = accepted ? reviewResult.artifacts.revisionRequest : undefined;
+      const guideProposal = accepted ? reviewResult.artifacts.guideProposal : undefined;
+      if (accepted) {
+        guideRevisionRequestService.validate(revisionRequest!);
+        validateProposalTarget(guideProposal!.plan, guideProposal!.targetAdapterId);
+        const catalog = actionCatalogRegistry.get({
+          targetAdapterId: guideProposal!.targetAdapterId,
+          catalogVersion: guideProposal!.catalogVersion,
+        });
+        const replayBinding = procedureLeafReplayBindingSchema.parse(
+          database.getProcedureLeafReplay(stored.envelope.replayId),
+        );
+        if (replayBinding.integrity.contentSha256 !== evidence.replayBindingContentSha256) {
+          throw new Error('Reviewed failure repair no longer matches its exact replay binding');
+        }
+        const preparedReplay = prepareProcedureLeafReplay(
+          replayBinding.request,
+          replayBinding.materialization,
+          catalog,
+        );
+        const replayLeaf = replayBinding.materialization.tree.nodes.find(
+          (node) => node.id === replayBinding.leafId,
+        );
+        const replayPlanningOptions: InternalPlanningQualityOptions =
+          (preparedReplay.actionName === 'blender.modifier.add_mirror' ||
+            preparedReplay.actionName === 'blender.modifier.add_solidify') &&
+          replayLeaf?.kind === 'leaf' &&
+          replayLeaf.action?.name === preparedReplay.actionName &&
+          typeof replayLeaf.action.arguments['targetId'] === 'string'
+            ? {
+                verifiedExternalResourceConsumers: [
+                  {
+                    consumerStepId: replayLeaf.id,
+                    resourceId: replayLeaf.action.arguments['targetId'],
+                    resourceType: 'OBJECT',
+                  },
+                ],
+                managedActionReplayAuthority: {
+                  replayId: replayBinding.replayId,
+                  leafId: replayLeaf.id,
+                  actionName: preparedReplay.actionName,
+                  targetId: replayLeaf.action.arguments['targetId'],
+                },
+              }
+            : {};
+        validateGuidePlanAgainstActionCatalog(guideProposal!.plan, catalog);
+        const planningQuality = evaluatePlanningQuality(
+          planningQualityEvaluationRequestSchema.parse({
+            targetAdapterId: guideProposal!.targetAdapterId,
+            catalogVersion: catalog.catalogVersion,
+            goal: preparedReplay.planning.goal,
+            requiredPhaseIds: preparedReplay.planning.requiredPhaseIds,
+            ...(preparedReplay.planning.capabilityCoverage === undefined
+              ? {}
+              : { capabilityCoverage: preparedReplay.planning.capabilityCoverage }),
+            plan: guideProposal!.plan,
+          }),
+          catalog,
+          replayPlanningOptions,
+        );
+        if (!planningQuality.valid) {
+          throw new Error('Reviewed failure repair no longer passes the planning-quality baseline');
+        }
+      }
+      const requestFingerprintSha256 = computeProcedureTreeContentSha256(reviewRequest);
+      const reviewedEvent = procedureExecutionFailureReplanReviewedEventSchema.parse({
+        formatVersion: '1.0.0',
+        operation: 'procedure_execution_failure_replan_review',
+        requestId: reviewRequest.requestId,
+        reviewId: reviewRequest.reviewId,
+        requestFingerprintSha256,
+        reviewBinding: {
+          ...reviewResult.evidenceBinding,
+          reviewEvidenceBindingSha256: reviewRequest.reviewBindingSha256,
+          reviewer: {
+            authentication: 'negotiated_companion_lease',
+            sessionFingerprintSha256: reviewerSessionFingerprintSha256,
+          },
+        },
+        reviewRequest,
+        finalStatus: accepted ? 'accepted' : 'discarded',
+        revisionRequestId: revisionRequest?.requestId ?? null,
+        guideProposalId: guideProposal?.proposalId ?? null,
+        proposalCreated: accepted,
+        providerCalled: false,
+        hostExecutionStarted: false,
+        occurredAt: reviewRequest.reviewedAt,
+      });
+      const persisted = database.commitProcedureExecutionFailureReplanReview({
+        review: {
+          requestId: reviewRequest.requestId,
+          reviewId: reviewRequest.reviewId,
+          decision: accepted ? 'accept' : 'discard',
+          requestFingerprintSha256,
+          candidateContentSha256: outcome.proposal.integrity.contentSha256,
+          sourceBindingSha256: evidence.sourceBindingSha256,
+          reviewEvidenceBindingSha256: reviewRequest.reviewBindingSha256,
+          adapterId: evidence.targetAdapterId,
+          instanceId: evidence.targetInstanceId,
+          basePlanId: evidence.currentPlan.id,
+          basePlanRevision: evidence.currentPlan.revision,
+          basePlanContentSha256: computePlanContentSha256(evidence.currentPlan),
+          reviewerSessionFingerprintSha256,
+          ...(revisionRequest === undefined
+            ? {}
+            : { revisionRequestId: revisionRequest.requestId }),
+          ...(guideProposal === undefined ? {} : { proposalId: guideProposal.proposalId }),
+          reviewedAt: reviewRequest.reviewedAt,
+          payload: reviewedEvent,
+        },
+        candidateEvent: {
+          id: candidateEvent.id,
+          eventType: candidateEvent.eventType,
+          payload: candidateEvent.payload,
+          createdAt: candidateEvent.createdAt,
+        },
+        ...(accepted
+          ? {
+              currentPlan: {
+                adapterId: evidence.targetAdapterId,
+                instanceId: evidence.targetInstanceId,
+                planId: evidence.currentPlan.id,
+                revision: evidence.currentPlan.revision,
+                contentSha256: computePlanContentSha256(evidence.currentPlan),
+              },
+              revisionRequest,
+              proposal: guideProposal,
+            }
+          : {}),
+      });
+      if (persisted.result === 'conflict' || persisted.review === null) {
+        throw new Error('Failure replan review conflicts with current durable state');
+      }
+      const durableReview = procedureExecutionFailureReplanReviewedEventSchema.parse(
+        persisted.review,
+      );
+      if (accepted) {
+        latestProposedRevisionByPlanId.set(guideProposal!.plan.id, guideProposal!.plan.revision);
+      }
+      return procedureExecutionFailureReplanReviewCommitResponseSchema.parse({
+        result: persisted.result,
+        review: durableReview,
+      });
+    };
+
     const finalizeProcedureLeafReplayFailureRecoveryWithReplan = (
       request: ReturnType<typeof procedureLeafReplayFailureRecoveryFinalizeRequestSchema.parse>,
     ) => {
@@ -3792,13 +4089,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       database,
       actionCatalogRegistry,
       listCompanionStates,
-      resolveTargetRevision: (planId, baseRevision) =>
-        Math.max(
-          baseRevision,
-          latestPublishedRevisionByPlanId.get(planId) ?? 0,
-          latestProposedRevisionByPlanId.get(planId) ?? 0,
-          activePlan?.id === planId ? activePlan.revision : 0,
-        ) + 1,
+      resolveTargetRevision: resolveNextGuideRevision,
       completedGeneration: (requestId) =>
         plannerReplanGenerationCoordinator?.completedResult(requestId) ?? null,
       createProposal,
@@ -5809,6 +6100,43 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return {
             content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
             structuredContent: outcome,
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.failure-replan.review.get',
+        {
+          description:
+            'Return the exact read-only human-review binding and terminal review status for one trusted failure-replan candidate. Parameter repair may produce preview-only GuideProposal artifacts; strategy and semantic candidates remain discardable but cannot be accepted. This tool never mutates review state, calls a Provider, or executes Blender.',
+          inputSchema: deferMcpInputValidation(
+            procedureExecutionFailureReplanReviewPreviewRequestSchema,
+          ),
+          outputSchema: procedureExecutionFailureReplanReviewStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureExecutionFailureReplanReviewPreviewRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_execution_failure_replan_review_request',
+                    message: 'Failure replan review status request violates the strict contract',
+                  }),
+                },
+              ],
+            };
+          }
+          const status = getProcedureExecutionFailureReplanReviewStatus(
+            parsedRequest.data.requestId,
+          );
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(status) }],
+            structuredContent: status,
           };
         },
       );
@@ -7920,6 +8248,93 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             message: 'No trusted automatic failure replan exists for this request',
           })
         : outcome;
+    });
+    runtimeApp.get('/api/v1/procedure/failure-replan/review', async (request, reply) => {
+      const parsedRequest = procedureExecutionFailureReplanReviewPreviewRequestSchema.safeParse(
+        request.query,
+      );
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_execution_failure_replan_review_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      return getProcedureExecutionFailureReplanReviewStatus(parsedRequest.data.requestId);
+    });
+    runtimeApp.post('/api/v1/procedure/failure-replan/review', async (request, reply) => {
+      const parsedRequest = procedureExecutionFailureReplanReviewRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_execution_failure_replan_review_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      const existingReviewInput = database.getProcedureExecutionFailureReplanReview(
+        parsedRequest.data.requestId,
+      );
+      const existingReview =
+        existingReviewInput === null
+          ? null
+          : procedureExecutionFailureReplanReviewedEventSchema.parse(existingReviewInput);
+      const evidence =
+        existingReview === null
+          ? resolveProcedureExecutionFailureReplanReviewEvidence(parsedRequest.data.requestId)
+          : null;
+      const target =
+        existingReview === null
+          ? evidence === null
+            ? null
+            : {
+                adapterId: evidence.targetAdapterId,
+                instanceId: evidence.targetInstanceId,
+              }
+          : {
+              adapterId: existingReview.reviewBinding.adapterId,
+              instanceId: existingReview.reviewBinding.instanceId,
+            };
+      if (target === null) {
+        return reply.code(409).send({
+          error: 'procedure_execution_failure_replan_review_unavailable',
+          message: 'Failure replan review lacks exact current trusted target evidence',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Failure replan review requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorize(
+          leaseHeader,
+          target.adapterId,
+          target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'companion_session_identity_mismatch',
+            message: 'Failure replan review requires the current Guide protocol session',
+          });
+        }
+        const reviewerSessionFingerprintSha256 = createHash('sha256')
+          .update(leaseHeader)
+          .digest('hex');
+        return commitProcedureExecutionFailureReplanReview(
+          parsedRequest.data,
+          reviewerSessionFingerprintSha256,
+        );
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        return reply.code(409).send({
+          error: 'procedure_execution_failure_replan_review_conflict',
+          message: error instanceof Error ? error.message : 'Failure replan review failed',
+        });
+      }
     });
     runtimeApp.post('/api/v1/procedure/replay/current-state/request', async (request, reply) => {
       const parsedRequest = procedureLeafReplayCurrentStateRequestSchema.safeParse(request.body);

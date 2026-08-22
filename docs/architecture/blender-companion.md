@@ -219,6 +219,19 @@ Runtime 只会把唯一匹配 terminal managed-action failure 的 `failed_rolled
 failure-replan resolver；它以精确 replay/catalog 证据生成 proposal-only 参数或 proof-backed 轨迹候选，且
 不会向 Companion 下发新的 action。只读查询和重启回填见
 [ADR 0102](../adr/0102-trusted-execution-failure-replan.md)。
+候选审查同样不把 MCP 客户端变成宿主执行权威：
+`operatingline.procedure.failure-replan.review.get` 只能读取明示当前 Plan identity/content hash、目录版本/content
+hash 和完整失败证据 hash 的严格 `evidenceBinding`，以及预览或终态
+收据；没有 mutating MCP review tool。接受或丢弃只能通过 HTTP POST，并要求
+`x-operatingline-companion-lease` 属于候选绑定的 adapter/instance 且协商当前 Guide protocol。Runtime 只保存
+lease 的 SHA-256 fingerprint，不把 lease 写进事件。
+
+参数修复接受会原子创建下一 revision 的 GuideRevisionRequest 和 pending GuideProposal，之后仍由 Blender
+现有 Proposal UI 独立预览并 Accept/Reject；审查本身不会安装 Plan、调用 Provider、排队 action 或触发
+Companion timer 执行。discard 不创建 revision 或 Proposal。策略切换在 GuidePlan 尚不能表达 execution track
+时只可 discard；语义候选在没有签名 Provider authority 时也不能接受。候选过期只禁止 accept，当前证据仍
+有效时仍可 discard；Plan、目录、rollback 证据或目标 lease 漂移则 fail closed。见
+[ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md)。
 见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与

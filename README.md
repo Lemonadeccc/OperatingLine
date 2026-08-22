@@ -1135,10 +1135,18 @@ checkpoint，全部耗尽则报告带 `exhausted` 证据的 `failed_rolled_back`
 异常不会自动重试。若同一 managed action 的终态失败随后以可信 attestation 证明已经自动回退，Runtime 会
 唯一关联不可变 replay/action/report 证据，并从精确目录和同一叶节点生成一个待审的参数修复或 proof-backed
 策略切换候选；`operatingline.procedure.failure-replan.get` 只能读取它。该阶段不调用 Provider、不创建或接受
-GuideProposal，也不再次执行 Blender；保留现场、回退失败、证据歧义和目录漂移都会 fail closed。语义局部
-重规划及候选审查/应用仍需要后续显式授权和事务门。见
+GuideProposal，也不再次执行 Blender；保留现场、回退失败、证据歧义和目录漂移都会 fail closed。
+`operatingline.procedure.failure-replan.review.get` 与
+`GET /api/v1/procedure/failure-replan/review?requestId=...` 可只读取得绑定候选、当前 Plan identity/content
+hash、目录版本/content hash 和完整失败证据 hash 的严格 `evidenceBinding`，以及审查预览或终态收据。唯一可变入口 `POST /api/v1/procedure/failure-replan/review` 必须携带目标实例当前
+协商的 Companion lease，并原样提交 `proposalId`、`reviewBindingSha256` 与一次性 `reviewId`。参数修复通过
+四项显式确认后，Runtime 才在同一 SQLite 事务中写入修订请求、下一 revision 的待审 GuideProposal 与审查
+收据；它不会接受 Proposal、调用 Provider 或启动 Blender action。discard 只写审查收据，不创建 Proposal；
+策略切换因 GuidePlan 尚无 execution-track 表达而拒绝接受，语义候选则继续要求签名 Provider authority。
+Plan/目录/证据漂移、过期接受、重复冲突、活动对话或已有待审 Proposal 都 fail closed。见
 [ADR 0074](docs/adr/0074-bounded-observation-retries.md) 与
-[ADR 0102](docs/adr/0102-trusted-execution-failure-replan.md)。
+[ADR 0102](docs/adr/0102-trusted-execution-failure-replan.md) 与
+[ADR 0103](docs/adr/0103-human-reviewed-execution-failure-replan.md)。
 
 `guide.publish` 直接发布路径在运行中收到更高 revision 时，Extension 不会因为“收到计划”而
 自动回退场景。该受信任更新会显示为 pending，用户 Back 到起点后才会安装。`guide.propose`

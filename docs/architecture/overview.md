@@ -74,6 +74,14 @@ GuideProposal
   ├─ immutable GuidePlan revision
   └─ per-companion accepted/rejected decision
 
+TrustedFailureReplanReview
+  ├─ exact candidate/current Plan/catalog/failure-evidence hash binding
+  ├─ read-only HTTP/MCP preview and terminal status
+  ├─ Companion-lease-authenticated, one-shot HTTP accept/discard
+  ├─ parameter repair → atomic revision request + pending GuideProposal
+  ├─ strategy/semantic accept fail closed; discard has no proposal side effect
+  └─ no Provider call, GuideProposal acceptance, or host execution
+
 ActionCatalog
   ├─ adapterId + catalogVersion
   ├─ strict argument schemas + resource effects
@@ -578,7 +586,19 @@ replay finalize 复用同一 validator 并固化认证 receipt，二者都不证
 才进入确定性 failure-replan 推导。Resolver 从 durable action event、replay binding、attestation 与精确安装目录
 重建证据，要求 execution/Plan/step/report 唯一一致；参数候选来自服务端 schema policy，备用策略只来自同叶
 携带 `proofExecution` 的轨迹。结果是可过期、只读、待审候选，不调用 Provider、不创建 Proposal、也不执行
-Blender。见 [ADR 0102](../adr/0102-trusted-execution-failure-replan.md)。
+Blender。审查预览通过严格 `evidenceBinding` 明示当前 GuidePlan identity/content hash、Action/Interaction
+Catalog 版本/content hash，以及 candidate、terminal action event、replay binding 和 rollback attestation 的
+SHA-256；`reviewBindingSha256` 再覆盖该公开对象和可接受 artifacts。MCP `operatingline.procedure.failure-replan.review.get` 与 HTTP
+GET 只读取预览或终态收据；审查决策只允许由精确目标实例的当前 Companion lease 通过 HTTP POST 提交。
+
+只有仍有效且能无歧义改写同一 action 参数和 Observation obligations 的 `parameter_repair` 可以接受。Runtime
+在 `BEGIN IMMEDIATE` 事务内再次检查当前 Plan、下一 revision、活动对话、现有修订请求和待审 Proposal，然后
+原子写入 GuideRevisionRequest、pending GuideProposal 与唯一终态审查事件。该接受不是 GuideProposal
+acceptance，也不会投递或执行 Blender action。discard 只写审查记录；重复的完全相同请求返回 duplicate，
+不同决策或绑定冲突。`strategy_switch` 在 GuidePlan 可表达 execution track 前不能接受，语义候选在取得签名、
+单次消费的 Provider authority 前不能接受。见
+[ADR 0102](../adr/0102-trusted-execution-failure-replan.md) 与
+[ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md)。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
 hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。Subdivision Surface `1.39.0` 的执行权
