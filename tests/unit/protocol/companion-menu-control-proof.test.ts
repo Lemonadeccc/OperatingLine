@@ -4,16 +4,25 @@ import { resolve } from 'node:path';
 import {
   companionMenuControlProofCreateRequestSchema,
   companionMenuControlProofDeliverySchema,
+  companionMenuControlProofHistoryIdentityMatchesResult,
+  companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery,
+  companionMenuControlProofHistoryTransitionReconciliationAckSchema,
+  companionMenuControlProofHistoryTransitionReconciliationDeliverySchema,
+  companionMenuControlProofHistoryTransitionReportMatchesResult,
+  companionMenuControlProofHistoryTransitionReportSchema,
   companionMenuControlProofPollDeliverySchema,
   companionMenuControlProofPollRequestSchema,
   companionMenuControlProofProgressSchema,
+  companionMenuControlProofRecoveryRequestSchema,
   companionMenuControlProofResultSchema,
   companionMenuControlProofStatusSchema,
   companionMenuControlProofTerminalReconciliationAckMatchesDelivery,
   companionMenuControlProofTerminalReconciliationAckSchema,
   companionMenuControlProofTerminalReconciliationDeliverySchema,
   companionMenuControlProofTerminalMarkerIdentity,
+  companionMenuControlProofTerminalHistoryIdentity,
   computeCompanionMenuControlProofFailureCheckpointContentSha256,
+  computeCompanionMenuControlProofHistoryTransitionContentSha256,
   computeCompanionMenuControlProofOperationReceiptContentSha256,
   computeCompanionMenuControlProofResultContentSha256,
   computeCompanionMenuControlProofTerminalMarkerContentSha256,
@@ -341,6 +350,115 @@ function result() {
   } as const;
 }
 
+function historyIdentity() {
+  const terminal = result();
+  return {
+    checkpointId: terminal.terminalEvidence.nativeUndoCheckpoint.checkpointId,
+    undoLockId: terminal.terminalEvidence.nativeUndoCheckpoint.undoLockId,
+    checkpointKind: 'success',
+    stageFingerprints: [
+      hash('b'),
+      hash('c'),
+      hash('d'),
+      hash('e'),
+      hash('f'),
+      hash('1'),
+      hash('2'),
+      hash('3'),
+      hash('a'),
+    ],
+    terminalResultContentSha256: computeCompanionMenuControlProofResultContentSha256(terminal),
+    terminalMarkerContentSha256:
+      computeCompanionMenuControlProofTerminalMarkerContentSha256(terminal),
+  } as const;
+}
+
+function historyTransition(fromCursor: number, toCursor: number, seconds = 30) {
+  const history = historyIdentity();
+  const stages = [
+    'baseline',
+    'sphere_created',
+    'location_x',
+    'location_y',
+    'location_z',
+    'scale_x',
+    'scale_y',
+    'scale_z',
+    'renamed_final',
+  ] as const;
+  return {
+    transitionId: `${seconds.toString().padStart(8, '0')}-0000-4000-8000-000000000000`,
+    checkpointId: history.checkpointId,
+    undoLockId: history.undoLockId,
+    direction: toCursor < fromCursor ? ('undo' as const) : ('redo' as const),
+    fromCursor,
+    toCursor,
+    stage: stages[toCursor]!,
+    status: toCursor === 0 ? ('restored' as const) : ('history_locked' as const),
+    sceneFingerprintSha256: history.stageFingerprints[toCursor],
+    occurredAt: `2026-08-22T10:02:${seconds.toString().padStart(2, '0')}+08:00`,
+  } as const;
+}
+
+function historyTransitionReport() {
+  const transition = historyTransition(8, 7, 30);
+  return {
+    ...delivery(),
+    kind: 'native_history_transition' as const,
+    currentLease: delivery().lease,
+    history: historyIdentity(),
+    serverAcceptedCursor: 8,
+    serverAcceptedStatus: 'history_locked' as const,
+    transition,
+    transitionContentSha256:
+      computeCompanionMenuControlProofHistoryTransitionContentSha256(transition),
+    reportedAt: '2026-08-22T10:02:31+08:00',
+  };
+}
+
+function historyReconciliationDelivery() {
+  const boundary = companionMenuControlProofTerminalHistoryIdentity(result());
+  return {
+    ...delivery(),
+    kind: 'native_history_transition_reconcile' as const,
+    recoveryId: '13572468-1357-4357-8357-135724681357',
+    replacementLease: {
+      ...delivery().lease,
+      leaseId: '24681357-2468-4468-8468-246813572468',
+      expiresAt: '2026-08-22T10:10:00+08:00',
+    },
+    history: boundary,
+    serverAcceptedCursor: 7,
+    serverAcceptedStatus: 'history_locked' as const,
+    acknowledgedTransitionContentSha256s: [historyTransitionReport().transitionContentSha256],
+    expectedMarkerContentSha256: boundary.terminalMarkerContentSha256,
+    recoveryRequestedAt: '2026-08-22T10:06:00+08:00',
+  };
+}
+
+function historyReconciliationAck() {
+  const history = historyIdentity();
+  const transition = historyTransition(7, 6, 31);
+  return {
+    ...delivery(),
+    kind: 'native_history_transition_reconcile' as const,
+    recoveryId: historyReconciliationDelivery().recoveryId,
+    history,
+    serverAcceptedCursor: 7,
+    serverAcceptedStatus: 'history_locked' as const,
+    transitions: [transition],
+    transitionContentSha256s: [
+      computeCompanionMenuControlProofHistoryTransitionContentSha256(transition),
+    ],
+    terminalResultContentSha256: history.terminalResultContentSha256,
+    expectedMarkerContentSha256: history.terminalMarkerContentSha256,
+    currentCursor: 6,
+    currentStatus: 'history_locked' as const,
+    currentSceneFingerprintSha256: history.stageFingerprints[6],
+    occurredAt: '2026-08-22T10:06:01+08:00',
+  };
+}
+
 function queuedStatus() {
   const delivered = delivery();
   const base = Object.fromEntries(
@@ -437,6 +555,187 @@ describe('companion menu-control proof protocol', () => {
         expectedMarkerContentSha256: hash('f'),
       }).success,
     ).toBe(false);
+  });
+
+  it('reports adjacent native history transitions and reconciles an exact persisted outbox', () => {
+    const history = historyIdentity();
+    const first = historyTransition(8, 7, 30);
+    const report = companionMenuControlProofHistoryTransitionReportSchema.parse({
+      ...delivery(),
+      kind: 'native_history_transition',
+      currentLease: delivery().lease,
+      history,
+      serverAcceptedCursor: 8,
+      serverAcceptedStatus: 'history_locked',
+      transition: first,
+      transitionContentSha256:
+        computeCompanionMenuControlProofHistoryTransitionContentSha256(first),
+      reportedAt: '2026-08-22T10:02:31+08:00',
+    });
+    expect(companionMenuControlProofHistoryIdentityMatchesResult(history, result())).toBe(true);
+    expect(companionMenuControlProofHistoryTransitionReportMatchesResult(report, result())).toBe(
+      true,
+    );
+
+    const boundary = companionMenuControlProofTerminalHistoryIdentity(result());
+    const challenge = companionMenuControlProofHistoryTransitionReconciliationDeliverySchema.parse({
+      ...delivery(),
+      kind: 'native_history_transition_reconcile',
+      recoveryId: '13572468-1357-4357-8357-135724681357',
+      replacementLease: {
+        ...delivery().lease,
+        leaseId: '24681357-2468-4468-8468-246813572468',
+        expiresAt: '2026-08-22T10:10:00+08:00',
+      },
+      history: boundary,
+      serverAcceptedCursor: 7,
+      serverAcceptedStatus: 'history_locked',
+      acknowledgedTransitionContentSha256s: [report.transitionContentSha256],
+      expectedMarkerContentSha256: boundary.terminalMarkerContentSha256,
+      recoveryRequestedAt: '2026-08-22T10:06:00+08:00',
+    });
+    const second = historyTransition(7, 6, 31);
+    const ack = companionMenuControlProofHistoryTransitionReconciliationAckSchema.parse({
+      ...delivery(),
+      kind: 'native_history_transition_reconcile',
+      recoveryId: challenge.recoveryId,
+      history,
+      serverAcceptedCursor: 7,
+      serverAcceptedStatus: 'history_locked',
+      transitions: [second],
+      transitionContentSha256s: [
+        computeCompanionMenuControlProofHistoryTransitionContentSha256(second),
+      ],
+      terminalResultContentSha256: history.terminalResultContentSha256,
+      expectedMarkerContentSha256: history.terminalMarkerContentSha256,
+      currentCursor: 6,
+      currentStatus: 'history_locked',
+      currentSceneFingerprintSha256: history.stageFingerprints[6],
+      occurredAt: '2026-08-22T10:06:01+08:00',
+    });
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery(ack, challenge),
+    ).toBe(true);
+    expect(companionMenuControlProofRecoveryRequestSchema.parse(ack)).toEqual(ack);
+    expect(companionMenuControlProofPollDeliverySchema.parse({ request: challenge })).toEqual({
+      request: challenge,
+    });
+
+    const emptyAck = {
+      ...ack,
+      transitions: [],
+      transitionContentSha256s: [],
+      currentCursor: 7,
+      currentSceneFingerprintSha256: history.stageFingerprints[7],
+    };
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckSchema.safeParse(emptyAck).success,
+    ).toBe(true);
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckSchema.safeParse({
+        ...ack,
+        transitions: [historyTransition(7, 5, 31)],
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckSchema.safeParse({
+        ...ack,
+        transitions: [{ ...second, sceneFingerprintSha256: hash('9') }],
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReportSchema.safeParse({
+        ...report,
+        transition: { ...first, stage: 'scale_x' },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReportSchema.safeParse({
+        ...report,
+        transitionContentSha256: hash('9'),
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReportSchema.safeParse({
+        ...report,
+        currentLease: {
+          ...report.currentLease,
+          documentIncarnationId: 'abcdefab-cdef-4abc-8def-abcdefabcdef',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery(
+        { ...ack, recoveryId: 'abcdefab-cdef-4abc-8def-abcdefabcdef' },
+        challenge,
+      ),
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery(
+        { ...ack, deliveryId: 'abcdefab-cdef-4abc-8def-abcdefabcdef' },
+        challenge,
+      ),
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckSchema.safeParse({
+        ...ack,
+        target: { ...ack.target, instanceId: 'abcdefab-cdef-4abc-8def-abcdefabcdef' },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery(
+        {
+          ...ack,
+          history: { ...ack.history, checkpointId: 'abcdefab-cdef-4abc-8def-abcdefabcdef' },
+        },
+        challenge,
+      ),
+    ).toBe(false);
+  });
+
+  it('expresses the failure checkpoint native history boundary as null to baseline', () => {
+    const successHistory = historyIdentity();
+    const history = {
+      ...successHistory,
+      checkpointKind: 'failure' as const,
+      stageFingerprints: [hash('b'), ...Array.from({ length: 8 }, () => hash('a'))] as [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+      ],
+    };
+    const transition = {
+      transitionId: '87654321-4321-4321-8321-123456789abc',
+      checkpointId: history.checkpointId,
+      undoLockId: history.undoLockId,
+      direction: 'undo' as const,
+      fromCursor: null,
+      toCursor: 0,
+      stage: 'baseline' as const,
+      status: 'restored' as const,
+      sceneFingerprintSha256: history.stageFingerprints[0],
+      occurredAt: '2026-08-22T10:02:30+08:00',
+    };
+    expect(
+      companionMenuControlProofHistoryTransitionReportSchema.safeParse({
+        ...delivery(),
+        kind: 'native_history_transition',
+        currentLease: delivery().lease,
+        history,
+        serverAcceptedCursor: null,
+        serverAcceptedStatus: 'history_locked',
+        transition,
+        transitionContentSha256:
+          computeCompanionMenuControlProofHistoryTransitionContentSha256(transition),
+        reportedAt: '2026-08-22T10:02:31+08:00',
+      }).success,
+    ).toBe(true);
   });
 
   it('keeps the caller request opaque and rejects native input injection', () => {
@@ -959,6 +1258,18 @@ describe('companion menu-control proof protocol', () => {
       ['companion-menu-control-proof-status.schema.json', recoveryPendingStatus()],
       ['companion-menu-control-proof-progress-ack.schema.json', { result: 'accepted' }],
       ['companion-menu-control-proof-result-ack.schema.json', { result: 'accepted' }],
+      [
+        'companion-menu-control-proof-history-transition-report.schema.json',
+        historyTransitionReport(),
+      ],
+      [
+        'companion-menu-control-proof-history-transition-reconciliation-delivery.schema.json',
+        historyReconciliationDelivery(),
+      ],
+      [
+        'companion-menu-control-proof-history-transition-reconciliation-ack.schema.json',
+        historyReconciliationAck(),
+      ],
       [
         'companion-menu-control-proof-terminal-reconciliation-delivery.schema.json',
         companionMenuControlProofTerminalReconciliationDeliverySchema.parse({

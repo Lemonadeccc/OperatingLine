@@ -37,6 +37,28 @@ export const uvSphereMenuControlProofMutationStagesSchema = z.tuple([
   z.literal(mutationStageValues[7]),
 ]);
 const mutationStagePrefixSchema = z.array(z.enum(mutationStageValues)).max(8);
+const historyStageValues = [
+  'baseline',
+  'sphere_created',
+  'location_x',
+  'location_y',
+  'location_z',
+  'scale_x',
+  'scale_y',
+  'scale_z',
+  'renamed_final',
+] as const;
+const historyStageFingerprintsSchema = z.tuple([
+  sha256Schema,
+  sha256Schema,
+  sha256Schema,
+  sha256Schema,
+  sha256Schema,
+  sha256Schema,
+  sha256Schema,
+  sha256Schema,
+  sha256Schema,
+]);
 
 const leaseSchema = z.strictObject({
   leaseId: z.uuid(),
@@ -787,23 +809,355 @@ export function companionMenuControlProofTerminalReconciliationAckMatchesDeliver
 }
 
 function isDeepStrictDeliveryIdentity(
-  result: CompanionMenuControlProofResult,
-  delivery: CompanionMenuControlProofTerminalReconciliationDelivery,
+  result: Record<string, unknown>,
+  delivery: Record<string, unknown>,
 ): boolean {
   return (
     computeProtocolCanonicalJsonSha256(
-      Object.fromEntries(
-        Object.keys(deliveryIdentityShape).map((key) => [key, result[key as keyof typeof result]]),
-      ),
+      Object.fromEntries(Object.keys(deliveryIdentityShape).map((key) => [key, result[key]])),
     ) ===
     computeProtocolCanonicalJsonSha256(
-      Object.fromEntries(
-        Object.keys(deliveryIdentityShape).map((key) => [
-          key,
-          delivery[key as keyof typeof delivery],
-        ]),
-      ),
+      Object.fromEntries(Object.keys(deliveryIdentityShape).map((key) => [key, delivery[key]])),
     )
+  );
+}
+
+const historyCursorSchema = z.number().int().min(0).max(8).nullable();
+const historyStatusSchema = z.enum(['history_locked', 'restored']);
+
+export const companionMenuControlProofHistoryIdentitySchema = z
+  .strictObject({
+    checkpointId: z.uuid(),
+    undoLockId: z.uuid(),
+    checkpointKind: z.enum(['success', 'failure']),
+    stageFingerprints: historyStageFingerprintsSchema,
+    terminalResultContentSha256: sha256Schema,
+    terminalMarkerContentSha256: sha256Schema,
+  })
+  .superRefine((history, context) => {
+    const valid =
+      history.checkpointKind === 'success'
+        ? new Set(history.stageFingerprints).size === 9
+        : history.stageFingerprints[0] !== history.stageFingerprints[1] &&
+          history.stageFingerprints
+            .slice(1)
+            .every((fingerprint) => fingerprint === history.stageFingerprints[1]);
+    if (!valid) {
+      context.addIssue({
+        code: 'custom',
+        path: ['stageFingerprints'],
+        message:
+          'Success history requires nine distinct stages; failure history requires one baseline and one repeated locked stage',
+      });
+    }
+  });
+export type CompanionMenuControlProofHistoryIdentity = z.infer<
+  typeof companionMenuControlProofHistoryIdentitySchema
+>;
+
+export const companionMenuControlProofTerminalHistoryIdentitySchema = z.strictObject({
+  checkpointId: z.uuid(),
+  undoLockId: z.uuid(),
+  checkpointKind: z.enum(['success', 'failure']),
+  baselineSceneFingerprintSha256: sha256Schema,
+  lockedSceneFingerprintSha256: sha256Schema,
+  terminalResultContentSha256: sha256Schema,
+  terminalMarkerContentSha256: sha256Schema,
+});
+export type CompanionMenuControlProofTerminalHistoryIdentity = z.infer<
+  typeof companionMenuControlProofTerminalHistoryIdentitySchema
+>;
+
+export function companionMenuControlProofTerminalHistoryIdentity(
+  result: CompanionMenuControlProofResult,
+): CompanionMenuControlProofTerminalHistoryIdentity {
+  const marker = companionMenuControlProofTerminalMarkerIdentity(result);
+  return {
+    checkpointId: marker.checkpointId,
+    undoLockId: marker.undoLockId,
+    checkpointKind: marker.checkpointKind,
+    baselineSceneFingerprintSha256: marker.baselineSceneFingerprintSha256,
+    lockedSceneFingerprintSha256: marker.lockedSceneFingerprintSha256,
+    terminalResultContentSha256: marker.terminalResultContentSha256,
+    terminalMarkerContentSha256:
+      computeCompanionMenuControlProofTerminalMarkerContentSha256(result),
+  };
+}
+
+export function companionMenuControlProofHistoryIdentityMatchesTerminalHistory(
+  history: CompanionMenuControlProofHistoryIdentity,
+  terminalHistory: CompanionMenuControlProofTerminalHistoryIdentity,
+): boolean {
+  const lockedIndex = terminalHistory.checkpointKind === 'success' ? 8 : 1;
+  return (
+    history.checkpointId === terminalHistory.checkpointId &&
+    history.undoLockId === terminalHistory.undoLockId &&
+    history.checkpointKind === terminalHistory.checkpointKind &&
+    history.stageFingerprints[0] === terminalHistory.baselineSceneFingerprintSha256 &&
+    history.stageFingerprints[lockedIndex] === terminalHistory.lockedSceneFingerprintSha256 &&
+    history.terminalResultContentSha256 === terminalHistory.terminalResultContentSha256 &&
+    history.terminalMarkerContentSha256 === terminalHistory.terminalMarkerContentSha256
+  );
+}
+
+export function companionMenuControlProofHistoryIdentityMatchesResult(
+  history: CompanionMenuControlProofHistoryIdentity,
+  result: CompanionMenuControlProofResult,
+): boolean {
+  const parsedHistory = companionMenuControlProofHistoryIdentitySchema.parse(history);
+  const parsedResult = companionMenuControlProofResultSchema.parse(result);
+  return companionMenuControlProofHistoryIdentityMatchesTerminalHistory(
+    parsedHistory,
+    companionMenuControlProofTerminalHistoryIdentity(parsedResult),
+  );
+}
+
+export const companionMenuControlProofHistoryTransitionSchema = z.strictObject({
+  transitionId: z.uuid(),
+  checkpointId: z.uuid(),
+  undoLockId: z.uuid(),
+  direction: z.enum(['undo', 'redo']),
+  fromCursor: historyCursorSchema,
+  toCursor: historyCursorSchema,
+  stage: z.enum([...historyStageValues, 'failure_checkpoint']),
+  status: historyStatusSchema,
+  sceneFingerprintSha256: sha256Schema,
+  occurredAt: timestampSchema,
+});
+export type CompanionMenuControlProofHistoryTransition = z.infer<
+  typeof companionMenuControlProofHistoryTransitionSchema
+>;
+
+export function computeCompanionMenuControlProofHistoryTransitionContentSha256(
+  transition: CompanionMenuControlProofHistoryTransition,
+): string {
+  return computeProtocolCanonicalJsonSha256(
+    companionMenuControlProofHistoryTransitionSchema.parse(transition),
+  );
+}
+
+function historyCursorStatusMatches(
+  history: { checkpointKind: 'success' | 'failure' },
+  cursor: number | null,
+  status: z.infer<typeof historyStatusSchema>,
+): boolean {
+  return history.checkpointKind === 'success'
+    ? cursor !== null && status === (cursor === 0 ? 'restored' : 'history_locked')
+    : (cursor === null && status === 'history_locked') || (cursor === 0 && status === 'restored');
+}
+
+function historyTransitionMatches(
+  transition: CompanionMenuControlProofHistoryTransition,
+  history: CompanionMenuControlProofHistoryIdentity,
+  fromCursor: number | null,
+  fromStatus: z.infer<typeof historyStatusSchema>,
+): boolean {
+  if (
+    transition.checkpointId !== history.checkpointId ||
+    transition.undoLockId !== history.undoLockId ||
+    transition.fromCursor !== fromCursor ||
+    !historyCursorStatusMatches(history, fromCursor, fromStatus) ||
+    !historyCursorStatusMatches(history, transition.toCursor, transition.status)
+  ) {
+    return false;
+  }
+  if (history.checkpointKind === 'failure') {
+    const undo =
+      transition.direction === 'undo' &&
+      transition.fromCursor === null &&
+      transition.toCursor === 0;
+    const redo =
+      transition.direction === 'redo' &&
+      transition.fromCursor === 0 &&
+      transition.toCursor === null;
+    return (
+      (undo || redo) &&
+      transition.stage === (transition.toCursor === 0 ? 'baseline' : 'failure_checkpoint') &&
+      transition.sceneFingerprintSha256 ===
+        history.stageFingerprints[transition.toCursor === 0 ? 0 : 1]
+    );
+  }
+  if (transition.fromCursor === null || transition.toCursor === null) return false;
+  return (
+    transition.toCursor - transition.fromCursor === (transition.direction === 'undo' ? -1 : 1) &&
+    transition.stage === historyStageValues[transition.toCursor] &&
+    transition.sceneFingerprintSha256 === history.stageFingerprints[transition.toCursor]
+  );
+}
+
+function currentLeaseMatchesOriginalDocument(
+  currentLease: z.infer<typeof leaseSchema>,
+  originalLease: z.infer<typeof leaseSchema>,
+  target: z.infer<typeof targetSchema>,
+): boolean {
+  return (
+    currentLease.sessionId === originalLease.sessionId &&
+    currentLease.target.adapterId === target.adapterId &&
+    currentLease.target.instanceId === target.instanceId &&
+    currentLease.documentIncarnationId === originalLease.documentIncarnationId
+  );
+}
+
+export const companionMenuControlProofHistoryTransitionReportSchema = z
+  .strictObject({
+    ...deliveryIdentityShape,
+    kind: z.literal('native_history_transition'),
+    currentLease: leaseSchema,
+    history: companionMenuControlProofHistoryIdentitySchema,
+    serverAcceptedCursor: historyCursorSchema,
+    serverAcceptedStatus: historyStatusSchema,
+    transition: companionMenuControlProofHistoryTransitionSchema,
+    transitionContentSha256: sha256Schema,
+    reportedAt: timestampSchema,
+  })
+  .superRefine((report, context) => {
+    if (
+      !deliverySemanticsMatch(report) ||
+      !currentLeaseMatchesOriginalDocument(report.currentLease, report.lease, report.target) ||
+      !historyTransitionMatches(
+        report.transition,
+        report.history,
+        report.serverAcceptedCursor,
+        report.serverAcceptedStatus,
+      ) ||
+      report.transitionContentSha256 !==
+        computeCompanionMenuControlProofHistoryTransitionContentSha256(report.transition) ||
+      Date.parse(report.transition.occurredAt) < Date.parse(report.dispatchedAt) ||
+      Date.parse(report.transition.occurredAt) > Date.parse(report.reportedAt) ||
+      Date.parse(report.reportedAt) >= Date.parse(report.currentLease.expiresAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Menu-control history transition report must bind one exact adjacent native transition to the current live document',
+      });
+    }
+  });
+export type CompanionMenuControlProofHistoryTransitionReport = z.infer<
+  typeof companionMenuControlProofHistoryTransitionReportSchema
+>;
+
+export function companionMenuControlProofHistoryTransitionReportMatchesResult(
+  report: CompanionMenuControlProofHistoryTransitionReport,
+  result: CompanionMenuControlProofResult,
+): boolean {
+  return (
+    isDeepStrictDeliveryIdentity(result, report) &&
+    companionMenuControlProofHistoryIdentityMatchesResult(report.history, result)
+  );
+}
+
+export const companionMenuControlProofHistoryTransitionReconciliationDeliverySchema = z
+  .strictObject({
+    ...deliveryIdentityShape,
+    kind: z.literal('native_history_transition_reconcile'),
+    recoveryId: z.uuid(),
+    replacementLease: leaseSchema,
+    history: companionMenuControlProofTerminalHistoryIdentitySchema,
+    serverAcceptedCursor: historyCursorSchema,
+    serverAcceptedStatus: historyStatusSchema,
+    acknowledgedTransitionContentSha256s: z.array(sha256Schema).max(32),
+    expectedMarkerContentSha256: sha256Schema,
+    recoveryRequestedAt: timestampSchema,
+  })
+  .superRefine((challenge, context) => {
+    if (
+      !deliverySemanticsMatch(challenge) ||
+      challenge.replacementLease.leaseId === challenge.lease.leaseId ||
+      !currentLeaseMatchesOriginalDocument(
+        challenge.replacementLease,
+        challenge.lease,
+        challenge.target,
+      ) ||
+      !historyCursorStatusMatches(
+        challenge.history,
+        challenge.serverAcceptedCursor,
+        challenge.serverAcceptedStatus,
+      ) ||
+      new Set(challenge.acknowledgedTransitionContentSha256s).size !==
+        challenge.acknowledgedTransitionContentSha256s.length ||
+      challenge.expectedMarkerContentSha256 !== challenge.history.terminalMarkerContentSha256 ||
+      Date.parse(challenge.recoveryRequestedAt) < Date.parse(challenge.dispatchedAt) ||
+      Date.parse(challenge.recoveryRequestedAt) >= Date.parse(challenge.replacementLease.expiresAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Menu-control history reconciliation must bind the accepted cursor to a distinct current lease for the same document',
+      });
+    }
+  });
+export type CompanionMenuControlProofHistoryTransitionReconciliationDelivery = z.infer<
+  typeof companionMenuControlProofHistoryTransitionReconciliationDeliverySchema
+>;
+
+export const companionMenuControlProofHistoryTransitionReconciliationAckSchema = z
+  .strictObject({
+    ...deliveryIdentityShape,
+    kind: z.literal('native_history_transition_reconcile'),
+    recoveryId: z.uuid(),
+    history: companionMenuControlProofHistoryIdentitySchema,
+    serverAcceptedCursor: historyCursorSchema,
+    serverAcceptedStatus: historyStatusSchema,
+    transitions: z.array(companionMenuControlProofHistoryTransitionSchema).max(32),
+    transitionContentSha256s: z.array(sha256Schema).max(32),
+    terminalResultContentSha256: sha256Schema,
+    expectedMarkerContentSha256: sha256Schema,
+    currentCursor: historyCursorSchema,
+    currentStatus: historyStatusSchema,
+    currentSceneFingerprintSha256: sha256Schema,
+    occurredAt: timestampSchema,
+  })
+  .superRefine((ack, context) => {
+    let cursor = ack.serverAcceptedCursor;
+    let status = ack.serverAcceptedStatus;
+    let previousOccurredAt = Number.NEGATIVE_INFINITY;
+    let valid =
+      deliverySemanticsMatch(ack) &&
+      historyCursorStatusMatches(ack.history, cursor, status) &&
+      ack.transitions.length === ack.transitionContentSha256s.length &&
+      ack.terminalResultContentSha256 === ack.history.terminalResultContentSha256 &&
+      ack.expectedMarkerContentSha256 === ack.history.terminalMarkerContentSha256;
+    for (const [index, transition] of ack.transitions.entries()) {
+      valid &&=
+        historyTransitionMatches(transition, ack.history, cursor, status) &&
+        ack.transitionContentSha256s[index] ===
+          computeCompanionMenuControlProofHistoryTransitionContentSha256(transition) &&
+        Date.parse(transition.occurredAt) > previousOccurredAt;
+      cursor = transition.toCursor;
+      status = transition.status;
+      previousOccurredAt = Date.parse(transition.occurredAt);
+    }
+    const fingerprintIndex = cursor === null ? 1 : cursor;
+    valid &&=
+      cursor === ack.currentCursor &&
+      status === ack.currentStatus &&
+      ack.currentSceneFingerprintSha256 === ack.history.stageFingerprints[fingerprintIndex] &&
+      Date.parse(ack.occurredAt) >= previousOccurredAt;
+    if (!valid) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Menu-control history reconciliation must prove the exact chronological adjacent transition outbox and final Scene',
+      });
+    }
+  });
+export type CompanionMenuControlProofHistoryTransitionReconciliationAck = z.infer<
+  typeof companionMenuControlProofHistoryTransitionReconciliationAckSchema
+>;
+
+export function companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery(
+  ack: CompanionMenuControlProofHistoryTransitionReconciliationAck,
+  delivery: CompanionMenuControlProofHistoryTransitionReconciliationDelivery,
+): boolean {
+  return (
+    ack.recoveryId === delivery.recoveryId &&
+    isDeepStrictDeliveryIdentity(ack, delivery) &&
+    companionMenuControlProofHistoryIdentityMatchesTerminalHistory(ack.history, delivery.history) &&
+    ack.serverAcceptedCursor === delivery.serverAcceptedCursor &&
+    ack.serverAcceptedStatus === delivery.serverAcceptedStatus &&
+    ack.expectedMarkerContentSha256 === delivery.expectedMarkerContentSha256 &&
+    Date.parse(ack.occurredAt) >= Date.parse(delivery.recoveryRequestedAt)
   );
 }
 
@@ -816,6 +1170,7 @@ export const companionMenuControlProofPollDeliverySchema = z.strictObject({
     .union([
       companionMenuControlProofDeliverySchema,
       companionMenuControlProofTerminalReconciliationDeliverySchema,
+      companionMenuControlProofHistoryTransitionReconciliationDeliverySchema,
     ])
     .nullable(),
 });
@@ -827,6 +1182,13 @@ const ackSchema = z.strictObject({ result: z.enum(['accepted', 'duplicate']) });
 export const companionMenuControlProofProgressAckSchema = ackSchema;
 export const companionMenuControlProofResultAckSchema = ackSchema;
 export const companionMenuControlProofRecoveryAckResponseSchema = ackSchema;
+export const companionMenuControlProofRecoveryRequestSchema = z.union([
+  companionMenuControlProofTerminalReconciliationAckSchema,
+  companionMenuControlProofHistoryTransitionReconciliationAckSchema,
+]);
+export type CompanionMenuControlProofRecoveryRequest = z.infer<
+  typeof companionMenuControlProofRecoveryRequestSchema
+>;
 
 const statusValueSchema = z.enum([
   'queued',
