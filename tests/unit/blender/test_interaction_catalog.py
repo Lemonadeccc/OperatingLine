@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.41.0")
+        self.assertEqual(catalog.catalog_version, "1.42.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -526,6 +526,42 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             subdivision_materialization.mcp.availability, "unavailable"
+        )
+        solidify = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.modifier.add_solidify"
+        )
+        self.assertIsNotNone(solidify.procedure_materialization)
+        assert solidify.procedure_materialization is not None
+        self.assertEqual(
+            (
+                solidify.procedure_materialization.menu.availability,
+                solidify.procedure_materialization.shortcut.availability,
+                solidify.procedure_materialization.mcp.availability,
+            ),
+            ("unavailable", "unavailable", "available"),
+        )
+        solidify_mcp = solidify.procedure_materialization.mcp
+        self.assertEqual(
+            (
+                solidify_mcp.source,
+                solidify_mcp.semantic_binding,
+                solidify_mcp.parameter_binding,
+                solidify_mcp.server_name,
+                solidify_mcp.tool_name,
+                solidify_mcp.authorization,
+                solidify_mcp.result_binding,
+            ),
+            (
+                "catalog.action_level_mcp",
+                "all_leaf_operations",
+                "accepted_action_arguments",
+                "operating-line",
+                "operatingline.blender.action.execute",
+                "accepted_replay_next_step",
+                "companion_state_report",
+            ),
         )
         mirror = next(
             recipe
@@ -1683,6 +1719,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.edit_bevel_edges",
                     "blender.mesh.edit_inset_faces",
                     "blender.mesh.edit_poke_faces",
+                    "blender.modifier.add_solidify",
                     "blender.modifier.add_subdivision_surface",
                     "blender.modifier.add_mirror",
                 }
@@ -2281,6 +2318,30 @@ class InteractionCatalogTests(unittest.TestCase):
             menu.control_operations.operations[2].target_id,
             "OUTLINER.object.name",
         )
+
+    def test_loads_byte_frozen_pre_solidify_action_level_mcp_catalog(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.41.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "c7fc9b7db6c9391a6d82e62cd569e36986af21d0ddf5583249e6644421ef356f",
+        )
+        self.assertEqual(frozen.catalog_version, "1.41.0")
+        solidify = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.modifier.add_solidify"
+        )
+        self.assertIsNone(solidify.procedure_materialization)
 
     def test_loads_byte_frozen_subdivision_surface_catalog_without_bevel_edges(
         self,
@@ -3876,7 +3937,7 @@ class InteractionCatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown field arguments"):
             self._load_raw(extra)
 
-    def test_action_level_mcp_allowlist_accepts_the_seven_native_primitives(
+    def test_action_level_mcp_allowlist_accepts_approved_native_and_semantic_recipes(
         self,
     ) -> None:
         raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
@@ -3909,6 +3970,13 @@ class InteractionCatalogTests(unittest.TestCase):
                     available_mcp
                 )
                 self._load_raw(forged)
+
+        for recipe_id in (
+            "blender.modifier.add_solidify.semantic",
+            "blender.modifier.add_mirror.semantic",
+        ):
+            with self.subTest(recipe_id=recipe_id):
+                parse_mcp_materialization(available_mcp, recipe_id)
 
         for recipe_id in (
             "blender.mesh.create_primitive_batch.semantic",

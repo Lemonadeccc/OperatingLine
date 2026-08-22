@@ -467,8 +467,9 @@ stable-ID preview、参数编辑、评论和 immutable revision 分支/合并；
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.41.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.40.0`，保留原生 Subdivision shortcut proof，并为
-UV Sphere、Icosphere、Cube、Plane、Torus、Cone、Cylinder 与 Mirror 的 accepted replay 提供有界
+`1.42.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.41.0`，保留原生 Subdivision shortcut proof 与
+UV Sphere menu-control proof，并为 UV Sphere、Icosphere、Cube、Plane、Torus、Cone、Cylinder、Solidify
+与 Mirror 的 accepted replay 提供有界
 action-level MCP 权限；旧 binding 不继承新增权限。当前目录为 UV Sphere 声明七步 ordered menu 与六步
 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
@@ -550,6 +551,12 @@ Cylinder 同样声明六步 ordered menu：四步 guidance operator 严格按序
 `end`，两端使用同一 `radius`，且不声称与 managed executor quaternion/roll 精确等价。
 `resourceId` 省略，shortcut unavailable；`1.38.0` 另为 Cylinder 显式授权 action-level MCP，更早目录中的
 unavailable binding 不获得新权限。
+Solidify 保留四步 `semantic_path`，menu/shortcut 明确 unavailable；`1.42.0` 只新增其 action-level MCP
+projection。Runtime 从不可变 accepted replay binding 派生 target/modifier identity、受管名称、thickness 与
+offset，不接受调用方提供 Action 或参数。强 `modifier_ready` 必须精确匹配 accepted 参数与固定
+`EXTRUDE`/even-offset/rim 状态，要求 receipt 保护的源 Mesh 内容未变，并报告真实 evaluated topology 的正整数
+vertex/edge/face count、有限坐标与 `8192/16384/8192` 上限。历史 `1.41.0` 的 Solidify binding 仍
+unavailable。
 `1.38.0` 为 UV Sphere、Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 的 accepted leaf 物化唯一
 `operatingline.blender.action.execute` operation。公开请求只携带 request/replay identity 与当前 report CAS；
 Runtime 从精确版本 replay binding 推导 Action 和完整参数，不接受调用方提供的 action、arguments、operator 或
@@ -562,8 +569,10 @@ unavailable。该 managed Action 入口不把 menu/shortcut grounding 升级为�
 [ADR 0090](../adr/0090-simple-primitive-action-level-mcp.md) 与
 [ADR 0091](../adr/0091-torus-action-level-mcp.md) 与
 [ADR 0092](../adr/0092-cone-action-level-mcp.md) 与
-[ADR 0093](../adr/0093-cylinder-action-level-mcp.md)。
-`action.status=succeeded` 已通过完整 primitive 几何和拓扑校验，但不是追加式 provenance attestation；后续
+[ADR 0093](../adr/0093-cylinder-action-level-mcp.md)、
+[ADR 0099](../adr/0099-mirror-action-level-mcp.md) 与
+[ADR 0101](../adr/0101-solidify-action-level-mcp.md)。
+`action.status=succeeded` 已通过完整 action-specific Observation 校验，但不是追加式 provenance attestation；后续
 replay finalize 复用同一 validator 并固化认证 receipt，二者都不证明报告之后的当前宿主状态。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
 hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
@@ -598,14 +607,15 @@ mutation 仍不等价于 managed transaction。Mirror 的七步语义路径记�
 object.modifier_add(type=MIRROR)`。Blender 4.5.3/5.1.1 的 Properties/Shift+A 前台回放都创建
 `OBJECT_OT_modifier_add(type=MIRROR, use_selected_objects=false)`，Cube 求值拓扑从 8/12/6 变为
 16/24/12，源 Mesh pointer 与 datablock 数量不变。该上下文别名无法携带 IDs、受管名称、固定 RNA、
-拓扑门、Observation 或回退，menu/shortcut/MCP materialization 因此全部 unavailable。Cube 与
+拓扑门、Observation 或回退，menu/shortcut materialization 因此 unavailable；InteractionCatalog `1.40.0`
+另为 accepted replay 提供 managed Mirror action-level MCP，不把该原生别名升级为执行证明。Cube 与
 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针
 不是实际键盘事件或完整 UI replay，并保留默认未 bake mesh 与 `scale = size / 2`，不等价于 managed
 executor 的 baked mesh/`scale = 1`。原生菜单/operator 不复现 managed collection 归属、resource tag、
 receipt、幂等或补偿语义；
 Cone/Cylinder 的 Blender 4.5/5.1 operator 双版本探针也不是六步 UI replay。历史
-`1.9.0` 至已冻结的 `1.26.0` 继续精确回放；`1.25.0` 中 Poke Faces action 尚不存在，`1.26.0` 中
-Mirror action 尚不存在。结果格式依实际
+`1.9.0` 至已冻结的 `1.41.0` 继续精确回放；`1.25.0` 中 Poke Faces action 尚不存在，`1.26.0` 中
+Mirror action 尚不存在，`1.41.0` 的 Solidify MCP 仍 unavailable。结果格式依实际
 使用能力为 `1.0.0`/`1.1.0`/`1.2.0`/`1.3.0`，其中 Icosphere shortcut 结果为 `1.3.0`，Plane、Cube 与
 UV Sphere shortcut 结果为 `1.2.0`，Subdivide shortcut 结果为 `1.3.0`，Torus/Cone/Cylinder menu-only
 结果为 `1.1.0`。该入口
@@ -634,11 +644,13 @@ grounding attestation。完整决策见
 
 首个可执行桥接使用独立的 `ProcedureLeafReplay 1.0.0` 合同。调用方把原始 authoring packet、候选树、
 目标实例和单一 leaf 提交给 MCP/HTTP `procedure.replay.propose`；Orchestrator 重新运行 packet-bound
-validation/materialization，只接受单一 UV Sphere、Icosphere、Cube、Plane、Torus、Cone 或 Cylinder action、
+validation/materialization，只接受单一 UV Sphere、Icosphere、Cube、Plane、Torus、Cone、Cylinder、
+Solidify Modifier 或 Mirror Modifier action、
 `rollback_step` 或 `retain_for_repair` 成功门、补偿回退和参数完全匹配的 `uv_sphere_ready`、`icosphere_ready`、`cube_ready`、
-`plane_ready`、`torus_ready`、`cone_ready` 或 `cylinder_ready`；Icosphere 验证细分级别对应的精确拓扑，
+`plane_ready`、`torus_ready`、`cone_ready`、`cylinder_ready` 或 `modifier_ready`；Icosphere 验证细分级别对应的精确拓扑，
 Cube/Plane 验证尺寸对应的坐标与固定拓扑，Torus 验证 segments/radii 对应的逐顶点参数化坐标与动态拓扑；
-Cone/Cylinder 验证中点、方向 Quaternion、世界端点、32 段局部环坐标、面形以及普通/尖锥动态拓扑。完整 request、
+Cone/Cylinder 验证中点、方向 Quaternion、世界端点、32 段局部环坐标、面形以及普通/尖锥动态拓扑；
+Solidify 验证精确参数、固定 RNA、源内容完整性和真实 evaluated topology。完整 request、
 materialization、编译 Plan 与待审 Proposal 作为不可变
 binding 原子入库，Proposal 仍必须由同一 Blender 实例人工 Accept。decision 与 terminal report 在接收时
 必须通过同一协商 lease，并以服务端单调 receipt 序列证明 Proposal → decision → report 顺序。执行后，

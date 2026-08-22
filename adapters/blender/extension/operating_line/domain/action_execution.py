@@ -20,10 +20,12 @@ ACTION_LEVEL_MCP_PRIMITIVE_RECIPES = frozenset(
 )
 
 ACTION_LEVEL_MCP_ACTIONS = ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS | {
-    "blender.modifier.add_mirror"
+    "blender.modifier.add_mirror",
+    "blender.modifier.add_solidify",
 }
 ACTION_LEVEL_MCP_RECIPES = ACTION_LEVEL_MCP_PRIMITIVE_RECIPES | {
-    "blender.modifier.add_mirror.semantic"
+    "blender.modifier.add_mirror.semantic",
+    "blender.modifier.add_solidify.semantic",
 }
 
 POKE_FACES_COMPOUND_RECIPES = {

@@ -16,6 +16,7 @@ export type ManagedPrimitiveActionName = z.infer<typeof managedPrimitiveActionNa
 export const actionLevelMcpActionNames = Object.freeze([
   ...managedPrimitiveActionNames,
   'blender.modifier.add_mirror',
+  'blender.modifier.add_solidify',
 ] as const);
 
 export const actionLevelMcpActionNameSchema = z.enum(actionLevelMcpActionNames);

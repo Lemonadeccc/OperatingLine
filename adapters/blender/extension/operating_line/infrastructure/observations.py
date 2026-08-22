@@ -2077,9 +2077,12 @@ def _modifier_ready(
         "useRimOnly",
     }
     if modifier_type == "SOLIDIFY":
-        properties_match = properties_match and solidify_parameters.issubset(
-            parameters
-        )
+        properties_match = properties_match and set(parameters) == {
+            "targetId",
+            "modifierId",
+            "modifierType",
+            *solidify_parameters,
+        }
     subdivision_surface_parameters = {
         "levels",
         "renderLevels",
@@ -2207,52 +2210,18 @@ def _modifier_ready(
     actual_mirror_axis = None
     mirror_fixed_state_matches = False
     mirror_object_absent = False
+    actual_solidify_thickness = None
+    actual_solidify_offset = None
+    actual_solidify_mode = None
+    actual_solidify_even_offset = None
+    actual_solidify_rim = None
+    actual_solidify_rim_only = None
+    solidify_fixed_state_matches = False
     source_content_intact = False
     evaluated_topology = (0, 0, 0)
     evaluated_finite = False
     evaluated_within_limits = False
-    if modifier_type == "MIRROR" and modifier is not None:
-        expected_axis = {
-            "X": (True, False, False),
-            "Y": (False, True, False),
-            "Z": (False, False, True),
-        }.get(expected_mirror_axis)
-        actual_axis_values = tuple(bool(value) for value in modifier.use_axis)
-        actual_mirror_axis = {
-            (True, False, False): "X",
-            (False, True, False): "Y",
-            (False, False, True): "Z",
-        }.get(actual_axis_values)
-        mirror_object_absent = modifier.mirror_object is None
-        mirror_fixed_state_matches = bool(
-            expected_axis is not None
-            and actual_axis_values == expected_axis
-            and tuple(bool(value) for value in modifier.use_bisect_axis)
-            == (False, False, False)
-            and tuple(bool(value) for value in modifier.use_bisect_flip_axis)
-            == (False, False, False)
-            and modifier.use_clip is False
-            and modifier.use_mirror_merge is True
-            and math.isclose(float(modifier.merge_threshold), 0.001, abs_tol=1e-9)
-            and math.isclose(float(modifier.bisect_threshold), 0.001, abs_tol=1e-9)
-            and mirror_object_absent
-            and modifier.use_mirror_vertex_groups is True
-            and modifier.use_mirror_u is False
-            and modifier.use_mirror_v is False
-            and modifier.use_mirror_udim is False
-            and math.isclose(float(modifier.offset_u), 0.0, abs_tol=1e-9)
-            and math.isclose(float(modifier.offset_v), 0.0, abs_tol=1e-9)
-            and math.isclose(float(modifier.mirror_offset_u), 0.0, abs_tol=1e-9)
-            and math.isclose(float(modifier.mirror_offset_v), 0.0, abs_tol=1e-9)
-            and modifier.show_viewport is True
-            and modifier.show_render is True
-            and modifier.show_in_editmode is True
-            and modifier.show_on_cage is False
-            and (
-                not hasattr(modifier, "use_apply_on_spline")
-                or modifier.use_apply_on_spline is False
-            )
-        )
+    if modifier_type in {"MIRROR", "SOLIDIFY"} and modifier is not None:
         owning_receipt = next(
             (
                 receipt
@@ -2328,9 +2297,94 @@ def _modifier_ready(
                     evaluated.to_mesh_clear()
             except RuntimeError:
                 pass
+    if modifier_type == "MIRROR" and modifier is not None:
+        expected_axis = {
+            "X": (True, False, False),
+            "Y": (False, True, False),
+            "Z": (False, False, True),
+        }.get(expected_mirror_axis)
+        actual_axis_values = tuple(bool(value) for value in modifier.use_axis)
+        actual_mirror_axis = {
+            (True, False, False): "X",
+            (False, True, False): "Y",
+            (False, False, True): "Z",
+        }.get(actual_axis_values)
+        mirror_object_absent = modifier.mirror_object is None
+        mirror_fixed_state_matches = bool(
+            expected_axis is not None
+            and actual_axis_values == expected_axis
+            and tuple(bool(value) for value in modifier.use_bisect_axis)
+            == (False, False, False)
+            and tuple(bool(value) for value in modifier.use_bisect_flip_axis)
+            == (False, False, False)
+            and modifier.use_clip is False
+            and modifier.use_mirror_merge is True
+            and math.isclose(float(modifier.merge_threshold), 0.001, abs_tol=1e-9)
+            and math.isclose(float(modifier.bisect_threshold), 0.001, abs_tol=1e-9)
+            and mirror_object_absent
+            and modifier.use_mirror_vertex_groups is True
+            and modifier.use_mirror_u is False
+            and modifier.use_mirror_v is False
+            and modifier.use_mirror_udim is False
+            and math.isclose(float(modifier.offset_u), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.offset_v), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.mirror_offset_u), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.mirror_offset_v), 0.0, abs_tol=1e-9)
+            and modifier.show_viewport is True
+            and modifier.show_render is True
+            and modifier.show_in_editmode is True
+            and modifier.show_on_cage is False
+            and (
+                not hasattr(modifier, "use_apply_on_spline")
+                or modifier.use_apply_on_spline is False
+            )
+        )
         properties_match = bool(
             properties_match
             and mirror_fixed_state_matches
+            and source_content_intact
+            and evaluated_finite
+            and evaluated_within_limits
+        )
+    elif modifier_type == "SOLIDIFY" and modifier is not None:
+        actual_solidify_thickness = float(modifier.thickness)
+        actual_solidify_offset = float(modifier.offset)
+        actual_solidify_mode = str(modifier.solidify_mode)
+        actual_solidify_even_offset = bool(modifier.use_even_offset)
+        actual_solidify_rim = bool(modifier.use_rim)
+        actual_solidify_rim_only = bool(modifier.use_rim_only)
+        solidify_fixed_state_matches = bool(
+            actual_solidify_mode == "EXTRUDE"
+            and math.isclose(float(modifier.thickness_clamp), 0.0, abs_tol=1e-9)
+            and modifier.use_thickness_angle_clamp is False
+            and math.isclose(
+                float(modifier.thickness_vertex_group), 0.0, abs_tol=1e-9
+            )
+            and math.isclose(float(modifier.edge_crease_inner), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.edge_crease_outer), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.edge_crease_rim), 0.0, abs_tol=1e-9)
+            and int(modifier.material_offset) == 0
+            and int(modifier.material_offset_rim) == 0
+            and modifier.vertex_group == ""
+            and modifier.shell_vertex_group == ""
+            and modifier.rim_vertex_group == ""
+            and actual_solidify_even_offset is True
+            and actual_solidify_rim is True
+            and actual_solidify_rim_only is False
+            and modifier.use_quality_normals is False
+            and modifier.invert_vertex_group is False
+            and modifier.use_flat_faces is False
+            and modifier.use_flip_normals is False
+            and modifier.nonmanifold_thickness_mode == "CONSTRAINTS"
+            and modifier.nonmanifold_boundary_mode == "NONE"
+            and math.isclose(
+                float(modifier.nonmanifold_merge_threshold), 0.0001, abs_tol=1e-9
+            )
+            and math.isclose(float(modifier.bevel_convex), 0.0, abs_tol=1e-9)
+        )
+        properties_match = bool(
+            properties_match
+            and solidify_fixed_state_matches
             and source_content_intact
             and evaluated_finite
             and evaluated_within_limits
@@ -2344,24 +2398,50 @@ def _modifier_ready(
         and modifier.type == modifier_type
         and properties_match
     )
-    return satisfied, {
+    details = {
         "targetId": target_id if isinstance(target_id, str) else None,
         "modifierId": modifier_id if isinstance(modifier_id, str) else None,
         "modifierType": modifier.type if modifier is not None else None,
         "propertiesMatch": properties_match,
-        "axis": actual_mirror_axis,
-        "expectedAxis": (
-            expected_mirror_axis if isinstance(expected_mirror_axis, str) else None
-        ),
-        "mirrorFixedStateMatches": mirror_fixed_state_matches,
-        "mirrorObjectAbsent": mirror_object_absent,
-        "sourceContentIntact": source_content_intact,
-        "evaluatedVertexCount": evaluated_topology[0],
-        "evaluatedEdgeCount": evaluated_topology[1],
-        "evaluatedFaceCount": evaluated_topology[2],
-        "evaluatedFinite": evaluated_finite,
-        "evaluatedWithinLimits": evaluated_within_limits,
     }
+    if modifier_type == "MIRROR":
+        details.update(
+            {
+                "axis": actual_mirror_axis,
+                "expectedAxis": (
+                    expected_mirror_axis
+                    if isinstance(expected_mirror_axis, str)
+                    else None
+                ),
+                "mirrorFixedStateMatches": mirror_fixed_state_matches,
+                "mirrorObjectAbsent": mirror_object_absent,
+                "sourceContentIntact": source_content_intact,
+                "evaluatedVertexCount": evaluated_topology[0],
+                "evaluatedEdgeCount": evaluated_topology[1],
+                "evaluatedFaceCount": evaluated_topology[2],
+                "evaluatedFinite": evaluated_finite,
+                "evaluatedWithinLimits": evaluated_within_limits,
+            }
+        )
+    elif modifier_type == "SOLIDIFY":
+        details.update(
+            {
+                "thickness": actual_solidify_thickness,
+                "offset": actual_solidify_offset,
+                "solidifyMode": actual_solidify_mode,
+                "useEvenOffset": actual_solidify_even_offset,
+                "useRim": actual_solidify_rim,
+                "useRimOnly": actual_solidify_rim_only,
+                "solidifyFixedStateMatches": solidify_fixed_state_matches,
+                "sourceContentIntact": source_content_intact,
+                "evaluatedVertexCount": evaluated_topology[0],
+                "evaluatedEdgeCount": evaluated_topology[1],
+                "evaluatedFaceCount": evaluated_topology[2],
+                "evaluatedFinite": evaluated_finite,
+                "evaluatedWithinLimits": evaluated_within_limits,
+            }
+        )
+    return satisfied, details
 
 
 def _geometry_nodes_ready(

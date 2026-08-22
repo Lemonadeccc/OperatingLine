@@ -775,7 +775,8 @@
                     "blender.mesh.create_torus",
                     "blender.mesh.create_cone",
                     "blender.mesh.create_cylinder",
-                    "blender.modifier.add_mirror"
+                    "blender.modifier.add_mirror",
+                    "blender.modifier.add_solidify"
                   ]
                 }
               },

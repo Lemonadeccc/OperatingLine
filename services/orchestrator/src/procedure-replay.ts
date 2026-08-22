@@ -554,6 +554,38 @@ const replayActionContracts = {
       parameters['modifierType'] === 'MIRROR' &&
       ['X', 'Y', 'Z'].includes(String(parameters['axis'])),
   },
+  'blender.modifier.add_solidify': {
+    observationShape: 'solidify_modifier',
+    observationKind: 'modifier_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      modifierId: actionArguments['modifierId'],
+      modifierType: 'SOLIDIFY',
+      thickness: actionArguments['thickness'],
+      offset: actionArguments['offset'],
+      solidifyMode: 'EXTRUDE',
+      useEvenOffset: true,
+      useRim: true,
+      useRimOnly: false,
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      Object.keys(parameters).length === 9 &&
+      typeof parameters['targetId'] === 'string' &&
+      parameters['targetId'].length > 0 &&
+      typeof parameters['modifierId'] === 'string' &&
+      parameters['modifierId'].length > 0 &&
+      parameters['modifierType'] === 'SOLIDIFY' &&
+      isFiniteNumber(parameters['thickness']) &&
+      parameters['thickness'] >= 0.0001 &&
+      parameters['thickness'] <= 100 &&
+      isFiniteNumber(parameters['offset']) &&
+      parameters['offset'] >= -1 &&
+      parameters['offset'] <= 1 &&
+      parameters['solidifyMode'] === 'EXTRUDE' &&
+      parameters['useEvenOffset'] === true &&
+      parameters['useRim'] === true &&
+      parameters['useRimOnly'] === false,
+  },
 } as const satisfies Record<
   ProcedureLeafReplayActionName,
   | {
@@ -572,6 +604,14 @@ const replayActionContracts = {
     }
   | {
       readonly observationShape: 'mirror_modifier';
+      readonly observationKind: 'modifier_ready';
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+    }
+  | {
+      readonly observationShape: 'solidify_modifier';
       readonly observationKind: 'modifier_ready';
       readonly expectedParameters: (
         actionArguments: Record<string, unknown>,
@@ -832,7 +872,70 @@ export function validateStrongProcedureLeafReplayObservation(
     );
   }
 
-  if (actionContract.observationShape === 'mirror_modifier') {
+  if (actionContract.observationShape === 'solidify_modifier') {
+    const strongDetailKeys = new Set([
+      'parameters',
+      'supported',
+      'targetId',
+      'modifierId',
+      'modifierType',
+      'propertiesMatch',
+      'thickness',
+      'offset',
+      'solidifyMode',
+      'useEvenOffset',
+      'useRim',
+      'useRimOnly',
+      'solidifyFixedStateMatches',
+      'sourceContentIntact',
+      'evaluatedVertexCount',
+      'evaluatedEdgeCount',
+      'evaluatedFaceCount',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ]);
+    const booleanDetailKeys = [
+      'propertiesMatch',
+      'useEvenOffset',
+      'useRim',
+      'solidifyFixedStateMatches',
+      'sourceContentIntact',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ] as const;
+    const evaluatedCounts = [
+      ['evaluatedVertexCount', 8192],
+      ['evaluatedEdgeCount', 16384],
+      ['evaluatedFaceCount', 8192],
+    ] as const;
+    if (
+      Object.keys(observation.details).length !== strongDetailKeys.size ||
+      Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
+      observation.details['targetId'] !== expectedParameters['targetId'] ||
+      observation.details['modifierId'] !== expectedParameters['modifierId'] ||
+      observation.details['modifierType'] !== 'SOLIDIFY' ||
+      !isFiniteNumber(observation.details['thickness']) ||
+      !isFiniteNumber(expectedParameters['thickness']) ||
+      Math.abs(observation.details['thickness'] - expectedParameters['thickness']) > 1e-6 ||
+      !isFiniteNumber(observation.details['offset']) ||
+      !isFiniteNumber(expectedParameters['offset']) ||
+      Math.abs(observation.details['offset'] - expectedParameters['offset']) > 1e-6 ||
+      observation.details['solidifyMode'] !== 'EXTRUDE' ||
+      booleanDetailKeys.some((key) => observation.details[key] !== true) ||
+      observation.details['useRimOnly'] !== false ||
+      evaluatedCounts.some(([key, maximum]) => {
+        const value = observation.details[key];
+        return (
+          !Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > maximum
+        );
+      })
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed Solidify observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'mirror_modifier') {
     const strongDetailKeys = new Set([
       'parameters',
       'supported',

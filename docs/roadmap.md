@@ -635,6 +635,13 @@
           与目录 `proofArguments` 完全一致时才携带声明。当前证明明确排除任意参数、其它 UI scale、OS HID、
           managed action/receipt 与通用 Companion 请求路径。见
           [ADR 0100](adr/0100-native-uv-sphere-menu-control-proof.md)。
+    - [x] Solidify modifier action-level MCP executor：冻结 InteractionCatalog `1.41.0`，由 `1.42.0` 只为
+          `blender.modifier.add_solidify` 开放 accepted replay 的通用 action executor。Runtime 从不可变 binding
+          派生 target/modifier identity、受管名称、thickness 与 offset；强 `modifier_ready` 要求精确参数、完整
+          固定 Solidify RNA、receipt 保护的源 Mesh 内容，以及正整数、有限且不超过 `8192/16384/8192` 的真实
+          evaluated topology。成功继续绑定 decision、Start→Next 原生 Undo checkpoint、可信 receipt 与补偿
+          回退；menu/shortcut 仍 unavailable，旧 binding 不继承权限。见
+          [ADR 0101](adr/0101-solidify-action-level-mcp.md)。
     - [ ] Poke Faces 隔离三叶 compound proof：Blender 4.5.3/5.1.1 前台已严格通过 Forward
           `Enter Edit→Poke→Exit Edit`、Back/Redo 各一次原生 history operation、逐叶 intent/receipt、
           middle-leaf-only checkpoint/history、完整 current-state integrity、每叶 crash/reconnect 分类、持久 lock、
@@ -643,7 +650,7 @@
           crash/restart、`.blend` file-load 与 transport disconnect/reconnect；这些目前只做 marker mismatch 分类，
           所以完整 Wave 1B gate 未关闭。未发布或修改任何 catalog，production Poke 继续 unavailable，等待上述
           host 边界与 Wave 2 catalog publication/composition。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
-    - [ ] 真实逐控件 menu/shortcut executor，以及八种已证明 managed action 之外的复合与编辑叶节点覆盖；根据失败
+    - [ ] 真实逐控件 menu/shortcut executor，以及九种已证明 managed action 之外的复合与编辑叶节点覆盖；根据失败
           分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
         证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，

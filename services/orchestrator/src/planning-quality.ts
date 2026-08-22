@@ -118,7 +118,7 @@ export function evaluatePlanningQuality(
     readonly managedActionReplayAuthority?: {
       readonly replayId: string;
       readonly leafId: string;
-      readonly actionName: 'blender.modifier.add_mirror';
+      readonly actionName: 'blender.modifier.add_mirror' | 'blender.modifier.add_solidify';
       readonly targetId: string;
     };
   } = {},
@@ -182,6 +182,39 @@ export function evaluatePlanningQuality(
     const modifierId = action?.arguments['modifierId'];
     const axis = action?.arguments['axis'];
     const expectedObservation = replayStep?.expectedObservations[0];
+    const observationParameters = expectedObservation?.parameters;
+    const exactMirrorBoundary =
+      managedActionReplayAuthority.actionName === 'blender.modifier.add_mirror' &&
+      action?.name === 'blender.modifier.add_mirror' &&
+      ['X', 'Y', 'Z'].includes(String(axis)) &&
+      Object.keys(action.arguments).length === 4 &&
+      observationParameters !== undefined &&
+      Object.keys(observationParameters).length === 4 &&
+      observationParameters['modifierType'] === 'MIRROR' &&
+      observationParameters['axis'] === axis;
+    const thickness = action?.arguments['thickness'];
+    const offset = action?.arguments['offset'];
+    const exactSolidifyBoundary =
+      managedActionReplayAuthority.actionName === 'blender.modifier.add_solidify' &&
+      action?.name === 'blender.modifier.add_solidify' &&
+      typeof thickness === 'number' &&
+      Number.isFinite(thickness) &&
+      thickness >= 0.0001 &&
+      thickness <= 100 &&
+      typeof offset === 'number' &&
+      Number.isFinite(offset) &&
+      offset >= -1 &&
+      offset <= 1 &&
+      Object.keys(action.arguments).length === 5 &&
+      observationParameters !== undefined &&
+      Object.keys(observationParameters).length === 9 &&
+      observationParameters['modifierType'] === 'SOLIDIFY' &&
+      observationParameters['thickness'] === thickness &&
+      observationParameters['offset'] === offset &&
+      observationParameters['solidifyMode'] === 'EXTRUDE' &&
+      observationParameters['useEvenOffset'] === true &&
+      observationParameters['useRim'] === true &&
+      observationParameters['useRimOnly'] === false;
     const exactManagedActionBoundary =
       request.targetAdapterId === 'blender' &&
       action?.adapterId === 'blender' &&
@@ -190,8 +223,7 @@ export function evaluatePlanningQuality(
       typeof modifierId === 'string' &&
       modifierId.length > 0 &&
       typeof action.arguments['modifierName'] === 'string' &&
-      ['X', 'Y', 'Z'].includes(String(axis)) &&
-      Object.keys(action.arguments).length === 4 &&
+      (exactMirrorBoundary || exactSolidifyBoundary) &&
       replayStep?.anchors.filter((anchor) => anchor.kind === 'object').length === 1 &&
       replayStep.anchors.filter((anchor) => anchor.kind === 'owned_control').length === 1 &&
       replayStep.anchors.some(
@@ -202,10 +234,8 @@ export function evaluatePlanningQuality(
       ) &&
       replayStep.expectedObservations.length === 1 &&
       expectedObservation?.kind === 'modifier_ready' &&
-      expectedObservation.parameters['targetId'] === targetId &&
-      expectedObservation.parameters['modifierId'] === modifierId &&
-      expectedObservation.parameters['modifierType'] === 'MIRROR' &&
-      expectedObservation.parameters['axis'] === axis;
+      observationParameters?.['targetId'] === targetId &&
+      observationParameters['modifierId'] === modifierId;
     const exactTuple =
       verifiedExternalResourceConsumers.length === 1
         ? verifiedExternalResourceConsumers[0]

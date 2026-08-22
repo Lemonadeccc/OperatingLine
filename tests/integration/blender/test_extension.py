@@ -1407,6 +1407,22 @@ def assert_solidify_round_trip_and_conflicts() -> None:
         session.receipts,
     )
     assert observation[0]["satisfied"] is True
+    details = observation[0]["details"]
+    assert math.isclose(details["thickness"], 0.25, abs_tol=1e-6)
+    assert math.isclose(details["offset"], -0.5, abs_tol=1e-6)
+    assert details["solidifyMode"] == "EXTRUDE"
+    assert details["useEvenOffset"] is True
+    assert details["useRim"] is True
+    assert details["useRimOnly"] is False
+    assert details["solidifyFixedStateMatches"] is True
+    assert details["sourceContentIntact"] is True
+    assert details["evaluatedFinite"] is True
+    assert details["evaluatedWithinLimits"] is True
+    assert (
+        details["evaluatedVertexCount"],
+        details["evaluatedEdgeCount"],
+        details["evaluatedFaceCount"],
+    ) == (16, 24, 12)
     exact_observation_parameters = observation[0]["details"]["parameters"]
     for field, wrong_value in (
         ("thickness", "0.25"),
@@ -1416,6 +1432,7 @@ def assert_solidify_round_trip_and_conflicts() -> None:
         ("useRim", "true"),
         ("useRimOnly", 0),
         ("axis", "X"),
+        ("showViewport", True),
         ("unexpected", True),
     ):
         malformed = observation_module.evaluate_observations(
@@ -1432,7 +1449,59 @@ def assert_solidify_round_trip_and_conflicts() -> None:
         )
         assert malformed[0]["satisfied"] is False, field
 
+    for property_name, tampered_value in (
+        ("thickness_clamp", 0.25),
+        ("use_quality_normals", True),
+        ("nonmanifold_merge_threshold", 0.002),
+    ):
+        original_value = getattr(modifier, property_name)
+        setattr(modifier, property_name, tampered_value)
+        tampered = observation_module.evaluate_observations(
+            (
+                {
+                    "kind": "modifier_ready",
+                    "parameters": exact_observation_parameters,
+                },
+            ),
+            session.receipts,
+        )[0]
+        assert tampered["satisfied"] is False, property_name
+        assert tampered["details"]["solidifyFixedStateMatches"] is False
+        setattr(modifier, property_name, original_value)
+
+    original_coordinate = source_mesh.vertices[0].co.copy()
+    source_mesh.vertices[0].co.x += 0.125
+    source_mesh.update()
+    source_tampered = observation_module.evaluate_observations(
+        (
+            {
+                "kind": "modifier_ready",
+                "parameters": exact_observation_parameters,
+            },
+        ),
+        session.receipts,
+    )[0]
+    assert source_tampered["satisfied"] is False
+    assert source_tampered["details"]["sourceContentIntact"] is False
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Tampered Solidify source must block rollback")
+    source_mesh.vertices[0].co = original_coordinate
+    source_mesh.update()
+
     modifier.thickness = 0.5
+    assert observation_module.evaluate_observations(
+        (
+            {
+                "kind": "modifier_ready",
+                "parameters": exact_observation_parameters,
+            },
+        ),
+        session.receipts,
+    )[0]["satisfied"] is False
     try:
         session.back()
     except RuntimeError as error:

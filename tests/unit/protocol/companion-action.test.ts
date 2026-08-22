@@ -12,6 +12,7 @@ import {
   companionActionResultAckSchema,
   actionLevelMcpActionNames,
   managedPrimitiveActionNames,
+  procedureLeafReplayObservationSchema,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
 
@@ -162,7 +163,9 @@ describe('companion action execution protocol', () => {
     expect(actionLevelMcpActionNames).toEqual([
       ...managedPrimitiveActionNames,
       'blender.modifier.add_mirror',
+      'blender.modifier.add_solidify',
     ]);
+    expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_solidify');
     expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_mirror');
     for (const actionName of actionLevelMcpActionNames) {
       const request = delivery(actionName);
@@ -204,6 +207,55 @@ describe('companion action execution protocol', () => {
       { ...request, python: 'exec(request.step)' },
     ]) {
       expect(companionActionExecutionDeliverySchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
+  it('requires the exact strong managed Solidify replay observation', () => {
+    const observation = {
+      kind: 'modifier_ready',
+      satisfied: true,
+      details: {
+        parameters: {
+          targetId: 'tutorial.cube',
+          modifierId: 'tutorial.cube.solidify',
+          modifierType: 'SOLIDIFY',
+          thickness: 0.25,
+          offset: -0.5,
+          solidifyMode: 'EXTRUDE',
+          useEvenOffset: true,
+          useRim: true,
+          useRimOnly: false,
+        },
+        supported: true,
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.solidify',
+        modifierType: 'SOLIDIFY',
+        propertiesMatch: true,
+        thickness: 0.25,
+        offset: -0.5,
+        solidifyMode: 'EXTRUDE',
+        useEvenOffset: true,
+        useRim: true,
+        useRimOnly: false,
+        solidifyFixedStateMatches: true,
+        sourceContentIntact: true,
+        evaluatedVertexCount: 16,
+        evaluatedEdgeCount: 24,
+        evaluatedFaceCount: 10,
+        evaluatedFinite: true,
+        evaluatedWithinLimits: true,
+      },
+    } as const;
+    expect(procedureLeafReplayObservationSchema.parse(observation)).toEqual(observation);
+
+    for (const invalid of [
+      { ...observation, details: { ...observation.details, thickness: 0.5 } },
+      { ...observation, details: { ...observation.details, solidifyMode: 'NON_MANIFOLD' } },
+      { ...observation, details: { ...observation.details, useRimOnly: true } },
+      { ...observation, details: { ...observation.details, sourceContentIntact: false } },
+      { ...observation, details: { ...observation.details, evaluatedVertexCount: 8193 } },
+    ]) {
+      expect(procedureLeafReplayObservationSchema.safeParse(invalid).success).toBe(false);
     }
   });
 

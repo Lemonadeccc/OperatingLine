@@ -1931,7 +1931,7 @@ def execute_solidify(
 ) -> ActionReceipt:
     ensure_receipts_intact(receipts)
     registry = build_resource_registry(receipts)
-    target_identity, target, _mesh_identity = _owned_mesh_target(
+    target_identity, target, mesh_identity = _owned_mesh_target(
         registry, definition.target_id
     )
     _ensure_solidify_input_is_bounded(receipts, target)
@@ -1940,6 +1940,7 @@ def execute_solidify(
         raise RuntimeError(
             f"Cannot replace existing modifier: {definition.modifier_name}"
         )
+    source_mesh_content = mesh_content_signature(target.data)
     receipt_id = new_receipt_id()
     mutations: list[MutationRecord] = []
     modifier = None
@@ -1985,6 +1986,22 @@ def execute_solidify(
                 f"modifier:{definition.modifier_id}",
                 None,
                 state,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                mesh_identity,
+                mesh_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                mesh_identity,
+                "mesh_content",
+                source_mesh_content,
+                source_mesh_content,
             )
         )
         return make_receipt(

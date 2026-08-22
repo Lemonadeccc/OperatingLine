@@ -38,6 +38,7 @@ const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_torus': 'torus_ready',
   'blender.mesh.create_cone': 'cone_ready',
   'blender.mesh.create_cylinder': 'cylinder_ready',
+  'blender.modifier.add_solidify': 'modifier_ready',
   'blender.modifier.add_mirror': 'modifier_ready',
 } as const satisfies Record<ProcedureLeafReplayActionName, string>;
 
@@ -767,6 +768,60 @@ const procedureLeafReplayMirrorParametersSchema = z.strictObject({
   axis: z.enum(['X', 'Y', 'Z']),
 });
 
+const procedureLeafReplaySolidifyParametersSchema = z.strictObject({
+  targetId: z.string().min(1),
+  modifierId: z.string().min(1),
+  modifierType: z.literal('SOLIDIFY'),
+  thickness: z.number().min(0.0001).max(100).finite(),
+  offset: z.number().min(-1).max(1).finite(),
+  solidifyMode: z.literal('EXTRUDE'),
+  useEvenOffset: z.literal(true),
+  useRim: z.literal(true),
+  useRimOnly: z.literal(false),
+});
+
+const procedureLeafReplaySolidifyDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplaySolidifyParametersSchema,
+    supported: z.literal(true),
+    targetId: z.string().min(1),
+    modifierId: z.string().min(1),
+    modifierType: z.literal('SOLIDIFY'),
+    propertiesMatch: z.literal(true),
+    thickness: z.number().min(0.0001).max(100).finite(),
+    offset: z.number().min(-1).max(1).finite(),
+    solidifyMode: z.literal('EXTRUDE'),
+    useEvenOffset: z.literal(true),
+    useRim: z.literal(true),
+    useRimOnly: z.literal(false),
+    solidifyFixedStateMatches: z.literal(true),
+    sourceContentIntact: z.literal(true),
+    evaluatedVertexCount: z.number().int().positive().max(8192),
+    evaluatedEdgeCount: z.number().int().positive().max(16384),
+    evaluatedFaceCount: z.number().int().positive().max(8192),
+    evaluatedFinite: z.literal(true),
+    evaluatedWithinLimits: z.literal(true),
+  })
+  .superRefine((details, context) => {
+    if (
+      details.targetId !== details.parameters.targetId ||
+      details.modifierId !== details.parameters.modifierId ||
+      details.modifierType !== details.parameters.modifierType ||
+      Math.abs(details.thickness - details.parameters.thickness) > 1e-6 ||
+      Math.abs(details.offset - details.parameters.offset) > 1e-6 ||
+      details.solidifyMode !== details.parameters.solidifyMode ||
+      details.useEvenOffset !== details.parameters.useEvenOffset ||
+      details.useRim !== details.parameters.useRim ||
+      details.useRimOnly !== details.parameters.useRimOnly
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Solidify replay details must match their evaluated parameters',
+      });
+    }
+  });
+
 const procedureLeafReplayMirrorDetailsSchema = z
   .strictObject({
     parameters: procedureLeafReplayMirrorParametersSchema,
@@ -844,10 +899,13 @@ const procedureLeafReplayCylinderObservationSchema = companionObservationSchema.
   details: procedureLeafReplayCylinderDetailsSchema,
 });
 
-const procedureLeafReplayMirrorObservationSchema = companionObservationSchema.safeExtend({
+const procedureLeafReplayModifierObservationSchema = companionObservationSchema.safeExtend({
   kind: z.literal('modifier_ready'),
   satisfied: z.literal(true),
-  details: procedureLeafReplayMirrorDetailsSchema,
+  details: z.union([
+    procedureLeafReplaySolidifyDetailsSchema,
+    procedureLeafReplayMirrorDetailsSchema,
+  ]),
 });
 
 export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind', [
@@ -858,7 +916,7 @@ export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind',
   procedureLeafReplayTorusObservationSchema,
   procedureLeafReplayConeObservationSchema,
   procedureLeafReplayCylinderObservationSchema,
-  procedureLeafReplayMirrorObservationSchema,
+  procedureLeafReplayModifierObservationSchema,
 ]);
 export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 

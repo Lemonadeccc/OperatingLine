@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.41.0",
+  "catalogVersion": "1.42.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.22.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -3271,6 +3271,26 @@
         ],
         "reason": "The action must bind exact thickness, offset, ownership, bounded topology, and compensation state while fixing mode to EXTRUDE, even offset and rim on, and rim-only off; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/solidify.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The native modifier UI does not encode the managed modifier identity and name, exact thickness and offset, fixed Solidify properties, bounded topology checks, observation, or compensating rollback contract."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No declared shortcut expresses the accepted Solidify parameters and managed modifier contract."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
       }
     },
     {

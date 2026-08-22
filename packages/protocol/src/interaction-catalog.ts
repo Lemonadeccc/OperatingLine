@@ -1300,10 +1300,9 @@ function validateRecipe(recipe: InteractionRecipe): void {
   }
 
   const mcp = recipe.procedureMaterialization?.mcp;
-  const expectedActionLevelMcpRecipeId =
-    recipe.actionName === 'blender.modifier.add_mirror'
-      ? 'blender.modifier.add_mirror.semantic'
-      : `${recipe.actionName}.native`;
+  const expectedActionLevelMcpRecipeId = recipe.actionName.startsWith('blender.modifier.')
+    ? `${recipe.actionName}.semantic`
+    : `${recipe.actionName}.native`;
   if (
     mcp?.availability === 'available' &&
     (!actionLevelMcpActionNameSchema.safeParse(recipe.actionName).success ||

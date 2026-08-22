@@ -34,8 +34,8 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.32.0` 与 ActionCatalog `1.22.0` 一一绑定 27 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0` 至已冻结的 `1.31.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+`1.42.0` 与 ActionCatalog `1.22.0` 一一绑定 27 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0` 至已冻结的 `1.41.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
 candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
 保留四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
 与 `objectName`；其九步 candidate shortcut 依次执行 `Shift+A → Mesh → Ico Sphere`、`F9`、
@@ -99,14 +99,19 @@ shortcut：`TAB → 3 → A → F3(query="poke faces") → ENTER → F9 → Offs
 `targetId`、`resultMeshId`、`resultMeshName` 显式省略，menu/MCP unavailable；现代默认 keymap 没有
 Poke Faces 直达键，legacy `Alt+P` 不进入默认轨迹。原生 operator 就地修改当前 Mesh，不创建 managed
 replacement identity。
+Solidify Modifier 保留 `Layout → Modifiers → Add Modifier → Solidify Settings` 四步 `semantic_path`；
+原生 UI 无法表达受管 identity/name、精确参数、固定 RNA、源内容/evaluated topology 门、Observation 与补偿
+回退，因此 menu/shortcut unavailable。InteractionCatalog `1.42.0` 只为已接受 replay 的 next step 声明
+`operatingline.blender.action.execute`，历史 `1.41.0` 不继承该权限。
 Mirror Modifier 保留七步 `semantic_path`：`Layout → Owned Mesh → Modifiers → Add Modifier → Generate →
 Mirror → Managed Mirror Contract`。其中 Add Modifier、Generate 和 Mirror 分别记录真实 Host 标识
 `OBJECT_MT_modifier_add`、`OBJECT_MT_modifier_add_generate` 与 `object.modifier_add(type=MIRROR)`。
 Properties Modifier context 的 `Shift+A` 只是一条打开 Add Modifier 的上下文别名，不能携带 IDs、
-受管名称、完整固定 RNA、安全门、Observation 或回退；menu/shortcut/MCP materialization 均 unavailable。
+受管名称、完整固定 RNA、安全门、Observation 或回退；menu/shortcut materialization unavailable，MCP 仅由
+`1.40.0+` 的 accepted-replay managed executor 提供。
 Icosphere、Cube、Plane、Torus、Cone 和 Cylinder 都省略内部
-`resourceId`；Torus、Cone、Cylinder shortcut unavailable，所有 MCP track 也因没有真实 action-level tool
-而 unavailable。
+`resourceId`；Torus、Cone、Cylinder shortcut unavailable。只有目录逐 action 明确声明的 MCP track 可用，
+其余 action 继续 fail closed 为 unavailable。
 Icosphere shortcut 使用 ProcedureTree `1.1.0` / Result `1.3.0`，Cube 与 Plane shortcut 使用 Result
 `1.2.0`，Subdivide shortcut 使用 Result `1.3.0`，其余这些 menu-only 结果使用 Result `1.1.0`；轨迹仍是
 `candidate`/`structural_only` 教学投影。Icosphere 的创建与 F9 参数前缀已在 Blender 4.5.3/5.1.1
@@ -176,8 +181,11 @@ Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/U
 
 通用 Procedure replay 切片不驱动上述菜单或 candidate shortcut；ADR 0094 的 Subdivision Surface
 `native_shortcut_proof` 是独立、显式审批且仅限 factory Cube 的例外。Orchestrator 重新验证并物化单一 UV Sphere、
-Icosphere、Cube、Plane、Torus、Cone 或 Cylinder leaf 后，只向目标实例投递普通待审 GuideProposal；用户 Accept 后仍由 Blender
-的既有受管 Session action 执行。ActionCatalog `1.18.0` 为 UV Sphere 增加 `uv_sphere_ready`，`1.19.0`
+Icosphere、Cube、Plane、Torus、Cone、Cylinder、Solidify 或 Mirror leaf 后，只向目标实例投递普通待审
+GuideProposal；用户 Accept 后可由 Blender 的既有受管 Session action 执行；只有精确目录声明 MCP available 的
+accepted、已 Start、未触碰 next step 才能改走通用 action-level executor。该公开请求只携带 replay/request
+identity 与当前 report CAS，Action 和 arguments 始终从不可变 binding 派生。
+ActionCatalog `1.18.0` 为 UV Sphere 增加 `uv_sphere_ready`，`1.19.0`
 为 Icosphere 增加 `icosphere_ready`，`1.20.0` 为 Cube/Plane 增加 `cube_ready`/`plane_ready`，`1.21.0`
 为 Torus 增加 `torus_ready`，`1.22.0` 为 Cone/Cylinder 增加 `cone_ready`/`cylinder_ready`。七者都从
 receipt 核对 Collection/Object/Mesh ownership、data/link/content mutations、名称、location、实际 basis
@@ -185,15 +193,18 @@ rotation、单位 scale 和 Mesh 内容签名；球体验证顶点半径，Cube/
 UV Sphere 固定 32×16 topology，Icosphere 按 `subdivisions` 验证精确 topology，Cube/Plane 固定验证
 `8/12/6` 与 `4/4/1`；Torus 按两组 segments 验证动态拓扑，并按 accepted radii 逐顶点复算参数化坐标；
 Cone/Cylinder 复算中点、方向 Quaternion、世界端点、32 段局部环坐标和面形，区分 `64/96/34` 锥台/圆柱与
-`33/64/33` 单端尖锥。七者都拒绝额外
+`33/64/33` 单端尖锥。Solidify 的 `modifier_ready` 还必须精确匹配 target/modifier identity、thickness/offset、
+固定 `EXTRUDE`/even-offset/rim 状态，证明 receipt 记录的源 Mesh 内容未变，并提供正整数、有限且不超过
+`8192/16384/8192` 的真实 evaluated topology。七种 primitive 都拒绝额外
 modifier、shape key、material slot、parent 或 constraint。accepted decision 与 terminal
 `step_succeeded` report 必须由同一协商 lease 提交，Runtime 以服务端 receipt 序列固定先后；之后调用方
 才可 finalize 追加式
 attestation。新的 finalization 还要求 terminal report 携带当前 `next` 原生 Undo checkpoint，并把 Scene
 marker、journal snapshot、完整 Plan/hash/execution、唯一 leaf receipt 与产物备份绑定到报告时状态。
 attestation 明确声明 `currentHostStateAfterReport: not_verified`。该证明仍只覆盖 managed Action 结果；menu
-未执行，shortcut 按目录事实保持 candidate 未执行或 unavailable，MCP unavailable，也不证明报告之后的当前
-场景或具体 UI 执行入口。显式 current-state request 会作为持久唯一挑战随 Guide poll 只投递给精确协商
+未执行，shortcut 按目录事实保持 candidate 未执行或 unavailable，MCP 按 replay 的目录版本记录为 grounded
+未执行或 unavailable。action-level MCP 的 `succeeded` status 另行证明严格入口链，但同样不证明报告之后的当前
+场景或逐控件 UI。显式 current-state request 会作为持久唯一挑战随 Guide poll 只投递给精确协商
 lease；Companion 在主线程只读复算 request leaf 的强 Observation，读取当前 Scene marker/journal 后回报
 `current_state_rechecked`，不调用 action、rollback 或 Undo。Runtime 保存 verified 或确定性的
 session/step/observation/checkpoint mismatch；直接成功与 `recovered_after_repair` 可作为 checkpoint-backed 基线，
@@ -213,7 +224,9 @@ session/step/observation/checkpoint mismatch；直接成功与 `recovered_after_
 [ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md) 与
 [ADR 0072](../adr/0072-challenged-procedure-current-state-verification.md) 与
 [ADR 0073](../adr/0073-managed-procedure-failure-recovery-attestation.md) 与
-[ADR 0074](../adr/0074-bounded-observation-retries.md)。
+[ADR 0074](../adr/0074-bounded-observation-retries.md)、
+[ADR 0099](../adr/0099-mirror-action-level-mcp.md) 与
+[ADR 0101](../adr/0101-solidify-action-level-mcp.md)。
 
 ## 视觉引导状态
 
@@ -442,7 +455,9 @@ Edit/Modifier/Geometry Nodes 当前开放十一个有界动作：Subdivide 复�
 方法把复制 Mesh 转换为三角面；Bevel 创建一个不应用的 modifier；Solidify
 只接受 `thickness` (`0.0001..100`) 与 `offset` (`-1..1`)，只允许 receipt-tracked 前置 Modifier，且源 Mesh 与
 前置 stack 的求值输入均不超过 8192 vertices、16384 edges、8192 polygons，固定 `solidify_mode=EXTRUDE`、`use_even_offset=true`、`use_rim=true` 和
-`use_rim_only=false`；Extrude Region 解析 1–256 个唯一 polygon index，要求一个有边界的连通面区域，
+`use_rim_only=false`；receipt 记录 Object→Mesh 同值 guard 与源 `mesh_content`，严格 `modifier_ready`
+同时复核 accepted 参数、完整固定属性、源内容和真实 evaluated topology，因此源 Mesh 或未开放 Solidify
+属性被外部修改时 Observation 与 Back 都 fail closed。Extrude Region 解析 1–256 个唯一 polygon index，要求一个有边界的连通面区域，
 按长度在 `0.0001..1000` 的固定局部空间向量移动新顶点，并对源/结果实施相同拓扑上限；它在读取索引前验证
 源 Mesh 内容与 Object→Mesh receipt 链，再按来源顶点、无向边和面顶点集合规范化结果索引，允许后续
 Extrude 在 Blender 4.5/5.1 间稳定引用结果 polygon；Subdivision Surface 只接受

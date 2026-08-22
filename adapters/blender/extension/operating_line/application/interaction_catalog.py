@@ -2097,8 +2097,8 @@ def _validate_ordered_parameter_operations(
     if materialization is None:
         return
     expected_action_level_mcp_recipe_id = (
-        "blender.modifier.add_mirror.semantic"
-        if recipe.action_name == "blender.modifier.add_mirror"
+        f"{recipe.action_name}.semantic"
+        if recipe.action_name.startswith("blender.modifier.")
         else f"{recipe.action_name}.native"
     )
     if (

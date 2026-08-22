@@ -222,6 +222,49 @@ function strongMirrorObservationDetails(input: {
   };
 }
 
+function strongSolidifyObservationDetails(input: {
+  readonly parameters: Record<string, unknown>;
+  readonly evaluatedTopology: {
+    readonly evaluatedVertexCount: number;
+    readonly evaluatedEdgeCount: number;
+    readonly evaluatedFaceCount: number;
+  };
+}) {
+  const targetId = input.parameters['targetId'];
+  const modifierId = input.parameters['modifierId'];
+  const modifierType = input.parameters['modifierType'];
+  const thickness = input.parameters['thickness'];
+  const offset = input.parameters['offset'];
+  if (
+    typeof targetId !== 'string' ||
+    typeof modifierId !== 'string' ||
+    modifierType !== 'SOLIDIFY' ||
+    typeof thickness !== 'number' ||
+    typeof offset !== 'number'
+  ) {
+    throw new Error('Expected managed Solidify observation identities and parameters');
+  }
+  return {
+    parameters: structuredClone(input.parameters),
+    supported: true,
+    targetId,
+    modifierId,
+    modifierType,
+    propertiesMatch: true,
+    thickness,
+    offset,
+    solidifyMode: 'EXTRUDE' as const,
+    useEvenOffset: true as const,
+    useRim: true as const,
+    useRimOnly: false as const,
+    solidifyFixedStateMatches: true as const,
+    sourceContentIntact: true as const,
+    ...input.evaluatedTopology,
+    evaluatedFinite: true as const,
+    evaluatedWithinLimits: true as const,
+  };
+}
+
 async function waitUntilAfter(isoTimestamp: string): Promise<void> {
   const timestamp = Date.parse(isoTimestamp);
   for (let attempt = 0; attempt < 100 && Date.now() <= timestamp; attempt += 1) {
@@ -1050,6 +1093,73 @@ function mirrorAuthoringCandidateFixture(
       modifierId: 'tutorial.cube.mirror',
       modifierType: 'MIRROR',
       axis: 'Y',
+    },
+  };
+  return tree;
+}
+
+function solidifyAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Solidify authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_solidify',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.solidify',
+      modifierName: 'OperatingLine.Cube.Solidify',
+      thickness: 0.25,
+      offset: -0.5,
+    },
+  };
+  leaf['title'] = 'Add a bounded Solidify modifier';
+  leaf['intent'] = 'Add a managed Solidify modifier with exact thickness and offset.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'add_solidify_modifier',
+    description: 'Add one Solidify modifier to the accepted Cube.',
+    parameters: { thickness: 0.25, offset: -0.5 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Object Mode modifier target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Track the managed Solidify modifier identity and name.',
+    parameters: {
+      modifierId: 'tutorial.cube.solidify',
+      modifierName: 'OperatingLine.Cube.Solidify',
+    },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.solidify',
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'modifier_ready',
+    parameters: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.solidify',
+      modifierType: 'SOLIDIFY',
+      thickness: 0.25,
+      offset: -0.5,
+      solidifyMode: 'EXTRUDE',
+      useEvenOffset: true,
+      useRim: true,
+      useRimOnly: false,
     },
   };
   return tree;
@@ -5396,6 +5506,14 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 16, edgeCount: 24, faceCount: 12 },
       geometryDetailKeys: [],
     },
+    {
+      primitive: 'solidify',
+      actionName: 'blender.modifier.add_solidify',
+      goal: '在已接受的 Cube 上添加厚度和偏移精确的 Solidify modifier。',
+      fixture: solidifyAuthoringCandidateFixture,
+      topology: { vertexCount: 16, edgeCount: 24, faceCount: 12 },
+      geometryDetailKeys: [],
+    },
   ])(
     'gates the accepted $primitive orchestration result on its exact action-level MCP and Start checkpoint',
     async ({ primitive, actionName, goal, fixture, topology, geometryDetailKeys }) => {
@@ -5449,14 +5567,16 @@ describe('procedure compilation runtime', () => {
         expect(proposed.binding).toMatchObject({
           actionName,
           claims: {
-            menuTrack: primitive === 'mirror' ? 'unavailable' : 'catalog_grounded_not_executed',
+            menuTrack: ['mirror', 'solidify'].includes(primitive)
+              ? 'unavailable'
+              : 'catalog_grounded_not_executed',
             mcpTrack: 'catalog_grounded_not_executed',
           },
           materialization: {
             formatVersion: '1.4.0',
             coverage: [
               expect.objectContaining({
-                menu: primitive === 'mirror' ? 'unavailable' : 'materialized',
+                menu: ['mirror', 'solidify'].includes(primitive) ? 'unavailable' : 'materialized',
                 mcp: 'materialized',
               }),
             ],
@@ -5615,11 +5735,20 @@ describe('procedure compilation runtime', () => {
                   evaluatedFaceCount: topology.faceCount,
                 },
               })
-            : strongPrimitiveObservationDetails({
-                parameters: expectedObservation.parameters,
-                topology,
-                geometryDetailKeys,
-              });
+            : primitive === 'solidify'
+              ? strongSolidifyObservationDetails({
+                  parameters: expectedObservation.parameters,
+                  evaluatedTopology: {
+                    evaluatedVertexCount: topology.vertexCount,
+                    evaluatedEdgeCount: topology.edgeCount,
+                    evaluatedFaceCount: topology.faceCount,
+                  },
+                })
+              : strongPrimitiveObservationDetails({
+                  parameters: expectedObservation.parameters,
+                  topology,
+                  geometryDetailKeys,
+                });
         const reportFor = (sequence: number, details: Record<string, unknown>) => {
           const occurredAt = new Date().toISOString();
           return {
@@ -5755,6 +5884,48 @@ describe('procedure compilation runtime', () => {
             companionActionExecutionStatusSchema.parse(
               (
                 await callMcpTool(runtime, 8974, 'operatingline.blender.action.status', {
+                  requestId: actionRequest.requestId,
+                })
+              ).result?.structuredContent,
+            ),
+          ).toMatchObject({ status: 'dispatched' });
+        }
+
+        if (primitive === 'solidify') {
+          const missingFixedStateDetails: Record<string, unknown> =
+            structuredClone(fullObservationDetails);
+          delete missingFixedStateDetails['solidifyFixedStateMatches'];
+          const missingFixedStateReport = reportFor(successSequence++, missingFixedStateDetails);
+          await postState(missingFixedStateReport);
+          const missingFixedStateResult = await postResult(missingFixedStateReport);
+          expect(missingFixedStateResult.status).toBe(409);
+          await expect(missingFixedStateResult.json()).resolves.toMatchObject({
+            error: 'action_execution_observation_mismatch',
+          });
+          expect(
+            companionActionExecutionStatusSchema.parse(
+              (
+                await callMcpTool(runtime, 8975, 'operatingline.blender.action.status', {
+                  requestId: actionRequest.requestId,
+                })
+              ).result?.structuredContent,
+            ),
+          ).toMatchObject({ status: 'dispatched' });
+
+          const wrongThicknessReport = reportFor(successSequence++, {
+            ...fullObservationDetails,
+            thickness: 0.5,
+          });
+          await postState(wrongThicknessReport);
+          const wrongThicknessResult = await postResult(wrongThicknessReport);
+          expect(wrongThicknessResult.status).toBe(409);
+          await expect(wrongThicknessResult.json()).resolves.toMatchObject({
+            error: 'action_execution_observation_mismatch',
+          });
+          expect(
+            companionActionExecutionStatusSchema.parse(
+              (
+                await callMcpTool(runtime, 8976, 'operatingline.blender.action.status', {
                   requestId: actionRequest.requestId,
                 })
               ).result?.structuredContent,

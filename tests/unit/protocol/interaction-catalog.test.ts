@@ -284,7 +284,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.41.0');
+    expect(catalog.catalogVersion).toBe('1.42.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -351,6 +351,7 @@ describe('interaction catalog protocol', () => {
       '1.39.0',
       '1.40.0',
       '1.41.0',
+      '1.42.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
@@ -364,6 +365,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.modifier.add_solidify',
       'blender.modifier.add_mirror',
     ]);
     for (const recipe of availableMcpRecipes) {
@@ -1840,6 +1842,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.edit_inset_faces',
       'blender.mesh.edit_poke_faces',
       'blender.modifier.add_subdivision_surface',
+      'blender.modifier.add_solidify',
       'blender.modifier.add_mirror',
     ]);
     expect(

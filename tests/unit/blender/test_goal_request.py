@@ -500,7 +500,10 @@ class GoalRequestTransportTests(unittest.TestCase):
         self.assertEqual(
             domain.ACTION_LEVEL_MCP_ACTIONS,
             domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS
-            | {"blender.modifier.add_mirror"},
+            | {
+                "blender.modifier.add_mirror",
+                "blender.modifier.add_solidify",
+            },
         )
 
         for action_name in (
@@ -512,6 +515,7 @@ class GoalRequestTransportTests(unittest.TestCase):
             "blender.mesh.create_cone",
             "blender.mesh.create_cylinder",
             "blender.modifier.add_mirror",
+            "blender.modifier.add_solidify",
         ):
             with self.subTest(action_name=action_name):
                 candidate = deepcopy(step)

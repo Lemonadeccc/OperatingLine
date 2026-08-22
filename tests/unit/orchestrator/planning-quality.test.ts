@@ -267,6 +267,103 @@ const evaluateMirror = (input: {
     },
   );
 
+const solidifyPlan = (): GuidePlan => {
+  const plan = subdivisionSurfacePlan();
+  const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_solidify',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.solidify',
+      modifierName: 'OperatingLine.Cube.Solidify',
+      thickness: 0.25,
+      offset: -0.5,
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.solidify',
+    },
+  ];
+  leaf.expectedObservations = [
+    {
+      kind: 'modifier_ready',
+      parameters: {
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.solidify',
+        modifierType: 'SOLIDIFY',
+        thickness: 0.25,
+        offset: -0.5,
+        solidifyMode: 'EXTRUDE',
+        useEvenOffset: true,
+        useRim: true,
+        useRimOnly: false,
+      },
+    },
+  ];
+  return guidePlanSchema.parse({
+    ...plan,
+    id: 'solidify-quality',
+    title: 'Add a Solidify modifier',
+  });
+};
+
+const solidifyCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'solidify',
+      statement: 'Add a Solidify modifier to the accepted Cube.',
+      coverage: [
+        {
+          capabilityId: 'geometry.solidify_modifier',
+          stepIds: ['snowman.model.head'],
+        },
+      ],
+    },
+  ],
+};
+
+const evaluateSolidify = (input: {
+  plan?: GuidePlan;
+  targetId?: string;
+  consumers?: readonly {
+    readonly consumerStepId: string;
+    readonly resourceId: string;
+    readonly resourceType: string;
+  }[];
+}) =>
+  evaluatePlanningQuality(
+    {
+      targetAdapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      capabilityCoverage: solidifyCoverage,
+      plan: input.plan ?? solidifyPlan(),
+    },
+    blenderActionCatalog,
+    {
+      verifiedExternalResourceConsumers:
+        input.consumers ??
+        ([
+          {
+            consumerStepId: 'snowman.model.head',
+            resourceId: 'tutorial.cube',
+            resourceType: 'OBJECT',
+          },
+        ] as const),
+      managedActionReplayAuthority: {
+        replayId: '33333333-3333-4333-8333-333333333333',
+        leafId: 'snowman.model.head',
+        actionName: 'blender.modifier.add_solidify',
+        targetId: input.targetId ?? 'tutorial.cube',
+      },
+    },
+  );
+
 describe('planning quality baseline', () => {
   it('accepts the complete teachable snowman plan deterministically', () => {
     const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
@@ -509,6 +606,67 @@ describe('planning quality baseline', () => {
       );
     },
   );
+
+  it('accepts only an exact managed Solidify replay as a verified external consumer', () => {
+    const report = evaluateSolidify({});
+
+    expect(report.valid).toBe(true);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'resource.verified_external_input',
+        severity: 'warning',
+        stepIds: ['snowman.model.head'],
+      }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+  });
+
+  it.each([
+    'authority target',
+    'action thickness',
+    'observation thickness',
+    'observation fixed mode',
+    'observation extra parameter',
+    'owned-control anchor',
+  ] as const)('rejects a Solidify external consumer with a mismatched %s', (mismatch) => {
+    const plan = solidifyPlan();
+    const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+    let targetId: string | undefined;
+    if (mismatch === 'authority target') targetId = 'tutorial.other';
+    if (mismatch === 'action thickness') {
+      if (leaf.action === null) throw new Error('expected Solidify action');
+      leaf.action.arguments['thickness'] = 0.5;
+    }
+    if (mismatch === 'observation thickness') {
+      leaf.expectedObservations[0]!.parameters['thickness'] = 0.5;
+    }
+    if (mismatch === 'observation fixed mode') {
+      leaf.expectedObservations[0]!.parameters['solidifyMode'] = 'NON_MANIFOLD';
+    }
+    if (mismatch === 'observation extra parameter') {
+      leaf.expectedObservations[0]!.parameters['showViewport'] = true;
+    }
+    if (mismatch === 'owned-control anchor') {
+      leaf.anchors = leaf.anchors.map((anchor) =>
+        anchor.kind === 'owned_control' ? { ...anchor, controlId: 'tutorial.cube.other' } : anchor,
+      );
+    }
+
+    const report = evaluateSolidify({
+      plan,
+      ...(targetId === undefined ? {} : { targetId }),
+    });
+
+    expect(report.valid).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.verified_external_input' }),
+    );
+  });
 
   it('degrades honestly for a historical catalog without phase metadata', () => {
     const historicalCatalogWithoutPhases = blenderActionCatalogs.find(

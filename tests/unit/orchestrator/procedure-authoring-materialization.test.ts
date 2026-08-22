@@ -278,6 +278,67 @@ function mirrorCandidate(): ProcedureAuthoringCandidateTree {
   return tree;
 }
 
+function solidifyCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Solidify candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_solidify',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.solidify',
+      modifierName: 'OperatingLine.Cube.Solidify',
+      thickness: 0.25,
+      offset: -0.5,
+    },
+  };
+  leaf.title = 'Add a bounded Solidify modifier';
+  leaf.intent = 'Add a managed Solidify modifier with exact thickness and offset.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'add_solidify_modifier',
+    description: 'Add one Solidify modifier to the accepted Cube.',
+    parameters: { thickness: 0.25, offset: -0.5 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Object Mode modifier target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Track the managed Solidify modifier identity and name.',
+    parameters: {
+      modifierId: 'tutorial.cube.solidify',
+      modifierName: 'OperatingLine.Cube.Solidify',
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.solidify',
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'modifier_ready',
+    parameters: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.solidify',
+      modifierType: 'SOLIDIFY',
+      thickness: 0.25,
+      offset: -0.5,
+      solidifyMode: 'EXTRUDE',
+      useEvenOffset: true,
+      useRim: true,
+      useRimOnly: false,
+    },
+  };
+  return tree;
+}
+
 function editBevelCandidate(): ProcedureAuthoringCandidateTree {
   const tree = candidate();
   const leaf = tree.nodes.find((node) => node.kind === 'leaf');
@@ -1766,6 +1827,86 @@ describe('procedure authoring materialization', () => {
               modifierId: 'tutorial.cube.mirror',
               modifierName: 'OperatingLine.Cube.Mirror',
               axis: 'Y',
+            },
+            resultBinding: `${leaf.id}.companion_state_report`,
+          }),
+        ],
+      },
+    ]);
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+  });
+
+  it('materializes only the exact accepted Solidify action through action-level MCP', () => {
+    const input = solidifyCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected materialized Solidify leaf');
+
+    expect(result.formatVersion).toBe('1.4.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.modifier.add_solidify.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'materialized',
+      },
+    ]);
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'modifier_ready',
+        parameters: {
+          targetId: 'tutorial.cube',
+          modifierId: 'tutorial.cube.solidify',
+          modifierType: 'SOLIDIFY',
+          thickness: 0.25,
+          offset: -0.5,
+          solidifyMode: 'EXTRUDE',
+          useEvenOffset: true,
+          useRim: true,
+          useRimOnly: false,
+        },
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: expect.stringContaining('managed modifier identity'),
+    });
+    expect(leaf.shortcutTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: expect.stringContaining('accepted Solidify parameters'),
+    });
+    expect(leaf.mcpTracks).toEqual([
+      {
+        id: 'blender.modifier.add_solidify.semantic.mcp',
+        availability: 'available',
+        title: 'Add a bounded Solidify modifier action-level MCP projection',
+        preconditions: [],
+        modality: 'mcp',
+        operations: [
+          expect.objectContaining({
+            id: 'blender.modifier.add_solidify.semantic.mcp.execute',
+            serverName: 'operating-line',
+            toolName: 'operatingline.blender.action.execute',
+            arguments: {
+              formatVersion: '1.0.0',
+              requestId: '$runtime.requestId',
+              replayId: '$runtime.replayId',
+              expectedState: '$runtime.expectedState',
+            },
+            argumentSource: 'accepted_leaf_action',
+            actionArguments: {
+              targetId: 'tutorial.cube',
+              modifierId: 'tutorial.cube.solidify',
+              modifierName: 'OperatingLine.Cube.Solidify',
+              thickness: 0.25,
+              offset: -0.5,
             },
             resultBinding: `${leaf.id}.companion_state_report`,
           }),

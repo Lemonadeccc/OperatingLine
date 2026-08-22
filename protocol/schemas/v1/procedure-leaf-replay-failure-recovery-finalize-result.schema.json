@@ -2217,11 +2217,205 @@
                             "const": true
                           },
                           "details": {
-                            "type": "object",
-                            "properties": {
-                              "parameters": {
+                            "anyOf": [
+                              {
                                 "type": "object",
                                 "properties": {
+                                  "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                      "targetId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "modifierId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "modifierType": {
+                                        "type": "string",
+                                        "const": "SOLIDIFY"
+                                      },
+                                      "thickness": {
+                                        "type": "number",
+                                        "minimum": 0.0001,
+                                        "maximum": 100
+                                      },
+                                      "offset": {
+                                        "type": "number",
+                                        "minimum": -1,
+                                        "maximum": 1
+                                      },
+                                      "solidifyMode": {
+                                        "type": "string",
+                                        "const": "EXTRUDE"
+                                      },
+                                      "useEvenOffset": {
+                                        "type": "boolean",
+                                        "const": true
+                                      },
+                                      "useRim": {
+                                        "type": "boolean",
+                                        "const": true
+                                      },
+                                      "useRimOnly": {
+                                        "type": "boolean",
+                                        "const": false
+                                      }
+                                    },
+                                    "required": [
+                                      "targetId",
+                                      "modifierId",
+                                      "modifierType",
+                                      "thickness",
+                                      "offset",
+                                      "solidifyMode",
+                                      "useEvenOffset",
+                                      "useRim",
+                                      "useRimOnly"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "supported": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "targetId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierType": {
+                                    "type": "string",
+                                    "const": "SOLIDIFY"
+                                  },
+                                  "propertiesMatch": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "thickness": {
+                                    "type": "number",
+                                    "minimum": 0.0001,
+                                    "maximum": 100
+                                  },
+                                  "offset": {
+                                    "type": "number",
+                                    "minimum": -1,
+                                    "maximum": 1
+                                  },
+                                  "solidifyMode": {
+                                    "type": "string",
+                                    "const": "EXTRUDE"
+                                  },
+                                  "useEvenOffset": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "useRim": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "useRimOnly": {
+                                    "type": "boolean",
+                                    "const": false
+                                  },
+                                  "solidifyFixedStateMatches": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "sourceContentIntact": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "evaluatedVertexCount": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 8192
+                                  },
+                                  "evaluatedEdgeCount": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 16384
+                                  },
+                                  "evaluatedFaceCount": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 8192
+                                  },
+                                  "evaluatedFinite": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "evaluatedWithinLimits": {
+                                    "type": "boolean",
+                                    "const": true
+                                  }
+                                },
+                                "required": [
+                                  "parameters",
+                                  "supported",
+                                  "targetId",
+                                  "modifierId",
+                                  "modifierType",
+                                  "propertiesMatch",
+                                  "thickness",
+                                  "offset",
+                                  "solidifyMode",
+                                  "useEvenOffset",
+                                  "useRim",
+                                  "useRimOnly",
+                                  "solidifyFixedStateMatches",
+                                  "sourceContentIntact",
+                                  "evaluatedVertexCount",
+                                  "evaluatedEdgeCount",
+                                  "evaluatedFaceCount",
+                                  "evaluatedFinite",
+                                  "evaluatedWithinLimits"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                      "targetId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "modifierId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "modifierType": {
+                                        "type": "string",
+                                        "const": "MIRROR"
+                                      },
+                                      "axis": {
+                                        "type": "string",
+                                        "enum": [
+                                          "X",
+                                          "Y",
+                                          "Z"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "targetId",
+                                      "modifierId",
+                                      "modifierType",
+                                      "axis"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "supported": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
                                   "targetId": {
                                     "type": "string",
                                     "minLength": 1
@@ -2234,6 +2428,10 @@
                                     "type": "string",
                                     "const": "MIRROR"
                                   },
+                                  "propertiesMatch": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
                                   "axis": {
                                     "type": "string",
                                     "enum": [
@@ -2241,107 +2439,72 @@
                                       "Y",
                                       "Z"
                                     ]
+                                  },
+                                  "expectedAxis": {
+                                    "type": "string",
+                                    "enum": [
+                                      "X",
+                                      "Y",
+                                      "Z"
+                                    ]
+                                  },
+                                  "mirrorFixedStateMatches": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "mirrorObjectAbsent": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "sourceContentIntact": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "evaluatedVertexCount": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 8192
+                                  },
+                                  "evaluatedEdgeCount": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 16384
+                                  },
+                                  "evaluatedFaceCount": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 8192
+                                  },
+                                  "evaluatedFinite": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "evaluatedWithinLimits": {
+                                    "type": "boolean",
+                                    "const": true
                                   }
                                 },
                                 "required": [
+                                  "parameters",
+                                  "supported",
                                   "targetId",
                                   "modifierId",
                                   "modifierType",
-                                  "axis"
+                                  "propertiesMatch",
+                                  "axis",
+                                  "expectedAxis",
+                                  "mirrorFixedStateMatches",
+                                  "mirrorObjectAbsent",
+                                  "sourceContentIntact",
+                                  "evaluatedVertexCount",
+                                  "evaluatedEdgeCount",
+                                  "evaluatedFaceCount",
+                                  "evaluatedFinite",
+                                  "evaluatedWithinLimits"
                                 ],
                                 "additionalProperties": false
-                              },
-                              "supported": {
-                                "type": "boolean",
-                                "const": true
-                              },
-                              "targetId": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "modifierId": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "modifierType": {
-                                "type": "string",
-                                "const": "MIRROR"
-                              },
-                              "propertiesMatch": {
-                                "type": "boolean",
-                                "const": true
-                              },
-                              "axis": {
-                                "type": "string",
-                                "enum": [
-                                  "X",
-                                  "Y",
-                                  "Z"
-                                ]
-                              },
-                              "expectedAxis": {
-                                "type": "string",
-                                "enum": [
-                                  "X",
-                                  "Y",
-                                  "Z"
-                                ]
-                              },
-                              "mirrorFixedStateMatches": {
-                                "type": "boolean",
-                                "const": true
-                              },
-                              "mirrorObjectAbsent": {
-                                "type": "boolean",
-                                "const": true
-                              },
-                              "sourceContentIntact": {
-                                "type": "boolean",
-                                "const": true
-                              },
-                              "evaluatedVertexCount": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 8192
-                              },
-                              "evaluatedEdgeCount": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 16384
-                              },
-                              "evaluatedFaceCount": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 8192
-                              },
-                              "evaluatedFinite": {
-                                "type": "boolean",
-                                "const": true
-                              },
-                              "evaluatedWithinLimits": {
-                                "type": "boolean",
-                                "const": true
                               }
-                            },
-                            "required": [
-                              "parameters",
-                              "supported",
-                              "targetId",
-                              "modifierId",
-                              "modifierType",
-                              "propertiesMatch",
-                              "axis",
-                              "expectedAxis",
-                              "mirrorFixedStateMatches",
-                              "mirrorObjectAbsent",
-                              "sourceContentIntact",
-                              "evaluatedVertexCount",
-                              "evaluatedEdgeCount",
-                              "evaluatedFaceCount",
-                              "evaluatedFinite",
-                              "evaluatedWithinLimits"
-                            ],
-                            "additionalProperties": false
+                            ]
                           }
                         },
                         "required": [
@@ -3023,7 +3186,8 @@
                     "blender.mesh.create_torus",
                     "blender.mesh.create_cone",
                     "blender.mesh.create_cylinder",
-                    "blender.modifier.add_mirror"
+                    "blender.modifier.add_mirror",
+                    "blender.modifier.add_solidify"
                   ]
                 }
               },

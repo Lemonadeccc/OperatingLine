@@ -1724,7 +1724,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       readonly managedActionReplayAuthority?: {
         readonly replayId: string;
         readonly leafId: string;
-        readonly actionName: 'blender.modifier.add_mirror';
+        readonly actionName: 'blender.modifier.add_mirror' | 'blender.modifier.add_solidify';
         readonly targetId: string;
       };
     };
@@ -2337,7 +2337,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       const planContentSha256 = computePlanContentSha256(plan);
       const replayLeaf = materialization.tree.nodes.find((node) => node.id === request.leafId);
       const replayPlanningOptions: InternalPlanningQualityOptions =
-        prepared.actionName === 'blender.modifier.add_mirror' &&
+        (prepared.actionName === 'blender.modifier.add_mirror' ||
+          prepared.actionName === 'blender.modifier.add_solidify') &&
         replayLeaf?.kind === 'leaf' &&
         replayLeaf.action?.name === prepared.actionName &&
         typeof replayLeaf.action.arguments['targetId'] === 'string'
@@ -3874,7 +3875,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.action.execute',
         {
           description:
-            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, Torus, Cone, Cylinder, or Mirror Modifier leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
+            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, Torus, Cone, Cylinder, Solidify Modifier, or Mirror Modifier leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
           inputSchema: companionActionExecutionCreateRequestSchema,
           outputSchema: companionActionExecutionStatusSchema,
         },
