@@ -1495,20 +1495,46 @@ describe('procedure execution failure replan runtime resolver', () => {
         executionId: queued.binding.executionId,
         leafId: queued.binding.leafId,
       } as const;
+      const verifiedResult = {
+        ...identity,
+        status: 'verified_unavailable',
+        authorityVerified: true,
+        capability: 'preflight_only',
+        reasonCode: 'executor_unavailable',
+        error: 'No execution-track action executor is installed.',
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const wrongIdentityResponse = await fetch(`${createUrl}/result`, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify({ ...verifiedResult, deliveryId: randomUUID() }),
+      });
+      expect(wrongIdentityResponse.status).toBe(409);
+      await expect(wrongIdentityResponse.json()).resolves.not.toMatchObject({
+        error: 'execution_track_preflight_verified_authority_changed',
+      });
+      const wrongLeaseResponse = await fetch(`${createUrl}/result`, {
+        method: 'POST',
+        headers: {
+          ...ready.headers,
+          'x-operatingline-companion-lease': randomUUID(),
+        },
+        body: JSON.stringify(verifiedResult),
+      });
+      expect(wrongLeaseResponse.status).toBe(409);
+      await expect(wrongLeaseResponse.json()).resolves.not.toMatchObject({
+        error: 'execution_track_preflight_verified_authority_changed',
+      });
       const verifiedResponse = await fetch(`${createUrl}/result`, {
         method: 'POST',
         headers: ready.headers,
-        body: JSON.stringify({
-          ...identity,
-          status: 'verified_unavailable',
-          authorityVerified: true,
-          capability: 'preflight_only',
-          reasonCode: 'executor_unavailable',
-          error: 'No execution-track action executor is installed.',
-          occurredAt: new Date().toISOString(),
-        }),
+        body: JSON.stringify(verifiedResult),
       });
       expect(verifiedResponse.status).toBe(409);
+      await expect(verifiedResponse.json()).resolves.toMatchObject({
+        error: 'execution_track_preflight_verified_authority_changed',
+        message: expect.stringContaining('execution_track_preflight_state_changed'),
+      });
       const inspectedBeforeReject = openOperatingLineDatabase(databasePath);
       try {
         expect(
@@ -1537,6 +1563,32 @@ describe('procedure execution failure replan runtime resolver', () => {
         200,
       );
       await expect(rejectedResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const inspectedAfterReject = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          inspectedAfterReject.listExecutionEventsByTypes([
+            'blender.execution-track-preflight.completed',
+          ]),
+        ).toHaveLength(1);
+      } finally {
+        inspectedAfterReject.close();
+      }
+      const nextRequest = {
+        ...ready.request,
+        requestId: randomUUID(),
+        executionId: changedExecutionId,
+        expectedState: {
+          reportId: changedReport.reportId,
+          sequence: changedReport.sequence,
+        },
+      };
+      const nextResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(nextRequest),
+      });
+      expect(nextResponse.status, JSON.stringify(await nextResponse.clone().json())).toBe(200);
+      await expect(nextResponse.json()).resolves.toMatchObject({ status: 'queued' });
     } finally {
       await runtime.stop();
       rmSync(temporaryDirectory, { recursive: true, force: true });

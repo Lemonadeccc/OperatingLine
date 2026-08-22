@@ -9812,28 +9812,39 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                 );
               }
               if (_result.status === 'rejected') return;
-              const binding = preflight.binding;
-              const revalidated = authorizeExecutionTrackPreflight(
-                companionExecutionTrackPreflightCreateRequestSchema.parse({
-                  formatVersion: binding.formatVersion,
-                  requestId: binding.requestId,
-                  target: binding.target,
-                  proposalId: binding.proposal.id,
-                  plan: binding.plan,
-                  executionId: binding.executionId,
-                  leafId: binding.leafId,
-                  override: binding.override,
-                  expectedState: binding.expectedState,
-                }),
-                session,
-                binding.requestedAt,
-              );
-              if (!isDeepStrictEqual(revalidated, binding)) {
-                executionTrackPreflightRejected(
-                  'Execution-track preflight binding changed before completion',
-                  409,
-                  'execution_track_preflight_authority_drift',
+              try {
+                const binding = preflight.binding;
+                const revalidated = authorizeExecutionTrackPreflight(
+                  companionExecutionTrackPreflightCreateRequestSchema.parse({
+                    formatVersion: binding.formatVersion,
+                    requestId: binding.requestId,
+                    target: binding.target,
+                    proposalId: binding.proposal.id,
+                    plan: binding.plan,
+                    executionId: binding.executionId,
+                    leafId: binding.leafId,
+                    override: binding.override,
+                    expectedState: binding.expectedState,
+                  }),
+                  session,
+                  binding.requestedAt,
                 );
+                if (!isDeepStrictEqual(revalidated, binding)) {
+                  executionTrackPreflightRejected(
+                    'Execution-track preflight binding changed before completion',
+                    409,
+                    'execution_track_preflight_authority_drift',
+                  );
+                }
+              } catch (error) {
+                if (error instanceof BlenderExecutionTrackPreflightError) {
+                  throw new BlenderExecutionTrackPreflightError(
+                    'execution_track_preflight_verified_authority_changed',
+                    409,
+                    `Verified execution-track authority changed (${error.code}): ${error.message}`,
+                  );
+                }
+                throw error;
               }
             },
           );
