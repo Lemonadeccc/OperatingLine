@@ -4736,13 +4736,13 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "single_root_leaf"
+                          "const": "single_leaf"
                         },
                         "leafCount": {
                           "type": "number",
                           "const": 1
                         },
-                        "rootLeafId": {
+                        "leafId": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                         },
@@ -4754,7 +4754,7 @@
                       "required": [
                         "kind",
                         "leafCount",
-                        "rootLeafId",
+                        "leafId",
                         "procedureTreeContentSha256"
                       ],
                       "additionalProperties": false
@@ -9776,13 +9776,13 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "single_root_leaf"
+                          "const": "single_leaf"
                         },
                         "leafCount": {
                           "type": "number",
                           "const": 1
                         },
-                        "rootLeafId": {
+                        "leafId": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                         },
@@ -9794,7 +9794,7 @@
                       "required": [
                         "kind",
                         "leafCount",
-                        "rootLeafId",
+                        "leafId",
                         "procedureTreeContentSha256"
                       ],
                       "additionalProperties": false
@@ -15443,13 +15443,13 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "single_root_leaf"
+                          "const": "single_leaf"
                         },
                         "leafCount": {
                           "type": "number",
                           "const": 1
                         },
-                        "rootLeafId": {
+                        "leafId": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                         },
@@ -15461,7 +15461,7 @@
                       "required": [
                         "kind",
                         "leafCount",
-                        "rootLeafId",
+                        "leafId",
                         "procedureTreeContentSha256"
                       ],
                       "additionalProperties": false
@@ -21393,13 +21393,13 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "single_root_leaf"
+                          "const": "single_leaf"
                         },
                         "leafCount": {
                           "type": "number",
                           "const": 1
                         },
-                        "rootLeafId": {
+                        "leafId": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                         },
@@ -21411,7 +21411,7 @@
                       "required": [
                         "kind",
                         "leafCount",
-                        "rootLeafId",
+                        "leafId",
                         "procedureTreeContentSha256"
                       ],
                       "additionalProperties": false
@@ -26289,13 +26289,13 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "single_root_leaf"
+                          "const": "single_leaf"
                         },
                         "leafCount": {
                           "type": "number",
                           "const": 1
                         },
-                        "rootLeafId": {
+                        "leafId": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                         },
@@ -26307,7 +26307,7 @@
                       "required": [
                         "kind",
                         "leafCount",
-                        "rootLeafId",
+                        "leafId",
                         "procedureTreeContentSha256"
                       ],
                       "additionalProperties": false
@@ -31256,13 +31256,13 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "single_root_leaf"
+                          "const": "single_leaf"
                         },
                         "leafCount": {
                           "type": "number",
                           "const": 1
                         },
-                        "rootLeafId": {
+                        "leafId": {
                           "type": "string",
                           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                         },
@@ -31274,7 +31274,7 @@
                       "required": [
                         "kind",
                         "leafCount",
-                        "rootLeafId",
+                        "leafId",
                         "procedureTreeContentSha256"
                       ],
                       "additionalProperties": false

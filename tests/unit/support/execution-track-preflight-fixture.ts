@@ -118,7 +118,7 @@ export function executionTrackPreflightFixture(): {
   const step = guideStepSchema.parse({
     id: sourceLeaf.id,
     parentId: sourceLeaf.parentId,
-    order: 0,
+    order: sourceLeaf.order,
     dependsOn: sourceLeaf.dependsOn,
     title: sourceLeaf.title,
     intent: sourceLeaf.intent,

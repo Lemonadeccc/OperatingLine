@@ -110,9 +110,9 @@ const bindingContentSchema = z.strictObject({
   preflightBinding: companionExecutionTrackPreflightBindingSchema,
   executor: companionExecutionTrackExecutionExecutorSchema,
   executionScope: z.strictObject({
-    kind: z.literal('single_root_leaf'),
+    kind: z.literal('single_leaf'),
     leafCount: z.literal(1),
-    rootLeafId: createShape.leafId,
+    leafId: createShape.leafId,
     procedureTreeContentSha256: sha256Schema,
   }),
   requestedAt: timestampSchema,
@@ -146,12 +146,11 @@ function bindingSemanticsMatch(binding: z.infer<typeof bindingContentSchema>): b
     track.proofExecution.nativeUndoDepth === binding.executor.nativeUndoDepth &&
     computeProtocolCanonicalJsonSha256(track.proofExecution.operationIds) ===
       computeProtocolCanonicalJsonSha256(binding.executor.proofOperationIds) &&
-    preflight.sourceLeaf.parentId === null &&
-    preflight.sourceLeaf.order === 1 &&
-    preflight.sourceLeaf.dependsOn.length === 0 &&
-    preflight.step.order === 0 &&
-    preflight.step.dependsOn.length === 0 &&
-    binding.executionScope.rootLeafId === binding.leafId &&
+    preflight.step.parentId === preflight.sourceLeaf.parentId &&
+    preflight.step.order === preflight.sourceLeaf.order &&
+    computeProtocolCanonicalJsonSha256(preflight.step.dependsOn) ===
+      computeProtocolCanonicalJsonSha256(preflight.sourceLeaf.dependsOn) &&
+    binding.executionScope.leafId === binding.leafId &&
     binding.executionScope.procedureTreeContentSha256 ===
       preflight.artifacts.procedureTreeContentSha256
   );

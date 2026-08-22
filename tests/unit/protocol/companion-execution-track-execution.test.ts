@@ -84,9 +84,9 @@ function fixture() {
       automaticReplay: false,
     },
     executionScope: {
-      kind: 'single_root_leaf',
+      kind: 'single_leaf',
       leafCount: 1,
-      rootLeafId: request.leafId,
+      leafId: request.leafId,
       procedureTreeContentSha256: preflight.binding.artifacts.procedureTreeContentSha256,
     },
     requestedAt: preflight.binding.requestedAt,
@@ -750,6 +750,85 @@ describe('Companion execution-track v2 protocol', () => {
       companionExecutionTrackExecutionBindingSchema.safeParse({
         ...forgedBindingContent,
         bindingContentSha256: computeProtocolCanonicalJsonSha256(forgedBindingContent),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('binds one nested leaf while rejecting preflight topology drift', () => {
+    const { binding } = fixture();
+    const nestedSourceLeaf = {
+      ...binding.preflightBinding.sourceLeaf,
+      parentId: 'tutorial.execution-track-preflight.phase',
+      order: 2,
+      dependsOn: ['tutorial.execution-track-preflight.prerequisite'],
+    };
+    const nestedStep = {
+      ...binding.preflightBinding.step,
+      parentId: nestedSourceLeaf.parentId,
+      order: nestedSourceLeaf.order,
+      dependsOn: nestedSourceLeaf.dependsOn,
+    };
+    const preflightContent = {
+      ...Object.fromEntries(
+        Object.entries(binding.preflightBinding).filter(([key]) => key !== 'bindingContentSha256'),
+      ),
+      step: nestedStep,
+      sourceLeaf: nestedSourceLeaf,
+      artifacts: {
+        ...binding.preflightBinding.artifacts,
+        sourceLeafContentSha256: computeProtocolCanonicalJsonSha256(nestedSourceLeaf),
+      },
+    };
+    const nestedPreflight = companionExecutionTrackPreflightBindingSchema.parse({
+      ...preflightContent,
+      bindingContentSha256: computeProtocolCanonicalJsonSha256(preflightContent),
+    });
+    const bindingContent = {
+      ...Object.fromEntries(
+        Object.entries(binding).filter(([key]) => key !== 'bindingContentSha256'),
+      ),
+      preflightBinding: nestedPreflight,
+    };
+    expect(
+      companionExecutionTrackExecutionBindingSchema.safeParse({
+        ...bindingContent,
+        bindingContentSha256: computeProtocolCanonicalJsonSha256(bindingContent),
+      }).success,
+    ).toBe(true);
+
+    for (const driftedStep of [
+      { ...nestedStep, parentId: 'tutorial.execution-track-preflight.other-phase' },
+      { ...nestedStep, order: nestedStep.order + 1 },
+      { ...nestedStep, dependsOn: [] },
+    ]) {
+      const driftedPreflightContent = { ...preflightContent, step: driftedStep };
+      const driftedPreflight = companionExecutionTrackPreflightBindingSchema.parse({
+        ...driftedPreflightContent,
+        bindingContentSha256: computeProtocolCanonicalJsonSha256(driftedPreflightContent),
+      });
+      const driftedBindingContent = {
+        ...bindingContent,
+        preflightBinding: driftedPreflight,
+      };
+      expect(
+        companionExecutionTrackExecutionBindingSchema.safeParse({
+          ...driftedBindingContent,
+          bindingContentSha256: computeProtocolCanonicalJsonSha256(driftedBindingContent),
+        }).success,
+      ).toBe(false);
+    }
+
+    const driftedScopeContent = {
+      ...bindingContent,
+      executionScope: {
+        ...binding.executionScope,
+        leafId: 'tutorial.execution-track-preflight.other-leaf',
+      },
+    };
+    expect(
+      companionExecutionTrackExecutionBindingSchema.safeParse({
+        ...driftedScopeContent,
+        bindingContentSha256: computeProtocolCanonicalJsonSha256(driftedScopeContent),
       }).success,
     ).toBe(false);
   });
