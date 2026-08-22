@@ -15,6 +15,7 @@ import {
   companionExecutionTrackExecutionRecoveryRequestSchema,
   companionExecutionTrackExecutionResultSchema,
   companionExecutionTrackExecutionStatusSchema,
+  companionExecutionTrackExecutionStartCheckpointSchema,
   companionExecutionTrackPreflightBindingSchema,
   companionMenuControlProofResultSchema,
   computeCompanionExecutionTrackExecutionProofTerminalMarkerContentSha256,
@@ -50,6 +51,22 @@ function hashContent<T extends Record<string, unknown>>(content: T) {
   return { ...content, contentSha256: computeProtocolCanonicalJsonSha256(content) };
 }
 
+function rehashBinding(
+  binding: ReturnType<typeof fixture>['binding'],
+  changes: Record<string, unknown>,
+) {
+  const content = {
+    ...Object.fromEntries(
+      Object.entries(binding).filter(([key]) => key !== 'bindingContentSha256'),
+    ),
+    ...changes,
+  };
+  return companionExecutionTrackExecutionBindingSchema.parse({
+    ...content,
+    bindingContentSha256: computeProtocolCanonicalJsonSha256(content),
+  });
+}
+
 function fixture() {
   const preflight = executionTrackPreflightFixture();
   const lease = {
@@ -60,8 +77,39 @@ function fixture() {
     ...preflight.request,
     formatVersion: '2.0.0',
   });
+  const authorizedCheckpoint = {
+    formatVersion: '1.0.0',
+    evidenceClass: 'companion_reported_native_undo_checkpoint',
+    checkpointId: ids.checkpoint,
+    previousCheckpointId: null,
+    operation: 'start',
+    committedAt: '2026-08-22T09:59:59Z',
+    marker: { key: '_operating_line_native_history_v1', matched: true },
+    journal: { entryPresent: true, snapshotMatchesSession: true, artifactsBackedUp: true },
+    session: {
+      plan: { id: request.plan.id, revision: request.plan.revision },
+      planContentSha256: request.plan.contentSha256,
+      executionId: request.executionId,
+      activeStepId: null,
+      completedStepIds: [],
+      receiptStepIds: [],
+    },
+  } as const;
   const content = {
     ...request,
+    authorizedStartState: {
+      reportContentSha256: '9'.repeat(64),
+      checkpoint: {
+        checkpointId: authorizedCheckpoint.checkpointId,
+        previousCheckpointId: authorizedCheckpoint.previousCheckpointId,
+        operation: authorizedCheckpoint.operation,
+        contentSha256: computeProtocolCanonicalJsonSha256(authorizedCheckpoint),
+      },
+      activeStepId: authorizedCheckpoint.session.activeStepId,
+      completedStepIds: authorizedCheckpoint.session.completedStepIds,
+      receiptStepIds: authorizedCheckpoint.session.receiptStepIds,
+      successPhase: 'completed',
+    },
     proofId: ids.proof,
     preflightBinding: preflight.binding,
     executor: {
@@ -85,7 +133,6 @@ function fixture() {
     },
     executionScope: {
       kind: 'single_leaf',
-      leafCount: 1,
       leafId: request.leafId,
       procedureTreeContentSha256: preflight.binding.artifacts.procedureTreeContentSha256,
     },
@@ -783,11 +830,25 @@ describe('Companion execution-track v2 protocol', () => {
       ...preflightContent,
       bindingContentSha256: computeProtocolCanonicalJsonSha256(preflightContent),
     });
+    const priorStepId = nestedSourceLeaf.dependsOn[0]!;
     const bindingContent = {
       ...Object.fromEntries(
         Object.entries(binding).filter(([key]) => key !== 'bindingContentSha256'),
       ),
       preflightBinding: nestedPreflight,
+      authorizedStartState: {
+        reportContentSha256: '8'.repeat(64),
+        checkpoint: {
+          checkpointId: '90000000-0000-4000-8000-000000000041',
+          previousCheckpointId: ids.checkpoint,
+          operation: 'next',
+          contentSha256: '9'.repeat(64),
+        },
+        activeStepId: priorStepId,
+        completedStepIds: [priorStepId],
+        receiptStepIds: [priorStepId],
+        successPhase: 'completed',
+      },
     };
     expect(
       companionExecutionTrackExecutionBindingSchema.safeParse({
@@ -795,6 +856,23 @@ describe('Companion execution-track v2 protocol', () => {
         bindingContentSha256: computeProtocolCanonicalJsonSha256(bindingContent),
       }).success,
     ).toBe(true);
+
+    const unrelatedStepId = 'tutorial.execution-track-preflight.unrelated';
+    const missingDependencyContent = {
+      ...bindingContent,
+      authorizedStartState: {
+        ...bindingContent.authorizedStartState,
+        activeStepId: unrelatedStepId,
+        completedStepIds: [unrelatedStepId],
+        receiptStepIds: [],
+      },
+    };
+    expect(
+      companionExecutionTrackExecutionBindingSchema.safeParse({
+        ...missingDependencyContent,
+        bindingContentSha256: computeProtocolCanonicalJsonSha256(missingDependencyContent),
+      }).success,
+    ).toBe(false);
 
     for (const driftedStep of [
       { ...nestedStep, parentId: 'tutorial.execution-track-preflight.other-phase' },
@@ -831,6 +909,194 @@ describe('Companion execution-track v2 protocol', () => {
         bindingContentSha256: computeProtocolCanonicalJsonSha256(driftedScopeContent),
       }).success,
     ).toBe(false);
+  });
+
+  it('authorizes empty start and nonempty next state while rejecting prefix drift', () => {
+    const { binding } = fixture();
+    expect(binding.authorizedStartState.checkpoint.operation).toBe('start');
+    expect(
+      companionExecutionTrackExecutionBindingSchema.safeParse({
+        ...binding,
+        authorizedStartState: {
+          ...binding.authorizedStartState,
+          successPhase: 'running',
+        },
+      }).success,
+    ).toBe(false);
+    const invalidPhaseContent = {
+      ...Object.fromEntries(
+        Object.entries(binding).filter(([key]) => key !== 'bindingContentSha256'),
+      ),
+      authorizedStartState: {
+        ...binding.authorizedStartState,
+        successPhase: 'failed',
+      },
+    };
+    expect(
+      companionExecutionTrackExecutionBindingSchema.safeParse({
+        ...invalidPhaseContent,
+        bindingContentSha256: computeProtocolCanonicalJsonSha256(invalidPhaseContent),
+      }).success,
+    ).toBe(false);
+
+    const priorStepId = 'tutorial.execution-track-preflight.prerequisite';
+    const nextState = {
+      reportContentSha256: '8'.repeat(64),
+      checkpoint: {
+        checkpointId: '90000000-0000-4000-8000-000000000041',
+        previousCheckpointId: ids.checkpoint,
+        operation: 'next' as const,
+        contentSha256: '9'.repeat(64),
+      },
+      activeStepId: priorStepId,
+      completedStepIds: [priorStepId],
+      receiptStepIds: [priorStepId],
+      successPhase: 'running' as const,
+    };
+    expect(rehashBinding(binding, { authorizedStartState: nextState })).toBeDefined();
+    const secondPriorStepId = 'tutorial.execution-track-preflight.second-prerequisite';
+    expect(
+      rehashBinding(binding, {
+        authorizedStartState: {
+          ...nextState,
+          activeStepId: secondPriorStepId,
+          completedStepIds: [priorStepId, secondPriorStepId],
+          receiptStepIds: [secondPriorStepId],
+        },
+      }),
+    ).toBeDefined();
+
+    for (const authorizedStartState of [
+      { ...nextState, activeStepId: null },
+      { ...nextState, completedStepIds: [priorStepId, priorStepId] },
+      { ...nextState, receiptStepIds: ['tutorial.execution-track-preflight.other'] },
+      {
+        ...nextState,
+        activeStepId: secondPriorStepId,
+        completedStepIds: [priorStepId, secondPriorStepId],
+        receiptStepIds: [secondPriorStepId, priorStepId],
+      },
+      {
+        ...nextState,
+        completedStepIds: [priorStepId, binding.leafId],
+        activeStepId: binding.leafId,
+      },
+      {
+        ...nextState,
+        checkpoint: {
+          ...nextState.checkpoint,
+          operation: 'start' as const,
+          previousCheckpointId: null,
+        },
+      },
+    ]) {
+      const content = {
+        ...Object.fromEntries(
+          Object.entries(binding).filter(([key]) => key !== 'bindingContentSha256'),
+        ),
+        authorizedStartState,
+      };
+      expect(
+        companionExecutionTrackExecutionBindingSchema.safeParse({
+          ...content,
+          bindingContentSha256: computeProtocolCanonicalJsonSha256(content),
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('attests the exact authorized native checkpoint for start and next', () => {
+    const start = sixPhaseChain()[0];
+    if (start?.phase !== 'baseline_attested') throw new Error('expected baseline');
+    expect(
+      companionExecutionTrackExecutionStartCheckpointSchema.safeParse(start.startCheckpoint)
+        .success,
+    ).toBe(true);
+    for (const operation of ['recheck', 'back'] as const) {
+      expect(
+        companionExecutionTrackExecutionStartCheckpointSchema.safeParse({
+          ...start.startCheckpoint,
+          previousCheckpointId: ids.proofCheckpoint,
+          operation,
+        }).success,
+      ).toBe(false);
+    }
+    expect(companionExecutionTrackExecutionProgressSchema.safeParse(start).success).toBe(true);
+
+    const priorStepId = 'tutorial.execution-track-preflight.prerequisite';
+    const nextCheckpoint = {
+      ...start.startCheckpoint,
+      checkpointId: '90000000-0000-4000-8000-000000000041',
+      previousCheckpointId: start.startCheckpoint.checkpointId,
+      operation: 'next' as const,
+      session: {
+        ...start.startCheckpoint.session,
+        activeStepId: priorStepId,
+        completedStepIds: [priorStepId],
+        receiptStepIds: [priorStepId],
+      },
+    };
+    expect(
+      companionExecutionTrackExecutionStartCheckpointSchema.safeParse(nextCheckpoint).success,
+    ).toBe(true);
+    const nextBinding = rehashBinding(start.binding, {
+      authorizedStartState: {
+        reportContentSha256: '8'.repeat(64),
+        checkpoint: {
+          checkpointId: nextCheckpoint.checkpointId,
+          previousCheckpointId: nextCheckpoint.previousCheckpointId,
+          operation: nextCheckpoint.operation,
+          contentSha256: computeProtocolCanonicalJsonSha256(nextCheckpoint),
+        },
+        activeStepId: priorStepId,
+        completedStepIds: [priorStepId],
+        receiptStepIds: [priorStepId],
+        successPhase: 'completed',
+      },
+    });
+    const attestationContent = Object.fromEntries(
+      Object.entries(start.startAttestation).filter(([key]) => key !== 'contentSha256'),
+    );
+    const nextAttestation = hashContent({
+      ...attestationContent,
+      checkpointId: nextCheckpoint.checkpointId,
+    });
+    const progressContentWithoutHash = Object.fromEntries(
+      Object.entries(start).filter(([key]) => key !== 'contentSha256'),
+    );
+    const nextProgress = companionExecutionTrackExecutionProgressSchema.parse(
+      hashContent({
+        ...progressContentWithoutHash,
+        binding: nextBinding,
+        startCheckpoint: nextCheckpoint,
+        startAttestation: nextAttestation,
+      }),
+    );
+    expect(nextProgress.startCheckpoint.operation).toBe('next');
+
+    for (const changes of [
+      { checkpointId: ids.checkpoint },
+      { previousCheckpointId: null },
+      { operation: 'start' as const },
+      { committedAt: '2026-08-22T09:59:58Z' },
+      {
+        session: {
+          ...nextCheckpoint.session,
+          activeStepId: null,
+        },
+      },
+    ]) {
+      const driftedCheckpoint = { ...nextCheckpoint, ...changes };
+      const content = {
+        ...Object.fromEntries(
+          Object.entries(nextProgress).filter(([key]) => key !== 'contentSha256'),
+        ),
+        startCheckpoint: driftedCheckpoint,
+      };
+      expect(
+        companionExecutionTrackExecutionProgressSchema.safeParse(hashContent(content)).success,
+      ).toBe(false);
+    }
   });
 
   it('accepts one real continuous six-phase chain and rejects hostile chain changes', () => {
@@ -1574,6 +1840,101 @@ describe('Companion execution-track v2 protocol', () => {
         updatedAt: success.occurredAt,
       }).status,
     ).toBe('succeeded');
+    const priorStepId = 'tutorial.execution-track-preflight.prerequisite';
+    const nextBinding = rehashBinding(binding, {
+      authorizedStartState: {
+        reportContentSha256: '8'.repeat(64),
+        checkpoint: {
+          checkpointId: ids.checkpoint,
+          previousCheckpointId: '90000000-0000-4000-8000-000000000041',
+          operation: 'next',
+          contentSha256: '9'.repeat(64),
+        },
+        activeStepId: priorStepId,
+        completedStepIds: [priorStepId],
+        receiptStepIds: [priorStepId],
+        successPhase: 'completed',
+      },
+    });
+    const commitContent = Object.fromEntries(
+      Object.entries(commit).filter(([key]) => key !== 'contentSha256'),
+    );
+    const barrierContent = Object.fromEntries(
+      Object.entries(commit.intent.redoBarrier).filter(([key]) => key !== 'contentSha256'),
+    );
+    const nextBarrier = hashContent({
+      ...barrierContent,
+      proofTerminalMarkerContentSha256:
+        computeCompanionExecutionTrackExecutionProofTerminalMarkerContentSha256({
+          formatVersion: '2.0.0',
+          kind: 'proof_terminal_marker',
+          proofId: nextBinding.proofId,
+          bindingContentSha256: nextBinding.bindingContentSha256,
+          proofCheckpointId: commit.proofCheckpointId,
+          undoLockId: commit.undoLockId,
+          baselineSceneFingerprintSha256: commit.baseline.sceneFingerprintSha256,
+          finalSceneFingerprintSha256: commit.proofFinalSceneFingerprintSha256,
+          proofEvidenceContentSha256: commit.proofEvidenceContentSha256,
+        }),
+    });
+    const intentContent = Object.fromEntries(
+      Object.entries(commit.intent).filter(([key]) => key !== 'contentSha256'),
+    );
+    const nextIntent = hashContent({ ...intentContent, redoBarrier: nextBarrier });
+    const nextCommit = companionExecutionTrackExecutionProgressSchema.parse(
+      hashContent({ ...commitContent, binding: nextBinding, intent: nextIntent }),
+    );
+    const nextManagedStart = hashContent({
+      ...Object.fromEntries(
+        Object.entries(managedStart).filter(([key]) => key !== 'contentSha256'),
+      ),
+      commitIntentContentSha256: nextCommit.intent.contentSha256,
+      previousProgressContentSha256: nextCommit.contentSha256,
+    });
+    const prefixedSuccess = companionExecutionTrackExecutionResultSchema.parse({
+      ...commonManaged,
+      bindingContentSha256: nextBinding.bindingContentSha256,
+      commitIntentContentSha256: nextCommit.intent.contentSha256,
+      lastProgressContentSha256: nextCommit.contentSha256,
+      managedStart: nextManagedStart,
+      managedCheckpoint: {
+        ...commonManaged.managedCheckpoint,
+        receiptStepIds: [priorStepId, binding.leafId],
+      },
+    });
+    expect(
+      companionExecutionTrackExecutionStatusSchema.parse({
+        binding: nextBinding,
+        deliveryId: delivery.deliveryId,
+        lease,
+        dispatchedAt: delivery.dispatchedAt,
+        status: 'succeeded',
+        progress: nextCommit,
+        result: prefixedSuccess,
+        updatedAt: prefixedSuccess.occurredAt,
+      }).status,
+    ).toBe('succeeded');
+    expect(
+      companionExecutionTrackExecutionStatusSchema.safeParse({
+        binding,
+        deliveryId: delivery.deliveryId,
+        lease,
+        dispatchedAt: delivery.dispatchedAt,
+        status: 'succeeded',
+        progress: commit,
+        result: { ...success, managedCheckpoint: prefixedSuccess.managedCheckpoint },
+        updatedAt: success.occurredAt,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionExecutionTrackExecutionResultSchema.safeParse({
+        ...prefixedSuccess,
+        managedCheckpoint: {
+          ...prefixedSuccess.managedCheckpoint,
+          receiptStepIds: [priorStepId, priorStepId, binding.leafId],
+        },
+      }).success,
+    ).toBe(false);
     expect(
       companionExecutionTrackExecutionResultSchema.safeParse({
         ...commonManaged,
@@ -1931,6 +2292,7 @@ describe('Companion execution-track v2 protocol', () => {
       error: 'Restored before reconciliation.',
     });
     const currentState = hashContent({
+      authentication: 'replacement_lease_recovery_post',
       replacementLeaseId: replacementLease.leaseId,
       sessionId: replacementLease.sessionId,
       documentIncarnationId: replacementLease.documentIncarnationId,
@@ -2067,6 +2429,7 @@ describe('Companion execution-track v2 protocol', () => {
       error: 'No mutation before restart.',
     });
     const noMutationState = hashContent({
+      authentication: 'replacement_lease_recovery_post',
       replacementLeaseId: replacementLease.leaseId,
       sessionId: replacementLease.sessionId,
       documentIncarnationId: replacementLease.documentIncarnationId,
@@ -2216,7 +2579,7 @@ describe('Companion execution-track v2 protocol', () => {
     ).toBe(false);
   }, 20_000);
 
-  it('rejects hostile persisted managed-terminal recovery acknowledgements', () => {
+  it('rejects hostile persisted managed-terminal recovery acknowledgements', async () => {
     const { binding, delivery, lease } = fixture();
     const commit = sixPhaseChain()[5];
     if (commit?.phase !== 'commit_intent_recorded') throw new Error('expected commit');
@@ -2309,6 +2672,7 @@ describe('Companion execution-track v2 protocol', () => {
       requestedAt: '2026-08-22T10:05:00Z',
     });
     const currentState = hashContent({
+      authentication: 'replacement_lease_recovery_post',
       replacementLeaseId: replacementLease.leaseId,
       sessionId: replacementLease.sessionId,
       documentIncarnationId: replacementLease.documentIncarnationId,
@@ -2341,6 +2705,364 @@ describe('Companion execution-track v2 protocol', () => {
       occurredAt: '2026-08-22T10:05:01Z',
     } as const;
     expect(companionExecutionTrackExecutionRecoveryAckSchema.parse(ack)).toEqual(ack);
+
+    const failedTerminalResult = companionExecutionTrackExecutionResultSchema.parse({
+      ...Object.fromEntries(
+        Object.entries(terminalResult).filter(
+          ([key]) =>
+            !['status', 'managedReport', 'managedCheckpoint', 'managedObservation'].includes(key),
+        ),
+      ),
+      status: 'failed_managed',
+      managedReport: {
+        ...terminalResult.managedReport,
+        transition: 'step_observation_failed',
+      },
+      managedCheckpoint: terminalResult.managedCheckpoint,
+      observationGate: {
+        stepId: binding.leafId,
+        status: 'repair_required',
+        failureStrategy: 'retain_for_repair',
+        message: 'Observation failed after the managed checkpoint was persisted.',
+      },
+      failedObservation: {
+        observationIndex: 0,
+        kind: 'uv_sphere_ready',
+        satisfied: false,
+        contentSha256: 'b'.repeat(64),
+      },
+      retainsTargetLock: true,
+      error: 'Managed observation failed durably.',
+    });
+    const failedTerminalResultContentSha256 =
+      computeProtocolCanonicalJsonSha256(failedTerminalResult);
+    const failedTerminalMarker = hashContent({
+      ...Object.fromEntries(
+        Object.entries(terminalMarker).filter(
+          ([key]) =>
+            !['terminalStatus', 'terminalResultContentSha256', 'contentSha256'].includes(key),
+        ),
+      ),
+      terminalStatus: 'failed_managed',
+      terminalResultContentSha256: failedTerminalResultContentSha256,
+      failedObservationContentSha256: failedTerminalResult.failedObservation.contentSha256,
+    });
+    const failedCurrentState = hashContent({
+      ...Object.fromEntries(
+        Object.entries(currentState).filter(([key]) => key !== 'contentSha256'),
+      ),
+      reportId: failedTerminalResult.managedReport.reportId,
+      sequence: failedTerminalResult.managedReport.sequence,
+    });
+    const failedAck = {
+      ...ack,
+      evidence: {
+        kind: 'persisted_managed_terminal',
+        terminalResult: failedTerminalResult,
+        terminalResultContentSha256: failedTerminalResultContentSha256,
+        terminalMarker: failedTerminalMarker,
+        currentState: failedCurrentState,
+      },
+      retainsTargetLock: true,
+    } as const;
+    expect(companionExecutionTrackExecutionRecoveryAckSchema.parse(failedAck)).toEqual(failedAck);
+    expect(
+      companionExecutionTrackExecutionRecoveryAckSchema.safeParse({
+        ...failedAck,
+        evidence: {
+          ...failedAck.evidence,
+          terminalMarker: hashContent({
+            ...Object.fromEntries(
+              Object.entries(failedTerminalMarker).filter(([key]) => key !== 'contentSha256'),
+            ),
+            failedObservationContentSha256: 'c'.repeat(64),
+          }),
+        },
+      }).success,
+    ).toBe(false);
+
+    const repairLease = {
+      ...replacementLease,
+      leaseId: '90000000-0000-4000-8000-000000000040',
+      expiresAt: '2026-08-22T10:20:00Z',
+    };
+    const repairDurableReferences = {
+      ...durableReferences,
+      terminalMarkerContentSha256: failedTerminalMarker.contentSha256,
+      terminalResultContentSha256: failedTerminalResultContentSha256,
+    };
+    const repairRequest = companionExecutionTrackExecutionRecoveryRequestSchema.parse({
+      ...request,
+      recoveryId: '90000000-0000-4000-8000-000000000041',
+      replacementLease: repairLease,
+      durableReferences: repairDurableReferences,
+      source: 'failed_managed_repair',
+      requestedAt: '2026-08-22T10:06:00Z',
+    });
+    const recoveredCheckpoint = {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_native_undo_checkpoint',
+      checkpointId: '90000000-0000-4000-8000-000000000043',
+      previousCheckpointId: failedTerminalResult.managedCheckpoint.checkpointId,
+      operation: 'recheck',
+      committedAt: '2026-08-22T10:05:59Z',
+      marker: { key: '_operating_line_native_history_v1', matched: true },
+      journal: {
+        entryPresent: true,
+        snapshotMatchesSession: true,
+        artifactsBackedUp: true,
+      },
+      session: {
+        plan: { id: binding.plan.id, revision: binding.plan.revision },
+        planContentSha256: binding.plan.contentSha256,
+        executionId: binding.executionId,
+        activeStepId: binding.leafId,
+        completedStepIds: [...binding.authorizedStartState.completedStepIds, binding.leafId],
+        receiptStepIds: failedTerminalResult.managedCheckpoint.receiptStepIds,
+      },
+    } as const;
+    const recoveredReportId = '90000000-0000-4000-8000-000000000042';
+    const recoveredReportSequence = failedTerminalResult.managedReport.sequence + 1;
+    const recoveredObservationDetails = hashContent({
+      evidenceClass: 'managed_repair_strong_observation',
+      observationIndex: failedTerminalResult.failedObservation.observationIndex + 1,
+      reportId: recoveredReportId,
+      reportSequence: recoveredReportSequence,
+      checkpointId: recoveredCheckpoint.checkpointId,
+      sceneFingerprintSha256: 'c'.repeat(64),
+      ...managedIdentity,
+      observedAt: '2026-08-22T10:06:01Z',
+    });
+    const recoveredReport = {
+      protocolVersion: '1.6.0',
+      reportId: recoveredReportId,
+      sequence: recoveredReportSequence,
+      adapterId: binding.target.adapterId,
+      instanceId: binding.target.instanceId,
+      companionVersion: '0.1.0',
+      hostVersion: '4.5.0',
+      plan: { id: binding.plan.id, revision: binding.plan.revision },
+      planContentSha256: binding.plan.contentSha256,
+      executionId: binding.executionId,
+      phase: binding.authorizedStartState.successPhase,
+      activeStepId: binding.leafId,
+      completedStepIds: recoveredCheckpoint.session.completedStepIds,
+      transition: 'observation_recovered',
+      stepId: binding.leafId,
+      observations: [
+        {
+          kind: failedTerminalResult.failedObservation.kind,
+          satisfied: true,
+          details: recoveredObservationDetails,
+        },
+      ],
+      observationGate: {
+        stepId: binding.leafId,
+        status: 'recovered',
+        failureStrategy: failedTerminalResult.observationGate.failureStrategy,
+        message: 'The retained failed observation was rechecked successfully.',
+      },
+      artifactAttestation: null,
+      nativeUndoCheckpoint: recoveredCheckpoint,
+      error: null,
+      occurredAt: '2026-08-22T10:06:03Z',
+    } as const;
+    const recoveredReportContentSha256 = computeProtocolCanonicalJsonSha256(recoveredReport);
+    const repairedCurrentState = hashContent({
+      authentication: 'replacement_lease_recovery_post',
+      replacementLeaseId: repairLease.leaseId,
+      sessionId: repairLease.sessionId,
+      documentIncarnationId: repairLease.documentIncarnationId,
+      reportId: recoveredReport.reportId,
+      sequence: recoveredReport.sequence,
+      sceneFingerprintSha256: recoveredObservationDetails.sceneFingerprintSha256,
+      ...managedIdentity,
+      observedAt: '2026-08-22T10:06:04Z',
+    });
+    const repairAck = {
+      formatVersion: '2.0.0',
+      request: repairRequest,
+      recoveryId: repairRequest.recoveryId,
+      requestId: repairRequest.requestId,
+      originalDeliveryId: repairRequest.originalDeliveryId,
+      bindingContentSha256: repairRequest.bindingContentSha256,
+      replacementLeaseId: repairLease.leaseId,
+      acceptedProgressChainHeadContentSha256: repairRequest.acceptedProgressChainHeadContentSha256,
+      durableReferences: repairDurableReferences,
+      outcome: 'reconciled',
+      evidence: {
+        kind: 'managed_repair_terminal',
+        failedTerminalResult,
+        failedTerminalResultContentSha256,
+        failedTerminalMarker,
+        recoveredReport,
+        recoveredReportContentSha256,
+        currentState: repairedCurrentState,
+      },
+      retainsTargetLock: false,
+      automaticReplay: false,
+      occurredAt: '2026-08-22T10:06:05Z',
+    } as const;
+    expect(Date.parse(recoveredCheckpoint.committedAt)).toBeLessThan(
+      Date.parse(repairRequest.requestedAt),
+    );
+    expect(companionExecutionTrackExecutionRecoveryAckSchema.parse(repairAck)).toEqual(repairAck);
+    const recoveryAckJsonSchema = JSON.parse(
+      readFileSync(
+        resolve(
+          'protocol/schemas/v1',
+          'companion-execution-track-execution-recovery-ack.schema.json',
+        ),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+    await validatePublicJsonSchemaCases(recoveryAckJsonSchema, [
+      { value: failedAck, accepted: true },
+      { value: repairAck, accepted: true },
+      { value: { ...failedAck, retainsTargetLock: false }, accepted: false },
+      { value: { ...repairAck, retainsTargetLock: true }, accepted: false },
+      {
+        value: {
+          ...repairAck,
+          evidence: {
+            ...repairAck.evidence,
+            recoveredReport: {
+              reportId: recoveredReport.reportId,
+              sequence: recoveredReport.sequence,
+            },
+          },
+        },
+        accepted: false,
+      },
+    ]);
+    expect(
+      companionExecutionTrackExecutionStatusSchema.parse({
+        binding,
+        deliveryId: delivery.deliveryId,
+        lease,
+        dispatchedAt: delivery.dispatchedAt,
+        status: 'failed_managed_repaired',
+        progress: commit,
+        result: failedTerminalResult,
+        updatedAt: repairAck.occurredAt,
+      }).status,
+    ).toBe('failed_managed_repaired');
+    for (const hostileRepairAck of [
+      {
+        ...repairAck,
+        durableReferences: {
+          ...repairDurableReferences,
+          terminalResultContentSha256: 'd'.repeat(64),
+        },
+      },
+      {
+        ...repairAck,
+        evidence: {
+          ...repairAck.evidence,
+          recoveredReport: {
+            ...recoveredReport,
+            nativeUndoCheckpoint: {
+              ...recoveredCheckpoint,
+              previousCheckpointId: ids.checkpoint,
+            },
+          },
+        },
+      },
+      {
+        ...repairAck,
+        evidence: {
+          ...repairAck.evidence,
+          currentState: hashContent({
+            ...Object.fromEntries(
+              Object.entries(repairedCurrentState).filter(([key]) => key !== 'contentSha256'),
+            ),
+            sceneFingerprintSha256: 'd'.repeat(64),
+          }),
+        },
+      },
+      {
+        ...repairAck,
+        evidence: {
+          ...repairAck.evidence,
+          recoveredReport: {
+            ...recoveredReport,
+            sequence: recoveredReport.sequence + 1,
+          },
+          recoveredReportContentSha256: computeProtocolCanonicalJsonSha256({
+            ...recoveredReport,
+            sequence: recoveredReport.sequence + 1,
+          }),
+          currentState: hashContent({
+            ...Object.fromEntries(
+              Object.entries(repairedCurrentState).filter(([key]) => key !== 'contentSha256'),
+            ),
+            sequence: recoveredReport.sequence + 1,
+          }),
+        },
+      },
+      {
+        ...repairAck,
+        evidence: {
+          ...repairAck.evidence,
+          recoveredReport: {
+            ...recoveredReport,
+            observations: [
+              {
+                ...recoveredReport.observations[0],
+                details: hashContent({
+                  ...Object.fromEntries(
+                    Object.entries(recoveredObservationDetails).filter(
+                      ([key]) => key !== 'contentSha256',
+                    ),
+                  ),
+                  observedAt: '2026-08-22T10:05:59.500Z',
+                }),
+              },
+            ],
+          },
+          recoveredReportContentSha256: computeProtocolCanonicalJsonSha256({
+            ...recoveredReport,
+            observations: [
+              {
+                ...recoveredReport.observations[0],
+                details: hashContent({
+                  ...Object.fromEntries(
+                    Object.entries(recoveredObservationDetails).filter(
+                      ([key]) => key !== 'contentSha256',
+                    ),
+                  ),
+                  observedAt: '2026-08-22T10:05:59.500Z',
+                }),
+              },
+            ],
+          }),
+        },
+      },
+      {
+        ...repairAck,
+        evidence: {
+          ...repairAck.evidence,
+          recoveredReport: {
+            ...recoveredReport,
+            nativeUndoCheckpoint: {
+              ...recoveredCheckpoint,
+              committedAt: '2026-08-22T10:06:02Z',
+            },
+          },
+          recoveredReportContentSha256: computeProtocolCanonicalJsonSha256({
+            ...recoveredReport,
+            nativeUndoCheckpoint: {
+              ...recoveredCheckpoint,
+              committedAt: '2026-08-22T10:06:02Z',
+            },
+          }),
+        },
+      },
+    ]) {
+      expect(
+        companionExecutionTrackExecutionRecoveryAckSchema.safeParse(hostileRepairAck).success,
+      ).toBe(false);
+    }
 
     const terminalMarkerContent = Object.fromEntries(
       Object.entries(terminalMarker).filter(([key]) => key !== 'contentSha256'),
@@ -2624,7 +3346,7 @@ describe('Companion execution-track v2 protocol', () => {
         `accepted hostile ${hostile.name}`,
       ).toBe(false);
     }
-  });
+  }, 40_000);
 
   it('exports strict public schemas and preserves v1 preflight parsing', async () => {
     const { binding, delivery, request } = fixture();
@@ -2674,6 +3396,7 @@ describe('Companion execution-track v2 protocol', () => {
     const recoveryStart = chain[0];
     if (recoveryStart?.phase !== 'baseline_attested') throw new Error('expected baseline');
     const recoveryCurrentState = hashContent({
+      authentication: 'replacement_lease_recovery_post',
       replacementLeaseId: recoveryLease.leaseId,
       sessionId: recoveryLease.sessionId,
       documentIncarnationId: recoveryLease.documentIncarnationId,
@@ -2920,5 +3643,5 @@ describe('Companion execution-track v2 protocol', () => {
     expect(companionExecutionTrackPreflightBindingSchema.parse(existing.binding)).toEqual(
       existing.binding,
     );
-  }, 20_000);
+  }, 40_000);
 });

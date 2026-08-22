@@ -77,6 +77,7 @@ const decisionId = '44444444-4444-4444-8444-444444444444';
 const executionId = '55555555-5555-4555-8555-555555555555';
 const reportId = '66666666-6666-4666-8666-666666666666';
 const attestationId = '77777777-7777-4777-8777-777777777777';
+const actionExecutionRequestId = '88888888-8888-4888-8888-888888888888';
 const occurredAt = '2026-08-17T10:00:00+08:00';
 
 function fixtures() {
@@ -207,7 +208,7 @@ function fixtures() {
   return { tree, leaf, request, materialization, proposal, plan };
 }
 
-describe('public single-leaf procedure replay JSON Schemas', () => {
+describe('public procedure leaf replay JSON Schemas', () => {
   it('keeps proposal requests managed-action-only and embeds packet plus candidate tree', async () => {
     const { request } = fixtures();
     const cases = [
@@ -440,6 +441,21 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         decision: 'accepted',
         occurredAt,
       },
+      authorization: {
+        actionExecutionRequestId,
+        startState: {
+          reportId: '99999999-9999-4999-8999-999999999999',
+          sequence: 1,
+          reportContentSha256: '6'.repeat(64),
+          checkpointId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          checkpointContentSha256: '7'.repeat(64),
+          phase: 'running',
+          activeStepId: null,
+          checkpointOperation: 'start',
+          completedStepIds: [],
+          receiptStepIds: [],
+        },
+      },
       report,
       evidenceClass: 'companion_reported_managed_action_leaf_replay',
       provenance: {
@@ -447,7 +463,8 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         sessionFingerprintSha256: '8'.repeat(64),
         proposalReceipt: { sequence: 1, receivedAt: occurredAt },
         decisionReceipt: { sequence: 2, receivedAt: occurredAt },
-        reportReceipt: { sequence: 3, receivedAt: occurredAt },
+        startReportReceipt: { sequence: 3, receivedAt: occurredAt },
+        reportReceipt: { sequence: 4, receivedAt: occurredAt },
       },
       bindingContentSha256,
       execution: {
@@ -523,6 +540,58 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     expect(procedureLeafReplayAttestationSchema.safeParse(checkpointAttestation).success).toBe(
       true,
     );
+    const prefixStepId = 'previous.completed.step';
+    const prefixAuthorization = {
+      ...content.authorization,
+      startState: {
+        ...content.authorization.startState,
+        activeStepId: prefixStepId,
+        checkpointOperation: 'next',
+        completedStepIds: [prefixStepId],
+        receiptStepIds: [prefixStepId],
+      },
+    } as const;
+    const prefixCheckpoint = {
+      ...nativeUndoCheckpoint,
+      session: {
+        ...nativeUndoCheckpoint.session,
+        completedStepIds: [prefixStepId, leaf.id],
+        receiptStepIds: [prefixStepId, leaf.id],
+      },
+    } as const;
+    const prefixContent = {
+      ...checkpointContent,
+      authorization: prefixAuthorization,
+      report: {
+        ...checkpointContent.report,
+        phase: 'running',
+        completedStepIds: [prefixStepId, leaf.id],
+        nativeUndoCheckpoint: prefixCheckpoint,
+      },
+    } as const;
+    expect(procedureLeafReplayAttestationSchema.safeParse(attest(prefixContent)).success).toBe(
+      true,
+    );
+    for (const completedStepIds of [
+      [prefixStepId, prefixStepId, leaf.id],
+      [leaf.id, prefixStepId],
+      [prefixStepId],
+    ]) {
+      const hostileContent = {
+        ...prefixContent,
+        report: {
+          ...prefixContent.report,
+          completedStepIds,
+          nativeUndoCheckpoint: {
+            ...prefixCheckpoint,
+            session: { ...prefixCheckpoint.session, completedStepIds },
+          },
+        },
+      };
+      expect(procedureLeafReplayAttestationSchema.safeParse(attest(hostileContent)).success).toBe(
+        false,
+      );
+    }
     expect(
       procedureLeafReplayAttestationSchema.safeParse(
         attest({ ...checkpointContent, verificationScope: content.verificationScope }),
@@ -541,6 +610,16 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       planContentSha256,
       executionId,
       stepId: leaf.id,
+      expectedPhase: checkpointContent.report.phase,
+      expectedCompletedStepIds: checkpointContent.report.completedStepIds,
+      expectedReceiptStepIds: nativeUndoCheckpoint.session.receiptStepIds,
+      expectedCheckpoint: {
+        checkpointId: nativeUndoCheckpoint.checkpointId,
+        operation: nativeUndoCheckpoint.operation,
+        contentSha256: createHash('sha256')
+          .update(canonicalizeProtocolJsonValue(nativeUndoCheckpoint))
+          .digest('hex'),
+      },
       expectedObservation: {
         kind: observations[0].kind,
         contentSha256: computeProcedureLeafReplayObservationContentSha256(observations[0]),
@@ -567,7 +646,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       provenance: {
         authentication: 'negotiated_companion_lease',
         sessionFingerprintSha256: '9'.repeat(64),
-        reportReceipt: { sequence: 4, receivedAt: occurredAt },
+        reportReceipt: { sequence: 5, receivedAt: occurredAt },
       },
       verificationScope: {
         managedActionCurrentState: 'verified_at_report',
@@ -600,6 +679,57 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     expect(
       procedureLeafReplayCurrentStateVerificationSchema.safeParse(currentStateVerification).success,
     ).toBe(true);
+    const driftedCurrentStateReport = {
+      ...currentStateReport,
+      completedStepIds: ['drifted.prefix', leaf.id],
+      nativeUndoCheckpoint: {
+        ...currentStateReport.nativeUndoCheckpoint,
+        session: {
+          ...currentStateReport.nativeUndoCheckpoint!.session,
+          completedStepIds: ['drifted.prefix', leaf.id],
+        },
+      },
+    } as const;
+    const driftedCurrentStateContent = {
+      ...currentStateContent,
+      report: driftedCurrentStateReport,
+      outcome: 'not_verified',
+      reason: 'step_state_mismatch',
+      verificationScope: {
+        ...currentStateContent.verificationScope,
+        managedActionCurrentState: 'not_verified_at_report',
+        nativeUndoCheckpoint: 'not_verified_at_report',
+      },
+    } as const;
+    expect(
+      procedureLeafReplayCurrentStateVerificationSchema.safeParse({
+        ...driftedCurrentStateContent,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256: computeProcedureLeafReplayCurrentStateVerificationContentSha256(
+            driftedCurrentStateContent,
+          ),
+        },
+      }).success,
+    ).toBe(true);
+    const falselyVerifiedDrift = {
+      ...driftedCurrentStateContent,
+      outcome: 'verified',
+      reason: 'verified',
+      verificationScope: currentStateContent.verificationScope,
+    } as const;
+    expect(
+      procedureLeafReplayCurrentStateVerificationSchema.safeParse({
+        ...falselyVerifiedDrift,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256:
+            computeProcedureLeafReplayCurrentStateVerificationContentSha256(falselyVerifiedDrift),
+        },
+      }).success,
+    ).toBe(false);
     expect(
       procedureLeafReplayCurrentStateStatusResultSchema.safeParse({
         status: 'pending',
@@ -712,6 +842,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       replayId,
       attestationId: 'c25e7e52-c4f0-413b-b03e-253177be6e04',
       decision: content.decision,
+      authorization: content.authorization,
       failureReport: retainedFailureReport,
       recoveryReport,
       evidenceClass: 'companion_reported_managed_action_failure_recovery',
@@ -722,8 +853,9 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         recoverySessionFingerprintSha256: '8'.repeat(64),
         proposalReceipt: { sequence: 1, receivedAt: occurredAt },
         decisionReceipt: { sequence: 2, receivedAt: occurredAt },
-        failureReportReceipt: { sequence: 3, receivedAt: occurredAt },
-        recoveryReportReceipt: { sequence: 4, receivedAt: occurredAt },
+        startReportReceipt: { sequence: 3, receivedAt: occurredAt },
+        failureReportReceipt: { sequence: 4, receivedAt: occurredAt },
+        recoveryReportReceipt: { sequence: 5, receivedAt: occurredAt },
       },
       bindingContentSha256: content.bindingContentSha256,
       execution: content.execution,
@@ -752,6 +884,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     expect(
       procedureLeafReplayFailureRecoveryFinalizeRequestSchema.safeParse({
         replayId,
+        actionExecutionRequestId,
         attestationId: failureRecoveryContent.attestationId,
         failureReportId: retainedFailureReport.reportId,
         recoveryReportId: recoveryReport.reportId,
@@ -761,6 +894,77 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       failureRecoveryAttestation,
     );
     expect(parsedFailureRecovery.success, parsedFailureRecovery.error?.message).toBe(true);
+    const prefixFailureRecoveryContent = {
+      ...failureRecoveryContent,
+      authorization: prefixAuthorization,
+      failureReport: {
+        ...retainedFailureReport,
+        completedStepIds: [prefixStepId],
+        nativeUndoCheckpoint: {
+          ...retainedFailureCheckpoint,
+          session: {
+            ...retainedFailureCheckpoint.session,
+            completedStepIds: [prefixStepId],
+            receiptStepIds: [prefixStepId, leaf.id],
+          },
+        },
+      },
+      recoveryReport: {
+        ...recoveryReport,
+        phase: 'running',
+        completedStepIds: [prefixStepId, leaf.id],
+        nativeUndoCheckpoint: {
+          ...recoveredCheckpoint,
+          session: {
+            ...recoveredCheckpoint.session,
+            completedStepIds: [prefixStepId, leaf.id],
+            receiptStepIds: [prefixStepId, leaf.id],
+          },
+        },
+      },
+    } as const;
+    const prefixFailureRecoveryAttestation = {
+      ...prefixFailureRecoveryContent,
+      integrity: {
+        algorithm: 'sha256',
+        canonicalization: 'operatingline-json-value-v1',
+        contentSha256: computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(
+          prefixFailureRecoveryContent,
+        ),
+      },
+    } as const;
+    expect(
+      procedureLeafReplayFailureRecoveryAttestationSchema.safeParse(
+        prefixFailureRecoveryAttestation,
+      ).success,
+    ).toBe(true);
+    const hostileRecoveryContent = {
+      ...prefixFailureRecoveryContent,
+      recoveryReport: {
+        ...prefixFailureRecoveryContent.recoveryReport,
+        completedStepIds: [leaf.id, prefixStepId],
+        nativeUndoCheckpoint: {
+          ...prefixFailureRecoveryContent.recoveryReport.nativeUndoCheckpoint,
+          session: {
+            ...prefixFailureRecoveryContent.recoveryReport.nativeUndoCheckpoint.session,
+            completedStepIds: [leaf.id, prefixStepId],
+          },
+        },
+      },
+    } as const;
+    expect(
+      procedureLeafReplayFailureRecoveryAttestationSchema.safeParse({
+        ...hostileRecoveryContent,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256:
+            computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(
+              hostileRecoveryContent,
+            ),
+        },
+      }).success,
+    ).toBe(false);
     expect(
       procedureLeafReplayFailureRecoveryFinalizeResultSchema.safeParse({
         status: 'accepted',
@@ -835,6 +1039,40 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         },
       }).success,
     ).toBe(true);
+    const prefixRolledBackContent = {
+      ...rolledBackContent,
+      authorization: prefixAuthorization,
+      failureReport: {
+        ...rolledBackFailureReport,
+        activeStepId: prefixStepId,
+        completedStepIds: [prefixStepId],
+      },
+    } as const;
+    const attestFailureRecovery = <T extends Record<string, unknown>>(candidate: T) => ({
+      ...candidate,
+      integrity: {
+        algorithm: 'sha256' as const,
+        canonicalization: 'operatingline-json-value-v1' as const,
+        contentSha256: computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(
+          candidate as Parameters<
+            typeof computeProcedureLeafReplayFailureRecoveryAttestationContentSha256
+          >[0],
+        ),
+      },
+    });
+    expect(
+      procedureLeafReplayFailureRecoveryAttestationSchema.safeParse(
+        attestFailureRecovery(prefixRolledBackContent),
+      ).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayFailureRecoveryAttestationSchema.safeParse(
+        attestFailureRecovery({
+          ...prefixRolledBackContent,
+          failureReport: { ...prefixRolledBackContent.failureReport, activeStepId: null },
+        }),
+      ).success,
+    ).toBe(false);
     expect(
       procedureLeafReplayAttestationSchema.safeParse(
         attest({
@@ -1176,7 +1414,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       ).toBe(false);
     }
 
-    const finalizeRequest = { replayId, attestationId, reportId };
+    const finalizeRequest = { replayId, actionExecutionRequestId, attestationId, reportId };
     expect(procedureLeafReplayFinalizeRequestSchema.safeParse(finalizeRequest).success).toBe(true);
     const resultCases = [
       { value: { status: 'accepted', attestation }, accepted: true },
@@ -1260,6 +1498,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     );
     const failureRecoveryFinalizeRequest = {
       replayId,
+      actionExecutionRequestId,
       attestationId: failureRecoveryAttestation.attestationId,
       failureReportId: retainedFailureReport.reportId,
       recoveryReportId: recoveryReport.reportId,

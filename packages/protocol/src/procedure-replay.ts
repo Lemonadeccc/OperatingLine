@@ -127,6 +127,17 @@ function withoutIntegrity(value: { integrity?: unknown } & Record<string, unknow
   return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'integrity'));
 }
 
+function equalStepIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((stepId, index) => stepId === right[index]);
+}
+
+const procedureLeafReplayStepIdPrefixSchema = z
+  .array(guideStepIdSchema)
+  .meta({ uniqueItems: true })
+  .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+    message: 'Replay step prefixes must contain unique step ids',
+  });
+
 export const procedureLeafReplayProposalRequestSchema = z.strictObject({
   formatVersion: procedureLeafReplayFormatVersionSchema,
   replayId: z.uuid(),
@@ -306,6 +317,7 @@ export type ProcedureLeafReplayProposalResult = z.infer<
 
 export const procedureLeafReplayFinalizeRequestSchema = z.strictObject({
   replayId: z.uuid(),
+  actionExecutionRequestId: z.uuid(),
   attestationId: z.uuid(),
   reportId: z.uuid(),
 });
@@ -316,6 +328,7 @@ export type ProcedureLeafReplayFinalizeRequest = z.infer<
 export const procedureLeafReplayFailureRecoveryFinalizeRequestSchema = z
   .strictObject({
     replayId: z.uuid(),
+    actionExecutionRequestId: z.uuid(),
     attestationId: z.uuid(),
     failureReportId: z.uuid(),
     recoveryReportId: z.uuid().optional(),
@@ -380,12 +393,14 @@ const procedureLeafReplayProvenanceSchema = z
     sessionFingerprintSha256: contentSha256Schema,
     proposalReceipt: procedureLeafReplayReceiptSchema,
     decisionReceipt: procedureLeafReplayReceiptSchema,
+    startReportReceipt: procedureLeafReplayReceiptSchema,
     reportReceipt: procedureLeafReplayReceiptSchema,
   })
   .superRefine((provenance, context) => {
     if (
       provenance.proposalReceipt.sequence >= provenance.decisionReceipt.sequence ||
-      provenance.decisionReceipt.sequence >= provenance.reportReceipt.sequence
+      provenance.decisionReceipt.sequence >= provenance.startReportReceipt.sequence ||
+      provenance.startReportReceipt.sequence >= provenance.reportReceipt.sequence
     ) {
       context.addIssue({
         code: 'custom',
@@ -395,8 +410,13 @@ const procedureLeafReplayProvenanceSchema = z
     }
     const proposalReceivedAt = Date.parse(provenance.proposalReceipt.receivedAt);
     const decisionReceivedAt = Date.parse(provenance.decisionReceipt.receivedAt);
+    const startReportReceivedAt = Date.parse(provenance.startReportReceipt.receivedAt);
     const reportReceivedAt = Date.parse(provenance.reportReceipt.receivedAt);
-    if (proposalReceivedAt > decisionReceivedAt || decisionReceivedAt > reportReceivedAt) {
+    if (
+      proposalReceivedAt > decisionReceivedAt ||
+      decisionReceivedAt > startReportReceivedAt ||
+      startReportReceivedAt > reportReceivedAt
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['reportReceipt', 'receivedAt'],
@@ -935,9 +955,9 @@ const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
   }),
   planContentSha256: contentSha256Schema,
   executionId: z.uuid(),
-  phase: z.literal('completed'),
+  phase: z.enum(['running', 'completed']),
   activeStepId: guideStepIdSchema,
-  completedStepIds: z.array(guideStepIdSchema).length(1),
+  completedStepIds: procedureLeafReplayStepIdPrefixSchema.min(1),
   transition: z.literal('step_succeeded'),
   stepId: guideStepIdSchema,
   observations: z.array(procedureLeafReplayObservationSchema).length(1),
@@ -946,6 +966,58 @@ const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
   nativeUndoCheckpoint: companionNativeUndoCheckpointSchema.optional(),
   error: z.null(),
 });
+
+const procedureLeafReplayAuthorizationSchema = z
+  .strictObject({
+    actionExecutionRequestId: z.uuid(),
+    startState: z.strictObject({
+      reportId: z.uuid(),
+      sequence: z.number().int().positive(),
+      reportContentSha256: contentSha256Schema,
+      checkpointId: z.uuid(),
+      checkpointContentSha256: contentSha256Schema,
+      phase: z.literal('running'),
+      activeStepId: guideStepIdSchema.nullable(),
+      checkpointOperation: z.enum(['start', 'next']),
+      completedStepIds: procedureLeafReplayStepIdPrefixSchema,
+      receiptStepIds: procedureLeafReplayStepIdPrefixSchema,
+    }),
+  })
+  .superRefine((authorization, context) => {
+    const { completedStepIds, receiptStepIds } = authorization.startState;
+    if (authorization.startState.activeStepId !== (completedStepIds.at(-1) ?? null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['startState', 'activeStepId'],
+        message: 'Replay start active step must be the completed-prefix tail or null',
+      });
+    }
+    if (
+      authorization.startState.checkpointOperation !==
+      (completedStepIds.length === 0 ? 'start' : 'next')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['startState', 'checkpointOperation'],
+        message: 'Replay start checkpoint operation must match the completed prefix',
+      });
+    }
+    let previousIndex = -1;
+    if (
+      receiptStepIds.some((stepId) => {
+        const index = completedStepIds.indexOf(stepId, previousIndex + 1);
+        if (index === -1) return true;
+        previousIndex = index;
+        return false;
+      })
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['startState', 'receiptStepIds'],
+        message: 'Replay start receipts must preserve completed-step order',
+      });
+    }
+  });
 
 const procedureLeafReplaySuccessGateSchema = z
   .strictObject({
@@ -979,6 +1051,7 @@ const procedureLeafReplayAttestationContentSchema = z.strictObject({
     adapterId: z.literal('blender'),
     decision: z.literal('accepted'),
   }),
+  authorization: procedureLeafReplayAuthorizationSchema,
   report: procedureLeafReplayReportSchema,
   evidenceClass: z.literal('companion_reported_managed_action_leaf_replay'),
   provenance: procedureLeafReplayProvenanceSchema,
@@ -992,7 +1065,7 @@ const procedureLeafReplayAttestationContentSchema = z.strictObject({
 export const procedureLeafReplayAttestationSchema = procedureLeafReplayAttestationContentSchema
   .safeExtend({ integrity: replayIntegritySchema })
   .superRefine((attestation, context) => {
-    const { decision, report, execution } = attestation;
+    const { authorization, decision, report, execution } = attestation;
     const observation = report.observations[0];
     const expectedObservationKind =
       procedureLeafReplayObservationKindByAction[execution.action.name];
@@ -1010,7 +1083,10 @@ export const procedureLeafReplayAttestationSchema = procedureLeafReplayAttestati
         message: 'Replay attestation requires an accepted proposal decision',
       });
     }
-    if (report.phase !== 'completed' || report.transition !== 'step_succeeded') {
+    if (
+      (report.phase !== 'running' && report.phase !== 'completed') ||
+      report.transition !== 'step_succeeded'
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['report'],
@@ -1020,13 +1096,17 @@ export const procedureLeafReplayAttestationSchema = procedureLeafReplayAttestati
     if (
       report.activeStepId !== execution.step.id ||
       report.stepId !== execution.step.id ||
-      report.completedStepIds.length !== 1 ||
-      report.completedStepIds[0] !== execution.step.id
+      authorization.startState.completedStepIds.includes(execution.step.id) ||
+      authorization.startState.receiptStepIds.includes(execution.step.id) ||
+      !equalStepIds(report.completedStepIds, [
+        ...authorization.startState.completedStepIds,
+        execution.step.id,
+      ])
     ) {
       context.addIssue({
         code: 'custom',
         path: ['report', 'completedStepIds'],
-        message: 'Replay report must identify only the exact completed attested step',
+        message: 'Replay report must append the attested step to the authorized completed prefix',
       });
     }
     if (
@@ -1075,8 +1155,10 @@ export const procedureLeafReplayAttestationSchema = procedureLeafReplayAttestati
     if (
       nativeUndoCheckpoint !== undefined &&
       (nativeUndoCheckpoint.operation !== 'next' ||
-        nativeUndoCheckpoint.session.receiptStepIds.length !== 1 ||
-        nativeUndoCheckpoint.session.receiptStepIds[0] !== execution.step.id)
+        !equalStepIds(nativeUndoCheckpoint.session.receiptStepIds, [
+          ...authorization.startState.receiptStepIds,
+          execution.step.id,
+        ]))
     ) {
       context.addIssue({
         code: 'custom',
@@ -1124,7 +1206,7 @@ const procedureLeafReplayFailureReportSchema = companionStateReportSchema.safeEx
   planContentSha256: contentSha256Schema,
   executionId: z.uuid(),
   phase: z.enum(['running', 'blocked']),
-  completedStepIds: z.array(guideStepIdSchema).length(0),
+  completedStepIds: procedureLeafReplayStepIdPrefixSchema,
   transition: z.literal('step_observation_failed'),
   stepId: guideStepIdSchema,
   observations: z.array(procedureLeafReplayFailedObservationSchema).length(1),
@@ -1142,9 +1224,9 @@ const procedureLeafReplayRecoveryReportSchema = companionStateReportSchema.safeE
   }),
   planContentSha256: contentSha256Schema,
   executionId: z.uuid(),
-  phase: z.literal('completed'),
+  phase: z.enum(['running', 'completed']),
   activeStepId: guideStepIdSchema,
-  completedStepIds: z.array(guideStepIdSchema).length(1),
+  completedStepIds: procedureLeafReplayStepIdPrefixSchema.min(1),
   transition: z.literal('observation_recovered'),
   stepId: guideStepIdSchema,
   observations: z.array(procedureLeafReplayObservationSchema).length(1),
@@ -1161,6 +1243,7 @@ const procedureLeafReplayFailureRecoveryProvenanceSchema = z
     recoverySessionFingerprintSha256: contentSha256Schema.nullable(),
     proposalReceipt: procedureLeafReplayReceiptSchema,
     decisionReceipt: procedureLeafReplayReceiptSchema,
+    startReportReceipt: procedureLeafReplayReceiptSchema,
     failureReportReceipt: procedureLeafReplayReceiptSchema,
     recoveryReportReceipt: procedureLeafReplayReceiptSchema.nullable(),
   })
@@ -1176,6 +1259,7 @@ const procedureLeafReplayFailureRecoveryProvenanceSchema = z
     const receipts = [
       provenance.proposalReceipt,
       provenance.decisionReceipt,
+      provenance.startReportReceipt,
       provenance.failureReportReceipt,
       ...(provenance.recoveryReportReceipt === null ? [] : [provenance.recoveryReportReceipt]),
     ];
@@ -1225,6 +1309,7 @@ const procedureLeafReplayFailureRecoveryAttestationContentSchema = z.strictObjec
     adapterId: z.literal('blender'),
     decision: z.literal('accepted'),
   }),
+  authorization: procedureLeafReplayAuthorizationSchema,
   failureReport: procedureLeafReplayFailureReportSchema,
   recoveryReport: procedureLeafReplayRecoveryReportSchema.nullable(),
   evidenceClass: z.literal('companion_reported_managed_action_failure_recovery'),
@@ -1252,7 +1337,6 @@ export const procedureLeafReplayFailureRecoveryAttestationSchema =
                 not: { required: ['nativeUndoCheckpoint'] },
                 properties: {
                   phase: { const: 'running' },
-                  activeStepId: { type: 'null' },
                   observationGate: {
                     properties: { status: { const: 'failed_rolled_back' } },
                   },
@@ -1322,7 +1406,8 @@ export const procedureLeafReplayFailureRecoveryAttestationSchema =
       ],
     })
     .superRefine((attestation, context) => {
-      const { decision, execution, failureReport, recoveryReport, provenance } = attestation;
+      const { authorization, decision, execution, failureReport, recoveryReport, provenance } =
+        attestation;
       const failureGate = failureReport.observationGate;
       const automaticRollback = failureGate.status === 'failed_rolled_back';
       const failureCheckpoint = failureReport.nativeUndoCheckpoint;
@@ -1363,13 +1448,24 @@ export const procedureLeafReplayFailureRecoveryAttestationSchema =
       if (
         automaticRollback
           ? failureReport.phase !== 'running' ||
-            failureReport.activeStepId !== null ||
+            failureReport.activeStepId !==
+              (authorization.startState.completedStepIds.at(-1) ?? null) ||
             failureReport.nativeUndoCheckpoint !== undefined ||
-            recoveryReport !== null
+            recoveryReport !== null ||
+            !equalStepIds(
+              failureReport.completedStepIds,
+              authorization.startState.completedStepIds,
+            ) ||
+            failureReport.completedStepIds.includes(execution.step.id)
           : failureReport.phase !== 'blocked' ||
             failureReport.activeStepId !== execution.step.id ||
             failureCheckpoint === undefined ||
-            recoveryReport === null
+            recoveryReport === null ||
+            !equalStepIds(
+              failureReport.completedStepIds,
+              authorization.startState.completedStepIds,
+            ) ||
+            failureReport.completedStepIds.includes(execution.step.id)
       ) {
         context.addIssue({
           code: 'custom',
@@ -1380,8 +1476,10 @@ export const procedureLeafReplayFailureRecoveryAttestationSchema =
       if (
         failureCheckpoint !== undefined &&
         (failureCheckpoint.operation !== 'next' ||
-          failureCheckpoint.session.receiptStepIds.length !== 1 ||
-          failureCheckpoint.session.receiptStepIds[0] !== execution.step.id)
+          !equalStepIds(failureCheckpoint.session.receiptStepIds, [
+            ...authorization.startState.receiptStepIds,
+            execution.step.id,
+          ]))
       ) {
         context.addIssue({
           code: 'custom',
@@ -1402,12 +1500,17 @@ export const procedureLeafReplayFailureRecoveryAttestationSchema =
           recoveryReport.executionId !== execution.execution.id ||
           recoveryReport.activeStepId !== execution.step.id ||
           recoveryReport.stepId !== execution.step.id ||
-          recoveryReport.completedStepIds[0] !== execution.step.id ||
+          !equalStepIds(recoveryReport.completedStepIds, [
+            ...authorization.startState.completedStepIds,
+            execution.step.id,
+          ]) ||
           recoveryReport.observationGate.stepId !== execution.step.id ||
           recoveryReport.observationGate.failureStrategy !== failureGate.failureStrategy ||
           recoveryCheckpoint.operation !== 'recheck' ||
-          recoveryCheckpoint.session.receiptStepIds.length !== 1 ||
-          recoveryCheckpoint.session.receiptStepIds[0] !== execution.step.id ||
+          !equalStepIds(recoveryCheckpoint.session.receiptStepIds, [
+            ...authorization.startState.receiptStepIds,
+            execution.step.id,
+          ]) ||
           Date.parse(recoveryReport.occurredAt) < Date.parse(failureReport.occurredAt)
         ) {
           context.addIssue({
@@ -1557,15 +1660,16 @@ export const procedureLeafReplayCurrentStateVerificationSchema =
       const checkpoint = report.nativeUndoCheckpoint;
       const checkpointMatches =
         checkpoint !== undefined &&
+        checkpoint.checkpointId === request.expectedCheckpoint.checkpointId &&
+        checkpoint.operation === request.expectedCheckpoint.operation &&
+        computeContentSha256(checkpoint) === request.expectedCheckpoint.contentSha256 &&
         checkpoint.session.plan.id === request.plan.id &&
         checkpoint.session.plan.revision === request.plan.revision &&
         checkpoint.session.planContentSha256 === request.planContentSha256 &&
         checkpoint.session.executionId === request.executionId &&
         checkpoint.session.activeStepId === request.stepId &&
-        checkpoint.session.completedStepIds.length === 1 &&
-        checkpoint.session.completedStepIds[0] === request.stepId &&
-        checkpoint.session.receiptStepIds.length === 1 &&
-        checkpoint.session.receiptStepIds[0] === request.stepId;
+        equalStepIds(checkpoint.session.completedStepIds, request.expectedCompletedStepIds) &&
+        equalStepIds(checkpoint.session.receiptStepIds, request.expectedReceiptStepIds);
       const observationMatches =
         report.observations.length === 1 &&
         report.observations[0]?.kind === request.expectedObservation.kind &&
@@ -1577,11 +1681,10 @@ export const procedureLeafReplayCurrentStateVerificationSchema =
         report.planContentSha256 === request.planContentSha256 &&
         report.executionId === request.executionId;
       const stepMatches =
-        report.phase === 'completed' &&
+        report.phase === request.expectedPhase &&
         report.activeStepId === request.stepId &&
         report.stepId === request.stepId &&
-        report.completedStepIds.length === 1 &&
-        report.completedStepIds[0] === request.stepId &&
+        equalStepIds(report.completedStepIds, request.expectedCompletedStepIds) &&
         report.observationGate === null &&
         report.error === null;
       const verified = sessionMatches && stepMatches && observationMatches && checkpointMatches;

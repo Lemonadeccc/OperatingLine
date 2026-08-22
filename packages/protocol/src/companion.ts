@@ -10,26 +10,84 @@ const companionPlanReferenceSchema = z.strictObject({
   revision: z.number().int().positive(),
 });
 
-export const companionProcedureReplayCurrentStateRequestSchema = z.strictObject({
-  formatVersion: z.literal('1.0.0'),
-  verificationId: z.uuid(),
-  replayId: z.uuid(),
-  attestationId: z.uuid(),
-  attestationContentSha256: companionContentSha256Schema,
-  target: z.strictObject({
-    adapterId: z.literal('blender'),
-    instanceId: z.uuid(),
-  }),
-  plan: companionPlanReferenceSchema,
-  planContentSha256: companionContentSha256Schema,
-  executionId: z.uuid(),
-  stepId: guideStepIdSchema,
-  expectedObservation: z.strictObject({
-    kind: z.string().min(1),
-    contentSha256: companionContentSha256Schema,
-  }),
-  requestedAt: z.iso.datetime({ offset: true }),
-});
+export const companionProcedureReplayCurrentStateRequestSchema = z
+  .strictObject({
+    formatVersion: z.literal('1.0.0'),
+    verificationId: z.uuid(),
+    replayId: z.uuid(),
+    attestationId: z.uuid(),
+    attestationContentSha256: companionContentSha256Schema,
+    target: z.strictObject({
+      adapterId: z.literal('blender'),
+      instanceId: z.uuid(),
+    }),
+    plan: companionPlanReferenceSchema,
+    planContentSha256: companionContentSha256Schema,
+    executionId: z.uuid(),
+    stepId: guideStepIdSchema,
+    expectedPhase: z.enum(['running', 'completed']),
+    expectedCompletedStepIds: z
+      .array(guideStepIdSchema)
+      .min(1)
+      .meta({ uniqueItems: true })
+      .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+        message: 'Expected completedStepIds must contain unique step ids',
+      }),
+    expectedReceiptStepIds: z
+      .array(guideStepIdSchema)
+      .min(1)
+      .meta({ uniqueItems: true })
+      .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+        message: 'Expected receiptStepIds must contain unique step ids',
+      })
+      .describe(
+        'Ordered subsequence of expectedCompletedStepIds ending at stepId; enforce with the OperatingLine protocol parser after structural JSON Schema validation.',
+      ),
+    expectedCheckpoint: z.strictObject({
+      checkpointId: z.uuid(),
+      operation: z.enum(['next', 'recheck']),
+      contentSha256: companionContentSha256Schema,
+    }),
+    expectedObservation: z.strictObject({
+      kind: z.string().min(1),
+      contentSha256: companionContentSha256Schema,
+    }),
+    requestedAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine((request, context) => {
+    if (request.expectedCompletedStepIds.at(-1) !== request.stepId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedCompletedStepIds'],
+        message: 'Expected completed-step prefix must end with the replay target step',
+      });
+    }
+    if (request.expectedReceiptStepIds.at(-1) !== request.stepId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedReceiptStepIds'],
+        message: 'Expected receipt-step prefix must end with the replay target step',
+      });
+    }
+    let previousCompletedIndex = -1;
+    if (
+      request.expectedReceiptStepIds.some((stepId) => {
+        const completedIndex = request.expectedCompletedStepIds.indexOf(
+          stepId,
+          previousCompletedIndex + 1,
+        );
+        if (completedIndex === -1) return true;
+        previousCompletedIndex = completedIndex;
+        return false;
+      })
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedReceiptStepIds'],
+        message: 'Expected receipt-step prefix must preserve completed-step order',
+      });
+    }
+  });
 export type CompanionProcedureReplayCurrentStateRequest = z.infer<
   typeof companionProcedureReplayCurrentStateRequestSchema
 >;

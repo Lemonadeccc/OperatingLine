@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
+  companionProcedureReplayCurrentStateRequestSchema,
   companionStateReportSchema,
 } from '@operatingline/protocol';
 
@@ -423,6 +424,14 @@ describe('companion protocol', () => {
       planContentSha256: report.planContentSha256,
       executionId: report.executionId,
       stepId: report.stepId,
+      expectedPhase: report.phase,
+      expectedCompletedStepIds: report.completedStepIds,
+      expectedReceiptStepIds: report.completedStepIds,
+      expectedCheckpoint: {
+        checkpointId: randomUUID(),
+        operation: 'next',
+        contentSha256: 'f'.repeat(64),
+      },
       expectedObservation: {
         kind: 'render_ready',
         contentSha256: 'e'.repeat(64),
@@ -470,6 +479,25 @@ describe('companion protocol', () => {
         proposal: null,
         proposalPlanContentSha256: null,
         procedureReplayCurrentStateRequest: request,
+      }).success,
+    ).toBe(false);
+
+    const reorderedReceiptRequest = {
+      ...request,
+      expectedCompletedStepIds: ['snowman.head', 'snowman.eye', request.stepId],
+      expectedReceiptStepIds: ['snowman.eye', 'snowman.head', request.stepId],
+    } as const;
+    expect(
+      companionProcedureReplayCurrentStateRequestSchema.safeParse(reorderedReceiptRequest).success,
+    ).toBe(false);
+    expect(
+      companionGuideDeliverySchema.safeParse({
+        protocolVersion: '1.5.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+        procedureReplayCurrentStateRequest: reorderedReceiptRequest,
       }).success,
     ).toBe(false);
   });

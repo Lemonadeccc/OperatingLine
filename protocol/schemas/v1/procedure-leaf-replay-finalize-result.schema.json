@@ -81,6 +81,100 @@
           ],
           "additionalProperties": false
         },
+        "authorization": {
+          "type": "object",
+          "properties": {
+            "actionExecutionRequestId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "startState": {
+              "type": "object",
+              "properties": {
+                "reportId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "reportContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "checkpointId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "checkpointContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "phase": {
+                  "type": "string",
+                  "const": "running"
+                },
+                "activeStepId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "checkpointOperation": {
+                  "type": "string",
+                  "enum": [
+                    "start",
+                    "next"
+                  ]
+                },
+                "completedStepIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "uniqueItems": true
+                },
+                "receiptStepIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "reportId",
+                "sequence",
+                "reportContentSha256",
+                "checkpointId",
+                "checkpointContentSha256",
+                "phase",
+                "activeStepId",
+                "checkpointOperation",
+                "completedStepIds",
+                "receiptStepIds"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "actionExecutionRequestId",
+            "startState"
+          ],
+          "additionalProperties": false
+        },
         "report": {
           "type": "object",
           "properties": {
@@ -153,7 +247,10 @@
             },
             "phase": {
               "type": "string",
-              "const": "completed"
+              "enum": [
+                "running",
+                "completed"
+              ]
             },
             "activeStepId": {
               "type": "string",
@@ -161,12 +258,12 @@
             },
             "completedStepIds": {
               "minItems": 1,
-              "maxItems": 1,
               "type": "array",
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-              }
+              },
+              "uniqueItems": true
             },
             "transition": {
               "type": "string",
@@ -2252,6 +2349,59 @@
                   "type": "string",
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                 },
+                "expectedPhase": {
+                  "type": "string",
+                  "enum": [
+                    "running",
+                    "completed"
+                  ]
+                },
+                "expectedCompletedStepIds": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "uniqueItems": true
+                },
+                "expectedReceiptStepIds": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "uniqueItems": true,
+                  "description": "Ordered subsequence of expectedCompletedStepIds ending at stepId; enforce with the OperatingLine protocol parser after structural JSON Schema validation."
+                },
+                "expectedCheckpoint": {
+                  "type": "object",
+                  "properties": {
+                    "checkpointId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "enum": [
+                        "next",
+                        "recheck"
+                      ]
+                    },
+                    "contentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "checkpointId",
+                    "operation",
+                    "contentSha256"
+                  ],
+                  "additionalProperties": false
+                },
                 "expectedObservation": {
                   "type": "object",
                   "properties": {
@@ -2287,6 +2437,10 @@
                 "planContentSha256",
                 "executionId",
                 "stepId",
+                "expectedPhase",
+                "expectedCompletedStepIds",
+                "expectedReceiptStepIds",
+                "expectedCheckpoint",
                 "expectedObservation",
                 "requestedAt"
               ],
@@ -2380,6 +2534,26 @@
               ],
               "additionalProperties": false
             },
+            "startReportReceipt": {
+              "type": "object",
+              "properties": {
+                "sequence": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "receivedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "sequence",
+                "receivedAt"
+              ],
+              "additionalProperties": false
+            },
             "reportReceipt": {
               "type": "object",
               "properties": {
@@ -2406,6 +2580,7 @@
             "sessionFingerprintSha256",
             "proposalReceipt",
             "decisionReceipt",
+            "startReportReceipt",
             "reportReceipt"
           ],
           "additionalProperties": false
@@ -4440,6 +4615,7 @@
         "replayId",
         "attestationId",
         "decision",
+        "authorization",
         "report",
         "evidenceClass",
         "provenance",

@@ -147,6 +147,120 @@
           ],
           "additionalProperties": false
         },
+        "authorizedStartState": {
+          "type": "object",
+          "properties": {
+            "reportContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "checkpoint": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "checkpointId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "previousCheckpointId": {
+                      "type": "null"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "const": "start"
+                    },
+                    "contentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "checkpointId",
+                    "previousCheckpointId",
+                    "operation",
+                    "contentSha256"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "checkpointId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "previousCheckpointId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "const": "next"
+                    },
+                    "contentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "checkpointId",
+                    "previousCheckpointId",
+                    "operation",
+                    "contentSha256"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "activeStepId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "completedStepIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "uniqueItems": true
+            },
+            "receiptStepIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "uniqueItems": true
+            },
+            "successPhase": {
+              "type": "string",
+              "enum": [
+                "running",
+                "completed"
+              ]
+            }
+          },
+          "required": [
+            "reportContentSha256",
+            "checkpoint",
+            "activeStepId",
+            "completedStepIds",
+            "receiptStepIds",
+            "successPhase"
+          ],
+          "additionalProperties": false
+        },
         "proofId": {
           "type": "string",
           "format": "uuid",
@@ -4585,10 +4699,6 @@
               "type": "string",
               "const": "single_leaf"
             },
-            "leafCount": {
-              "type": "number",
-              "const": 1
-            },
             "leafId": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -4600,7 +4710,6 @@
           },
           "required": [
             "kind",
-            "leafCount",
             "leafId",
             "procedureTreeContentSha256"
           ],
@@ -4626,6 +4735,7 @@
         "leafId",
         "override",
         "expectedState",
+        "authorizedStartState",
         "proofId",
         "preflightBinding",
         "executor",
@@ -4714,6 +4824,7 @@
         "failed_no_mutation",
         "failed_restored",
         "failed_managed",
+        "failed_managed_repaired",
         "recovery_required"
       ]
     },
@@ -4864,6 +4975,120 @@
                   "required": [
                     "reportId",
                     "sequence"
+                  ],
+                  "additionalProperties": false
+                },
+                "authorizedStartState": {
+                  "type": "object",
+                  "properties": {
+                    "reportContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "checkpoint": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "next"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "activeStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "receiptStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "successPhase": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "completed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reportContentSha256",
+                    "checkpoint",
+                    "activeStepId",
+                    "completedStepIds",
+                    "receiptStepIds",
+                    "successPhase"
                   ],
                   "additionalProperties": false
                 },
@@ -9305,10 +9530,6 @@
                       "type": "string",
                       "const": "single_leaf"
                     },
-                    "leafCount": {
-                      "type": "number",
-                      "const": 1
-                    },
                     "leafId": {
                       "type": "string",
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -9320,7 +9541,6 @@
                   },
                   "required": [
                     "kind",
-                    "leafCount",
                     "leafId",
                     "procedureTreeContentSha256"
                   ],
@@ -9346,6 +9566,7 @@
                 "leafId",
                 "override",
                 "expectedState",
+                "authorizedStartState",
                 "proofId",
                 "preflightBinding",
                 "executor",
@@ -9499,144 +9720,314 @@
               "const": "baseline_attested"
             },
             "startCheckpoint": {
-              "type": "object",
-              "properties": {
-                "formatVersion": {
-                  "type": "string",
-                  "const": "1.0.0"
-                },
-                "evidenceClass": {
-                  "type": "string",
-                  "const": "companion_reported_native_undo_checkpoint"
-                },
-                "checkpointId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "previousCheckpointId": {
-                  "type": "null"
-                },
-                "operation": {
-                  "type": "string",
-                  "const": "start"
-                },
-                "committedAt": {
-                  "type": "string",
-                  "format": "date-time",
-                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                },
-                "marker": {
+              "oneOf": [
+                {
                   "type": "object",
                   "properties": {
-                    "key": {
+                    "formatVersion": {
                       "type": "string",
-                      "const": "_operating_line_native_history_v1"
+                      "const": "1.0.0"
                     },
-                    "matched": {
-                      "type": "boolean",
-                      "const": true
-                    }
-                  },
-                  "required": [
-                    "key",
-                    "matched"
-                  ],
-                  "additionalProperties": false
-                },
-                "journal": {
-                  "type": "object",
-                  "properties": {
-                    "entryPresent": {
-                      "type": "boolean",
-                      "const": true
-                    },
-                    "snapshotMatchesSession": {
-                      "type": "boolean",
-                      "const": true
-                    },
-                    "artifactsBackedUp": {
-                      "type": "boolean",
-                      "const": true
-                    }
-                  },
-                  "required": [
-                    "entryPresent",
-                    "snapshotMatchesSession",
-                    "artifactsBackedUp"
-                  ],
-                  "additionalProperties": false
-                },
-                "session": {
-                  "type": "object",
-                  "properties": {
-                    "plan": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "revision": {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "revision"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "planContentSha256": {
+                    "evidenceClass": {
                       "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
+                      "const": "companion_reported_native_undo_checkpoint"
                     },
-                    "executionId": {
+                    "checkpointId": {
                       "type": "string",
                       "format": "uuid",
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
-                    "activeStepId": {
+                    "previousCheckpointId": {
                       "type": "null"
                     },
-                    "completedStepIds": {
-                      "type": "array",
-                      "items": {},
-                      "minItems": 0,
-                      "maxItems": 0
+                    "operation": {
+                      "type": "string",
+                      "const": "start"
                     },
-                    "receiptStepIds": {
-                      "type": "array",
-                      "items": {},
-                      "minItems": 0,
-                      "maxItems": 0
+                    "committedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "marker": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "const": "_operating_line_native_history_v1"
+                        },
+                        "matched": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "matched"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "journal": {
+                      "type": "object",
+                      "properties": {
+                        "entryPresent": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "snapshotMatchesSession": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "artifactsBackedUp": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "entryPresent",
+                        "snapshotMatchesSession",
+                        "artifactsBackedUp"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "session": {
+                      "type": "object",
+                      "properties": {
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "revision"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "planContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "executionId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "activeStepId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "completedStepIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "uniqueItems": true
+                        },
+                        "receiptStepIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "plan",
+                        "planContentSha256",
+                        "executionId",
+                        "activeStepId",
+                        "completedStepIds",
+                        "receiptStepIds"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
-                    "plan",
-                    "planContentSha256",
-                    "executionId",
-                    "activeStepId",
-                    "completedStepIds",
-                    "receiptStepIds"
+                    "formatVersion",
+                    "evidenceClass",
+                    "checkpointId",
+                    "previousCheckpointId",
+                    "operation",
+                    "committedAt",
+                    "marker",
+                    "journal",
+                    "session"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "evidenceClass": {
+                      "type": "string",
+                      "const": "companion_reported_native_undo_checkpoint"
+                    },
+                    "checkpointId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "previousCheckpointId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "const": "next"
+                    },
+                    "committedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "marker": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "const": "_operating_line_native_history_v1"
+                        },
+                        "matched": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "matched"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "journal": {
+                      "type": "object",
+                      "properties": {
+                        "entryPresent": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "snapshotMatchesSession": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "artifactsBackedUp": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "entryPresent",
+                        "snapshotMatchesSession",
+                        "artifactsBackedUp"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "session": {
+                      "type": "object",
+                      "properties": {
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "revision"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "planContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "executionId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "activeStepId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "completedStepIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "uniqueItems": true
+                        },
+                        "receiptStepIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "plan",
+                        "planContentSha256",
+                        "executionId",
+                        "activeStepId",
+                        "completedStepIds",
+                        "receiptStepIds"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "evidenceClass",
+                    "checkpointId",
+                    "previousCheckpointId",
+                    "operation",
+                    "committedAt",
+                    "marker",
+                    "journal",
+                    "session"
                   ],
                   "additionalProperties": false
                 }
-              },
-              "required": [
-                "formatVersion",
-                "evidenceClass",
-                "checkpointId",
-                "previousCheckpointId",
-                "operation",
-                "committedAt",
-                "marker",
-                "journal",
-                "session"
-              ],
-              "additionalProperties": false
+              ]
             },
             "startAttestation": {
               "type": "object",
@@ -9907,6 +10298,120 @@
                   ],
                   "additionalProperties": false
                 },
+                "authorizedStartState": {
+                  "type": "object",
+                  "properties": {
+                    "reportContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "checkpoint": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "next"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "activeStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "receiptStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "successPhase": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "completed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reportContentSha256",
+                    "checkpoint",
+                    "activeStepId",
+                    "completedStepIds",
+                    "receiptStepIds",
+                    "successPhase"
+                  ],
+                  "additionalProperties": false
+                },
                 "proofId": {
                   "type": "string",
                   "format": "uuid",
@@ -14345,10 +14850,6 @@
                       "type": "string",
                       "const": "single_leaf"
                     },
-                    "leafCount": {
-                      "type": "number",
-                      "const": 1
-                    },
                     "leafId": {
                       "type": "string",
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -14360,7 +14861,6 @@
                   },
                   "required": [
                     "kind",
-                    "leafCount",
                     "leafId",
                     "procedureTreeContentSha256"
                   ],
@@ -14386,6 +14886,7 @@
                 "leafId",
                 "override",
                 "expectedState",
+                "authorizedStartState",
                 "proofId",
                 "preflightBinding",
                 "executor",
@@ -15574,6 +16075,120 @@
                   ],
                   "additionalProperties": false
                 },
+                "authorizedStartState": {
+                  "type": "object",
+                  "properties": {
+                    "reportContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "checkpoint": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "next"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "activeStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "receiptStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "successPhase": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "completed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reportContentSha256",
+                    "checkpoint",
+                    "activeStepId",
+                    "completedStepIds",
+                    "receiptStepIds",
+                    "successPhase"
+                  ],
+                  "additionalProperties": false
+                },
                 "proofId": {
                   "type": "string",
                   "format": "uuid",
@@ -20012,10 +20627,6 @@
                       "type": "string",
                       "const": "single_leaf"
                     },
-                    "leafCount": {
-                      "type": "number",
-                      "const": 1
-                    },
                     "leafId": {
                       "type": "string",
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -20027,7 +20638,6 @@
                   },
                   "required": [
                     "kind",
-                    "leafCount",
                     "leafId",
                     "procedureTreeContentSha256"
                   ],
@@ -20053,6 +20663,7 @@
                 "leafId",
                 "override",
                 "expectedState",
+                "authorizedStartState",
                 "proofId",
                 "preflightBinding",
                 "executor",
@@ -21524,6 +22135,120 @@
                   ],
                   "additionalProperties": false
                 },
+                "authorizedStartState": {
+                  "type": "object",
+                  "properties": {
+                    "reportContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "checkpoint": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "next"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "activeStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "receiptStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "successPhase": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "completed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reportContentSha256",
+                    "checkpoint",
+                    "activeStepId",
+                    "completedStepIds",
+                    "receiptStepIds",
+                    "successPhase"
+                  ],
+                  "additionalProperties": false
+                },
                 "proofId": {
                   "type": "string",
                   "format": "uuid",
@@ -25962,10 +26687,6 @@
                       "type": "string",
                       "const": "single_leaf"
                     },
-                    "leafCount": {
-                      "type": "number",
-                      "const": 1
-                    },
                     "leafId": {
                       "type": "string",
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -25977,7 +26698,6 @@
                   },
                   "required": [
                     "kind",
-                    "leafCount",
                     "leafId",
                     "procedureTreeContentSha256"
                   ],
@@ -26003,6 +26723,7 @@
                 "leafId",
                 "override",
                 "expectedState",
+                "authorizedStartState",
                 "proofId",
                 "preflightBinding",
                 "executor",
@@ -26420,6 +27141,120 @@
                   ],
                   "additionalProperties": false
                 },
+                "authorizedStartState": {
+                  "type": "object",
+                  "properties": {
+                    "reportContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "checkpoint": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "next"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "activeStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "receiptStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "successPhase": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "completed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reportContentSha256",
+                    "checkpoint",
+                    "activeStepId",
+                    "completedStepIds",
+                    "receiptStepIds",
+                    "successPhase"
+                  ],
+                  "additionalProperties": false
+                },
                 "proofId": {
                   "type": "string",
                   "format": "uuid",
@@ -30858,10 +31693,6 @@
                       "type": "string",
                       "const": "single_leaf"
                     },
-                    "leafCount": {
-                      "type": "number",
-                      "const": 1
-                    },
                     "leafId": {
                       "type": "string",
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -30873,7 +31704,6 @@
                   },
                   "required": [
                     "kind",
-                    "leafCount",
                     "leafId",
                     "procedureTreeContentSha256"
                   ],
@@ -30899,6 +31729,7 @@
                 "leafId",
                 "override",
                 "expectedState",
+                "authorizedStartState",
                 "proofId",
                 "preflightBinding",
                 "executor",
@@ -31387,6 +32218,120 @@
                   ],
                   "additionalProperties": false
                 },
+                "authorizedStartState": {
+                  "type": "object",
+                  "properties": {
+                    "reportContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "checkpoint": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "next"
+                            },
+                            "contentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            }
+                          },
+                          "required": [
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "contentSha256"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "activeStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "receiptStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "successPhase": {
+                      "type": "string",
+                      "enum": [
+                        "running",
+                        "completed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reportContentSha256",
+                    "checkpoint",
+                    "activeStepId",
+                    "completedStepIds",
+                    "receiptStepIds",
+                    "successPhase"
+                  ],
+                  "additionalProperties": false
+                },
                 "proofId": {
                   "type": "string",
                   "format": "uuid",
@@ -35825,10 +36770,6 @@
                       "type": "string",
                       "const": "single_leaf"
                     },
-                    "leafCount": {
-                      "type": "number",
-                      "const": 1
-                    },
                     "leafId": {
                       "type": "string",
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -35840,7 +36781,6 @@
                   },
                   "required": [
                     "kind",
-                    "leafCount",
                     "leafId",
                     "procedureTreeContentSha256"
                   ],
@@ -35866,6 +36806,7 @@
                 "leafId",
                 "override",
                 "expectedState",
+                "authorizedStartState",
                 "proofId",
                 "preflightBinding",
                 "executor",
@@ -36640,16 +37581,13 @@
                   "const": "next"
                 },
                 "receiptStepIds": {
-                  "type": "array",
-                  "items": [
-                    {
-                      "type": "string",
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                    }
-                  ],
-                  "additionalItems": false,
                   "minItems": 1,
-                  "maxItems": 1
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "uniqueItems": true
                 },
                 "contentSha256": {
                   "type": "string",
@@ -37316,16 +38254,13 @@
                   "const": "next"
                 },
                 "receiptStepIds": {
-                  "type": "array",
-                  "items": [
-                    {
-                      "type": "string",
-                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                    }
-                  ],
-                  "additionalItems": false,
                   "minItems": 1,
-                  "maxItems": 1
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "uniqueItems": true
                 },
                 "contentSha256": {
                   "type": "string",
@@ -37754,6 +38689,17 @@
           "type": "object",
           "properties": {
             "terminalMarkerContentSha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "terminalResultContentSha256": {
               "anyOf": [
                 {
                   "type": "string",
@@ -38823,6 +39769,75 @@
         "properties": {
           "status": {
             "const": "failed_managed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "progress",
+          "result"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "progress": {
+                "properties": {
+                  "phase": {
+                    "const": "commit_intent_recorded"
+                  }
+                },
+                "required": [
+                  "phase"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "result": {
+                "properties": {
+                  "status": {
+                    "const": "failed_managed"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          },
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "managedStart"
+                  ]
+                },
+                {
+                  "required": [
+                    "serverRecoveryEvidence"
+                  ]
+                },
+                {
+                  "required": [
+                    "preDispatchAuthorityExpirationEvidence"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed_managed_repaired"
           }
         },
         "required": [

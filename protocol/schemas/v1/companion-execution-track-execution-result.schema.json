@@ -260,16 +260,13 @@
               "const": "next"
             },
             "receiptStepIds": {
-              "type": "array",
-              "items": [
-                {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                }
-              ],
-              "additionalItems": false,
               "minItems": 1,
-              "maxItems": 1
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "uniqueItems": true
             },
             "contentSha256": {
               "type": "string",
@@ -936,16 +933,13 @@
               "const": "next"
             },
             "receiptStepIds": {
-              "type": "array",
-              "items": [
-                {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                }
-              ],
-              "additionalItems": false,
               "minItems": 1,
-              "maxItems": 1
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "uniqueItems": true
             },
             "contentSha256": {
               "type": "string",

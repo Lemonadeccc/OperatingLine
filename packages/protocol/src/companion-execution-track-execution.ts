@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { computeProtocolCanonicalJsonSha256 } from './canonical-json-value.js';
-import { companionNativeUndoCheckpointSchema } from './companion.js';
+import { companionNativeUndoCheckpointSchema, companionStateReportSchema } from './companion.js';
 import {
   companionExecutionTrackPreflightBindingSchema,
   companionExecutionTrackPreflightCreateRequestSchema,
@@ -61,19 +61,19 @@ export const companionExecutionTrackExecutionExecutorSchema = z.strictObject({
   automaticReplay: z.literal(false),
 });
 
-const pristineStartCheckpointSessionSchema =
-  companionNativeUndoCheckpointSchema.shape.session.safeExtend({
-    activeStepId: z.null(),
-    completedStepIds: z.tuple([]),
-    receiptStepIds: z.tuple([]),
-  });
-
-export const companionExecutionTrackExecutionStartCheckpointSchema =
-  companionNativeUndoCheckpointSchema.safeExtend({
-    previousCheckpointId: z.null(),
-    operation: z.literal('start'),
-    session: pristineStartCheckpointSessionSchema,
-  });
+export const companionExecutionTrackExecutionStartCheckpointSchema = z.discriminatedUnion(
+  'operation',
+  [
+    companionNativeUndoCheckpointSchema.safeExtend({
+      previousCheckpointId: z.null(),
+      operation: z.literal('start'),
+    }),
+    companionNativeUndoCheckpointSchema.safeExtend({
+      previousCheckpointId: z.uuid(),
+      operation: z.literal('next'),
+    }),
+  ],
+);
 
 export const companionExecutionTrackExecutionStartAttestationSchema = z.strictObject({
   checkpointId: z.uuid(),
@@ -106,12 +106,42 @@ const bindingContentSchema = z.strictObject({
   leafId: createShape.leafId,
   override: createShape.override,
   expectedState: expectedStateSchema,
+  authorizedStartState: z.strictObject({
+    reportContentSha256: sha256Schema,
+    checkpoint: z.discriminatedUnion('operation', [
+      z.strictObject({
+        checkpointId: z.uuid(),
+        previousCheckpointId: z.null(),
+        operation: z.literal('start'),
+        contentSha256: sha256Schema,
+      }),
+      z.strictObject({
+        checkpointId: z.uuid(),
+        previousCheckpointId: z.uuid(),
+        operation: z.literal('next'),
+        contentSha256: sha256Schema,
+      }),
+    ]),
+    activeStepId: createShape.leafId.nullable(),
+    completedStepIds: z
+      .array(createShape.leafId)
+      .meta({ uniqueItems: true })
+      .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+        message: 'Authorized completedStepIds must contain unique step ids',
+      }),
+    receiptStepIds: z
+      .array(createShape.leafId)
+      .meta({ uniqueItems: true })
+      .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+        message: 'Authorized receiptStepIds must contain unique step ids',
+      }),
+    successPhase: z.enum(['running', 'completed']),
+  }),
   proofId: z.uuid(),
   preflightBinding: companionExecutionTrackPreflightBindingSchema,
   executor: companionExecutionTrackExecutionExecutorSchema,
   executionScope: z.strictObject({
     kind: z.literal('single_leaf'),
-    leafCount: z.literal(1),
     leafId: createShape.leafId,
     procedureTreeContentSha256: sha256Schema,
   }),
@@ -121,6 +151,16 @@ const bindingContentSchema = z.strictObject({
 function bindingSemanticsMatch(binding: z.infer<typeof bindingContentSchema>): boolean {
   const preflight = binding.preflightBinding;
   const track = preflight.selectedTrack;
+  const startState = binding.authorizedStartState;
+  const checkpoint = startState.checkpoint;
+  const completedStepIds = startState.completedStepIds;
+  const receiptStepIds = startState.receiptStepIds;
+  let previousReceiptIndex = -1;
+  const receiptsFollowCompletedOrder = receiptStepIds.every((stepId) => {
+    const index = completedStepIds.indexOf(stepId, previousReceiptIndex + 1);
+    previousReceiptIndex = index;
+    return index >= 0;
+  });
   return (
     preflight.requestId === binding.requestId &&
     preflight.target.adapterId === binding.target.adapterId &&
@@ -150,6 +190,14 @@ function bindingSemanticsMatch(binding: z.infer<typeof bindingContentSchema>): b
     preflight.step.order === preflight.sourceLeaf.order &&
     computeProtocolCanonicalJsonSha256(preflight.step.dependsOn) ===
       computeProtocolCanonicalJsonSha256(preflight.sourceLeaf.dependsOn) &&
+    !completedStepIds.includes(binding.leafId) &&
+    !receiptStepIds.includes(binding.leafId) &&
+    preflight.step.dependsOn.every((stepId) => completedStepIds.includes(stepId)) &&
+    startState.activeStepId === (completedStepIds.at(-1) ?? null) &&
+    receiptsFollowCompletedOrder &&
+    (checkpoint.operation === 'start'
+      ? completedStepIds.length === 0 && checkpoint.previousCheckpointId === null
+      : completedStepIds.length > 0 && checkpoint.previousCheckpointId !== null) &&
     binding.executionScope.leafId === binding.leafId &&
     binding.executionScope.procedureTreeContentSha256 ===
       preflight.artifacts.procedureTreeContentSha256
@@ -476,8 +524,18 @@ export const companionExecutionTrackExecutionProgressSchema = z
     if (progress.phase === 'baseline_attested') {
       const checkpoint = progress.startCheckpoint;
       const attestation = progress.startAttestation;
+      const authorized = progress.binding.authorizedStartState;
       const { contentSha256: attestationHash, ...attestationContent } = attestation;
       valid &&=
+        computeProtocolCanonicalJsonSha256(checkpoint) === authorized.checkpoint.contentSha256 &&
+        checkpoint.checkpointId === authorized.checkpoint.checkpointId &&
+        checkpoint.previousCheckpointId === authorized.checkpoint.previousCheckpointId &&
+        checkpoint.operation === authorized.checkpoint.operation &&
+        checkpoint.session.activeStepId === authorized.activeStepId &&
+        computeProtocolCanonicalJsonSha256(checkpoint.session.completedStepIds) ===
+          computeProtocolCanonicalJsonSha256(authorized.completedStepIds) &&
+        computeProtocolCanonicalJsonSha256(checkpoint.session.receiptStepIds) ===
+          computeProtocolCanonicalJsonSha256(authorized.receiptStepIds) &&
         checkpoint.session.plan.id === progress.binding.plan.id &&
         checkpoint.session.plan.revision === progress.binding.plan.revision &&
         checkpoint.session.planContentSha256 === progress.binding.plan.contentSha256 &&
@@ -890,6 +948,13 @@ const managedResultReferenceShape = {
   lastProgressContentSha256: sha256Schema,
   managedStart: companionExecutionTrackExecutionManagedStartSchema,
 } as const;
+const managedReceiptStepIdsSchema = z
+  .array(createShape.leafId)
+  .min(1)
+  .meta({ uniqueItems: true })
+  .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+    message: 'Managed checkpoint receiptStepIds must contain unique step ids',
+  });
 const managedFailureResultSchema = z.strictObject({
   ...resultIdentityShape,
   status: z.literal('failed_managed'),
@@ -905,7 +970,7 @@ const managedFailureResultSchema = z.strictObject({
     checkpointId: z.uuid(),
     previousCheckpointId: z.uuid(),
     operation: z.literal('next'),
-    receiptStepIds: z.tuple([createShape.leafId]),
+    receiptStepIds: managedReceiptStepIdsSchema,
     contentSha256: sha256Schema,
   }),
   observationGate: z.strictObject({
@@ -954,7 +1019,7 @@ const successResultSchema = z.strictObject({
     checkpointId: z.uuid(),
     previousCheckpointId: z.uuid(),
     operation: z.literal('next'),
-    receiptStepIds: z.tuple([createShape.leafId]),
+    receiptStepIds: managedReceiptStepIdsSchema,
     contentSha256: sha256Schema,
   }),
   managedObservation: z.strictObject({
@@ -993,13 +1058,10 @@ export const companionExecutionTrackExecutionResultSchema = z
         result.managedCheckpoint.checkpointId !== result.startCheckpointId;
     }
     if (result.status === 'succeeded') {
-      valid &&=
-        result.managedCheckpoint.receiptStepIds.length === 1 &&
-        result.managedCheckpoint.receiptStepIds[0] === result.leafId;
+      valid &&= result.managedCheckpoint.receiptStepIds.at(-1) === result.leafId;
     } else if (result.status === 'failed_managed') {
       valid &&=
-        result.managedCheckpoint.receiptStepIds.length === 1 &&
-        result.managedCheckpoint.receiptStepIds[0] === result.leafId &&
+        result.managedCheckpoint.receiptStepIds.at(-1) === result.leafId &&
         result.observationGate.stepId === result.leafId &&
         ((result.observationGate.status === 'repair_required' &&
           result.observationGate.failureStrategy === 'retain_for_repair') ||
@@ -1049,11 +1111,13 @@ export const companionExecutionTrackExecutionStatusValueSchema = z.enum([
   'failed_no_mutation',
   'failed_restored',
   'failed_managed',
+  'failed_managed_repaired',
   'recovery_required',
 ]);
 
 const recoveryDurableReferencesSchema = z.strictObject({
   terminalMarkerContentSha256: sha256Schema.nullable(),
+  terminalResultContentSha256: sha256Schema.nullable().optional(),
   managedStartContentSha256: sha256Schema.nullable(),
   baselineContentSha256: sha256Schema.nullable(),
   commitIntentId: z.uuid().nullable(),
@@ -1195,6 +1259,7 @@ export const companionExecutionTrackExecutionStatusSchema = z
           'failed_no_mutation',
           'failed_restored',
           'failed_managed',
+          'failed_managed_repaired',
           'recovery_required',
         ].includes(status.status);
     }
@@ -1224,6 +1289,7 @@ export const companionExecutionTrackExecutionStatusSchema = z
       'failed_no_mutation',
       'failed_restored',
       'failed_managed',
+      'failed_managed_repaired',
       'recovery_required',
     ].includes(status.status);
     if (status.status === 'pre_dispatch_authority_expired') {
@@ -1233,6 +1299,9 @@ export const companionExecutionTrackExecutionStatusSchema = z
     else if (status.status === 'succeeded' || status.status === 'failed_managed') {
       valid &&=
         status.result?.status === status.status && status.serverRecoveryEvidence === undefined;
+    } else if (status.status === 'failed_managed_repaired') {
+      valid &&=
+        status.result?.status === 'failed_managed' && status.serverRecoveryEvidence === undefined;
     } else {
       valid &&=
         (status.result?.status === status.status) !==
@@ -1316,6 +1385,10 @@ export const companionExecutionTrackExecutionStatusSchema = z
               recoveryProgress?.proofEvidenceContentSha256;
         }
       } else if (result.status === 'succeeded' || result.status === 'failed_managed') {
+        const expectedReceiptStepIds = [
+          ...status.binding.authorizedStartState.receiptStepIds,
+          status.binding.leafId,
+        ];
         valid &&=
           status.progress?.phase === 'commit_intent_recorded' &&
           result.commitIntentId === status.progress.intent.intentId &&
@@ -1331,7 +1404,9 @@ export const companionExecutionTrackExecutionStatusSchema = z
           Date.parse(status.progress.intent.recordedAt) <=
             Date.parse(result.managedStart.startedAt) &&
           Date.parse(result.managedStart.startedAt) <= Date.parse(result.occurredAt) &&
-          result.managedReport.sequence > status.binding.expectedState.sequence;
+          result.managedReport.sequence > status.binding.expectedState.sequence &&
+          computeProtocolCanonicalJsonSha256(result.managedCheckpoint.receiptStepIds) ===
+            computeProtocolCanonicalJsonSha256(expectedReceiptStepIds);
       }
     }
     if (status.serverRecoveryEvidence !== undefined) {
@@ -1414,7 +1489,12 @@ export const companionExecutionTrackExecutionRecoveryRequestSchema = z
     acceptedProgress: companionExecutionTrackExecutionProgressSchema.nullable(),
     acceptedProgressChainHeadContentSha256: sha256Schema.nullable(),
     durableReferences: recoveryDurableReferencesSchema,
-    source: z.enum(['coordinator_restart', 'document_authority_drift', 'companion_reported']),
+    source: z.enum([
+      'coordinator_restart',
+      'document_authority_drift',
+      'companion_reported',
+      'failed_managed_repair',
+    ]),
     mode: z.literal('read_only_reconcile'),
     automaticReplay: z.literal(false),
     requestedAt: timestampSchema,
@@ -1425,6 +1505,11 @@ export const companionExecutionTrackExecutionRecoveryRequestSchema = z
     const pairedIntent =
       (request.durableReferences.commitIntentId === null) ===
       (request.durableReferences.commitIntentContentSha256 === null);
+    const repairChallenge = request.source === 'failed_managed_repair';
+    const hasFailedTerminalBinding =
+      request.durableReferences.terminalResultContentSha256 !== undefined &&
+      request.durableReferences.terminalResultContentSha256 !== null &&
+      request.durableReferences.terminalMarkerContentSha256 !== null;
     const valid =
       request.target.adapterId === original.target.adapterId &&
       request.target.instanceId === original.target.instanceId &&
@@ -1436,6 +1521,8 @@ export const companionExecutionTrackExecutionRecoveryRequestSchema = z
       Date.parse(original.expiresAt) <= Date.parse(replacement.expiresAt) &&
       Date.parse(request.requestedAt) < Date.parse(replacement.expiresAt) &&
       pairedIntent &&
+      repairChallenge === hasFailedTerminalBinding &&
+      (!repairChallenge || request.acceptedProgress?.phase === 'commit_intent_recorded') &&
       request.acceptedProgressChainHeadContentSha256 ===
         (request.acceptedProgress?.contentSha256 ?? null) &&
       durableReferencesMatchProgress(request.durableReferences, request.acceptedProgress) &&
@@ -1456,6 +1543,7 @@ export const companionExecutionTrackExecutionRecoveryPollDeliverySchema = z.stri
 });
 
 const recoveryCurrentStateAttestationSchema = z.strictObject({
+  authentication: z.literal('replacement_lease_recovery_post'),
   replacementLeaseId: z.uuid(),
   sessionId: z.uuid(),
   documentIncarnationId: z.uuid(),
@@ -1472,9 +1560,8 @@ const recoveryCurrentStateAttestationSchema = z.strictObject({
   observedAt: timestampSchema,
   contentSha256: sha256Schema,
 });
-export const companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema = z.strictObject({
+const persistedManagedTerminalMarkerCommonShape = {
   kind: z.literal('persisted_managed_terminal'),
-  terminalStatus: z.literal('succeeded'),
   terminalResultContentSha256: sha256Schema,
   managedReportId: z.uuid(),
   managedReportSequence: z.number().int().positive(),
@@ -1488,14 +1575,46 @@ export const companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchem
   pointerDomainSha256: sha256Schema,
   linksAndSelectionSha256: sha256Schema,
   contentSha256: sha256Schema,
-});
+} as const;
+export const companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema =
+  z.discriminatedUnion('terminalStatus', [
+    z.strictObject({
+      ...persistedManagedTerminalMarkerCommonShape,
+      terminalStatus: z.literal('succeeded'),
+    }),
+    z.strictObject({
+      ...persistedManagedTerminalMarkerCommonShape,
+      terminalStatus: z.literal('failed_managed'),
+      failedObservationContentSha256: sha256Schema,
+    }),
+  ]);
 export type CompanionExecutionTrackExecutionPersistedManagedTerminalMarker = z.infer<
   typeof companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema
 >;
+const managedRepairStrongObservationDetailsSchema = z.strictObject({
+  evidenceClass: z.literal('managed_repair_strong_observation'),
+  observationIndex: z.number().int().nonnegative(),
+  reportId: z.uuid(),
+  reportSequence: z.number().int().positive(),
+  checkpointId: z.uuid(),
+  sceneFingerprintSha256: sha256Schema,
+  viewLayerIdentitySha256: sha256Schema,
+  objectIdentitySha256: sha256Schema,
+  meshIdentitySha256: sha256Schema,
+  collectionIdentitySha256: sha256Schema,
+  sessionUidDomainSha256: sha256Schema,
+  pointerDomainSha256: sha256Schema,
+  linksAndSelectionSha256: sha256Schema,
+  observedAt: timestampSchema,
+  contentSha256: sha256Schema,
+});
 const recoveryReconciliationEvidenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('persisted_managed_terminal'),
-    terminalResult: successResultSchema,
+    terminalResult: z.discriminatedUnion('status', [
+      successResultSchema,
+      managedFailureResultSchema,
+    ]),
     terminalResultContentSha256: sha256Schema,
     terminalMarker: companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema,
     currentState: recoveryCurrentStateAttestationSchema,
@@ -1505,6 +1624,15 @@ const recoveryReconciliationEvidenceSchema = z.discriminatedUnion('kind', [
     terminalResult: z.union([noMutationResultSchema, restoredResultSchema]),
     terminalResultContentSha256: sha256Schema,
     progress: canonicalRecoveryBaselineProgressSchema,
+    currentState: recoveryCurrentStateAttestationSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('managed_repair_terminal'),
+    failedTerminalResult: managedFailureResultSchema,
+    failedTerminalResultContentSha256: sha256Schema,
+    failedTerminalMarker: companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema,
+    recoveredReport: companionStateReportSchema,
+    recoveredReportContentSha256: sha256Schema,
     currentState: recoveryCurrentStateAttestationSchema,
   }),
   z.strictObject({
@@ -1585,7 +1713,106 @@ export const companionExecutionTrackExecutionRecoveryAckSchema = z
       Date.parse(request.requestedAt) <= Date.parse(state.observedAt) &&
       Date.parse(state.observedAt) <= Date.parse(ack.occurredAt);
     let evidenceValid: boolean;
-    if (ack.evidence.kind === 'persisted_managed_terminal') {
+    if (ack.evidence.kind === 'managed_repair_terminal') {
+      const result = ack.evidence.failedTerminalResult;
+      const marker = ack.evidence.failedTerminalMarker;
+      const report = ack.evidence.recoveredReport;
+      const checkpoint = report.nativeUndoCheckpoint;
+      const observation = report.observations.length === 1 ? report.observations[0] : undefined;
+      const strongObservation = managedRepairStrongObservationDetailsSchema.safeParse(
+        observation?.details,
+      );
+      const { contentSha256: markerHash, ...markerContent } = marker;
+      const expectedCompletedStepIds = [
+        ...(request.acceptedProgress?.binding.authorizedStartState.completedStepIds ?? []),
+        result.leafId,
+      ];
+      const expectedReceiptStepIds = [
+        ...(request.acceptedProgress?.binding.authorizedStartState.receiptStepIds ?? []),
+        result.leafId,
+      ];
+      evidenceValid =
+        request.source === 'failed_managed_repair' &&
+        ack.outcome === 'reconciled' &&
+        !ack.retainsTargetLock &&
+        state.authentication === 'replacement_lease_recovery_post' &&
+        marker.terminalStatus === 'failed_managed' &&
+        ack.evidence.failedTerminalResultContentSha256 ===
+          computeProtocolCanonicalJsonSha256(result) &&
+        request.durableReferences.terminalResultContentSha256 ===
+          ack.evidence.failedTerminalResultContentSha256 &&
+        request.durableReferences.terminalMarkerContentSha256 === marker.contentSha256 &&
+        markerHash === computeProtocolCanonicalJsonSha256(markerContent) &&
+        marker.terminalResultContentSha256 === ack.evidence.failedTerminalResultContentSha256 &&
+        marker.managedReportId === result.managedReport.reportId &&
+        marker.managedReportSequence === result.managedReport.sequence &&
+        marker.managedCheckpointId === result.managedCheckpoint.checkpointId &&
+        marker.failedObservationContentSha256 === result.failedObservation.contentSha256 &&
+        recoveryResultIdentityMatchesRequest(result, request) &&
+        request.acceptedProgress?.phase === 'commit_intent_recorded' &&
+        request.acceptedProgress.contentSha256 === result.lastProgressContentSha256 &&
+        ack.evidence.recoveredReportContentSha256 === computeProtocolCanonicalJsonSha256(report) &&
+        report.protocolVersion === '1.6.0' &&
+        report.adapterId === request.target.adapterId &&
+        report.instanceId === request.target.instanceId &&
+        report.plan?.id === request.acceptedProgress.binding.plan.id &&
+        report.plan.revision === request.acceptedProgress.binding.plan.revision &&
+        report.planContentSha256 === request.acceptedProgress.binding.plan.contentSha256 &&
+        report.executionId === result.executionId &&
+        report.phase === request.acceptedProgress.binding.authorizedStartState.successPhase &&
+        report.activeStepId === result.leafId &&
+        report.transition === 'observation_recovered' &&
+        report.stepId === result.leafId &&
+        report.sequence === result.managedReport.sequence + 1 &&
+        computeProtocolCanonicalJsonSha256(report.completedStepIds) ===
+          computeProtocolCanonicalJsonSha256(expectedCompletedStepIds) &&
+        report.error === null &&
+        report.observationGate?.status === 'recovered' &&
+        report.observationGate.stepId === result.leafId &&
+        report.observationGate.failureStrategy === result.observationGate.failureStrategy &&
+        checkpoint !== undefined &&
+        checkpoint.operation === 'recheck' &&
+        checkpoint.previousCheckpointId === result.managedCheckpoint.checkpointId &&
+        checkpoint.session.plan.id === report.plan.id &&
+        checkpoint.session.plan.revision === report.plan.revision &&
+        checkpoint.session.planContentSha256 === report.planContentSha256 &&
+        checkpoint.session.executionId === report.executionId &&
+        checkpoint.session.activeStepId === result.leafId &&
+        computeProtocolCanonicalJsonSha256(checkpoint.session.completedStepIds) ===
+          computeProtocolCanonicalJsonSha256(expectedCompletedStepIds) &&
+        computeProtocolCanonicalJsonSha256(checkpoint.session.receiptStepIds) ===
+          computeProtocolCanonicalJsonSha256(expectedReceiptStepIds) &&
+        computeProtocolCanonicalJsonSha256(checkpoint.session.receiptStepIds) ===
+          computeProtocolCanonicalJsonSha256(result.managedCheckpoint.receiptStepIds) &&
+        observation?.kind === result.failedObservation.kind &&
+        observation.satisfied &&
+        strongObservation.success &&
+        strongObservation.data.observationIndex > result.failedObservation.observationIndex &&
+        strongObservation.data.reportId === report.reportId &&
+        strongObservation.data.reportSequence === report.sequence &&
+        strongObservation.data.checkpointId === checkpoint.checkpointId &&
+        strongObservation.data.contentSha256 ===
+          computeProtocolCanonicalJsonSha256(
+            Object.fromEntries(
+              Object.entries(strongObservation.data).filter(([key]) => key !== 'contentSha256'),
+            ),
+          ) &&
+        Date.parse(result.occurredAt) <= Date.parse(checkpoint.committedAt) &&
+        Date.parse(checkpoint.committedAt) <= Date.parse(strongObservation.data.observedAt) &&
+        Date.parse(request.requestedAt) <= Date.parse(strongObservation.data.observedAt) &&
+        Date.parse(strongObservation.data.observedAt) <= Date.parse(report.occurredAt) &&
+        Date.parse(report.occurredAt) <= Date.parse(state.observedAt) &&
+        state.reportId === report.reportId &&
+        state.sequence === report.sequence &&
+        state.sceneFingerprintSha256 === strongObservation.data.sceneFingerprintSha256 &&
+        state.viewLayerIdentitySha256 === strongObservation.data.viewLayerIdentitySha256 &&
+        state.objectIdentitySha256 === strongObservation.data.objectIdentitySha256 &&
+        state.meshIdentitySha256 === strongObservation.data.meshIdentitySha256 &&
+        state.collectionIdentitySha256 === strongObservation.data.collectionIdentitySha256 &&
+        state.sessionUidDomainSha256 === strongObservation.data.sessionUidDomainSha256 &&
+        state.pointerDomainSha256 === strongObservation.data.pointerDomainSha256 &&
+        state.linksAndSelectionSha256 === strongObservation.data.linksAndSelectionSha256;
+    } else if (ack.evidence.kind === 'persisted_managed_terminal') {
       const parsedResult = companionExecutionTrackExecutionResultSchema.safeParse(
         ack.evidence.terminalResult,
       );
@@ -1599,13 +1826,16 @@ export const companionExecutionTrackExecutionRecoveryAckSchema = z
       evidenceValid =
         request.source !== 'document_authority_drift' &&
         ack.outcome === 'reconciled' &&
-        !ack.retainsTargetLock &&
+        ack.retainsTargetLock === (result.status === 'failed_managed') &&
         result.status === marker.terminalStatus &&
         ack.evidence.terminalResultContentSha256 === computeProtocolCanonicalJsonSha256(result) &&
         marker.terminalResultContentSha256 === ack.evidence.terminalResultContentSha256 &&
         marker.managedReportId === result.managedReport.reportId &&
         marker.managedReportSequence === result.managedReport.sequence &&
         marker.managedCheckpointId === result.managedCheckpoint.checkpointId &&
+        (result.status === 'succeeded' ||
+          (marker.terminalStatus === 'failed_managed' &&
+            marker.failedObservationContentSha256 === result.failedObservation.contentSha256)) &&
         markerHash === computeProtocolCanonicalJsonSha256(markerContent) &&
         (request.durableReferences.terminalMarkerContentSha256 === null ||
           request.durableReferences.terminalMarkerContentSha256 === marker.contentSha256) &&

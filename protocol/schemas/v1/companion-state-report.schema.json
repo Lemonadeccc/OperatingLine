@@ -726,6 +726,59 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
         },
+        "expectedPhase": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed"
+          ]
+        },
+        "expectedCompletedStepIds": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "uniqueItems": true
+        },
+        "expectedReceiptStepIds": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "uniqueItems": true,
+          "description": "Ordered subsequence of expectedCompletedStepIds ending at stepId; enforce with the OperatingLine protocol parser after structural JSON Schema validation."
+        },
+        "expectedCheckpoint": {
+          "type": "object",
+          "properties": {
+            "checkpointId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "operation": {
+              "type": "string",
+              "enum": [
+                "next",
+                "recheck"
+              ]
+            },
+            "contentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "checkpointId",
+            "operation",
+            "contentSha256"
+          ],
+          "additionalProperties": false
+        },
         "expectedObservation": {
           "type": "object",
           "properties": {
@@ -761,6 +814,10 @@
         "planContentSha256",
         "executionId",
         "stepId",
+        "expectedPhase",
+        "expectedCompletedStepIds",
+        "expectedReceiptStepIds",
+        "expectedCheckpoint",
         "expectedObservation",
         "requestedAt"
       ],

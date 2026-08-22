@@ -2056,6 +2056,24 @@ function hardenExecutionTrackExecutionLifecycle(
           ],
         },
       })),
+      {
+        if: {
+          properties: { status: { const: 'failed_managed_repaired' } },
+          required: ['status'],
+        },
+        then: {
+          required: ['progress', 'result'],
+          allOf: [
+            progressPhase('commit_intent_recorded'),
+            resultStatus('failed_managed'),
+            forbid([
+              'managedStart',
+              'serverRecoveryEvidence',
+              'preDispatchAuthorityExpirationEvidence',
+            ]),
+          ],
+        },
+      },
       ...(['failed_no_mutation', 'failed_restored', 'recovery_required'] as const).map(
         (status) => ({
           if: { properties: { status: { const: status } }, required: ['status'] },
@@ -2302,11 +2320,16 @@ function hardenExecutionTrackExecutionLifecycle(
           properties: {
             evidence: {
               properties: {
-                kind: { enum: ['persisted_managed_terminal', 'baseline_terminal'] },
+                kind: {
+                  enum: [
+                    'persisted_managed_terminal',
+                    'baseline_terminal',
+                    'managed_repair_terminal',
+                  ],
+                },
               },
               required: ['kind'],
             },
-            retainsTargetLock: { const: false },
           },
         },
         else: {
@@ -2316,6 +2339,71 @@ function hardenExecutionTrackExecutionLifecycle(
               required: ['kind'],
             },
             retainsTargetLock: { const: true },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            evidence: {
+              properties: {
+                kind: { const: 'persisted_managed_terminal' },
+                terminalResult: {
+                  properties: { status: { const: 'failed_managed' } },
+                  required: ['status'],
+                },
+              },
+              required: ['kind', 'terminalResult'],
+            },
+          },
+          required: ['evidence'],
+        },
+        then: {
+          properties: {
+            outcome: { const: 'reconciled' },
+            retainsTargetLock: { const: true },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            evidence: {
+              properties: {
+                kind: { enum: ['baseline_terminal', 'managed_repair_terminal'] },
+              },
+              required: ['kind'],
+            },
+          },
+          required: ['evidence'],
+        },
+        then: {
+          properties: {
+            outcome: { const: 'reconciled' },
+            retainsTargetLock: { const: false },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            evidence: {
+              properties: {
+                kind: { const: 'persisted_managed_terminal' },
+                terminalResult: {
+                  properties: { status: { const: 'succeeded' } },
+                  required: ['status'],
+                },
+              },
+              required: ['kind', 'terminalResult'],
+            },
+          },
+          required: ['evidence'],
+        },
+        then: {
+          properties: {
+            outcome: { const: 'reconciled' },
+            retainsTargetLock: { const: false },
           },
         },
       },
