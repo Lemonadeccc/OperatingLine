@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import json
 from queue import Empty
+import re
 import time
 import uuid
 from typing import Any
@@ -18,6 +19,7 @@ from ..domain import (
     PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
     is_action_level_mcp_action,
+    bundled_action_catalog_data,
     load_task_tree_data,
 )
 from ..infrastructure.blender_actions import action_registry
@@ -113,6 +115,9 @@ class CompanionController:
         self._pending_proposal_decisions: dict[str, dict[str, Any]] = {}
         self._last_accepted_proposal_id: str | None = None
         self._last_accepted_proposal_decision: dict[str, Any] | None = None
+        self.execution_track_preflight_request: dict[str, Any] | None = None
+        self.execution_track_preflight_status: dict[str, Any] | None = None
+        self.execution_track_preflight_message = ""
         self._artifact_attestation_execution_id: str | None = None
         self._artifact_attestation: dict[str, Any] | None = None
         self._shortcut_proof_driver: Any | None = None
@@ -308,6 +313,9 @@ class CompanionController:
         self.pending_plan_content_sha256 = None
         self._last_accepted_proposal_id = None
         self._last_accepted_proposal_decision = None
+        self.execution_track_preflight_request = None
+        self.execution_track_preflight_status = None
+        self.execution_track_preflight_message = ""
         if not preserve_proposal_review:
             self.proposed_plan = None
             self.proposal_session = None
@@ -2112,6 +2120,481 @@ class CompanionController:
         return None
 
     @staticmethod
+    def _execution_track_override_data(source_step: dict[str, Any]) -> dict[str, Any]:
+        override = source_step.get("executionTrackOverride")
+        if not isinstance(override, dict):
+            raise ValueError("The exact next leaf has no execution-track override")
+        return deepcopy(override)
+
+    def request_execution_track_preflight(self) -> dict[str, Any]:
+        """Request immutable authority delivery without executing or mutating anything."""
+        from .. import get_session
+
+        if self.execution_track_preflight_request is not None:
+            raise ValueError("An execution-track preflight request is already active")
+        transport = self._transport
+        if transport is None or not transport.running or transport.session_snapshot is None:
+            raise ValueError("Connect to the OperatingLine runtime before verifying the track")
+        if transport.session_snapshot.negotiated_guide_protocol_version != "1.6.0":
+            raise ValueError("Execution-track preflight requires Guide protocol 1.6")
+        decision = self._last_accepted_proposal_decision
+        if self._last_accepted_proposal_id is None or decision is None:
+            raise ValueError("Execution-track preflight requires a locally accepted proposal")
+        if decision["decisionId"] in self._pending_proposal_decisions:
+            raise ValueError(
+                "Wait for the runtime to acknowledge the accepted proposal decision"
+            )
+        if self.proposed_plan is not None or self._proposal_candidates or self.pending_plan is not None:
+            raise ValueError("A plan or proposal is still pending review")
+        session = get_session()
+        if not session.started or session.execution_id is None:
+            raise ValueError("Start the accepted walkthrough before verifying its next track")
+        next_index = session.active_index + 1
+        if next_index < 0 or next_index >= len(session.steps):
+            raise ValueError("The accepted walkthrough has no next leaf")
+        candidate = session.steps[next_index]
+        source_step = self._source_step(session, candidate.id)
+        if source_step is None:
+            raise ValueError("The exact accepted next leaf is unavailable")
+        override = self._execution_track_override_data(source_step)
+        last_report = self.last_report
+        if not isinstance(last_report, dict):
+            raise ValueError("Execution-track preflight requires a current delivered state")
+        expected_state = {
+            "reportId": last_report.get("reportId"),
+            "sequence": last_report.get("sequence"),
+        }
+        if (
+            not isinstance(expected_state["reportId"], str)
+            or isinstance(expected_state["sequence"], bool)
+            or not isinstance(expected_state["sequence"], int)
+            or expected_state["sequence"] <= 0
+            or expected_state["sequence"]
+            > getattr(transport, "last_delivered_sequence", self.last_delivered_sequence)
+        ):
+            raise ValueError("The current Companion state has not been delivered")
+        request = {
+            "formatVersion": "1.0.0",
+            "requestId": str(uuid.uuid4()),
+            "target": {"adapterId": "blender", "instanceId": self.instance_id},
+            "proposalId": self._last_accepted_proposal_id,
+            "plan": {
+                "protocolVersion": "1.6.0",
+                "id": session.plan_id,
+                "revision": session.revision,
+                "contentSha256": session.plan_content_sha256,
+            },
+            "executionId": session.execution_id,
+            "leafId": candidate.id,
+            "override": override,
+            "expectedState": expected_state,
+        }
+        self.execution_track_preflight_request = deepcopy(request)
+        self.execution_track_preflight_status = None
+        self.execution_track_preflight_message = "Track verification queued"
+        transport.create_execution_track_preflight(request)
+        return request
+
+    @staticmethod
+    def _preflight_exact_keys(value: Any, keys: set[str], label: str) -> dict[str, Any]:
+        if not isinstance(value, dict) or set(value) != keys:
+            raise ValueError(f"{label} fields do not match the versioned protocol")
+        return value
+
+    @staticmethod
+    def _preflight_uuid(value: Any, label: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"{label} must be a canonical UUID")
+        try:
+            parsed = uuid.UUID(value)
+        except ValueError as error:
+            raise ValueError(f"{label} must be a canonical UUID") from error
+        if str(parsed) != value:
+            raise ValueError(f"{label} must be a canonical UUID")
+        return value
+
+    @staticmethod
+    def _preflight_timestamp(value: Any, label: str) -> datetime:
+        if not isinstance(value, str):
+            raise ValueError(f"{label} must be an ISO-8601 timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError(f"{label} must be an ISO-8601 timestamp") from error
+        if parsed.tzinfo is None:
+            raise ValueError(f"{label} must include an offset")
+        return parsed
+
+    @staticmethod
+    def _preflight_sha256(value: Any, label: str) -> str:
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise ValueError(f"{label} must be a lowercase SHA-256")
+        return value
+
+    def _validate_execution_track_preflight_delivery(
+        self, delivery: Any
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Validate immutable authority on the main thread without Blender operations."""
+        from .. import get_session
+
+        transport = self._transport
+        request = self.execution_track_preflight_request
+        if transport is None or request is None:
+            raise RuntimeError("authority_invalid: no local preflight request is active")
+        try:
+            delivery = self._preflight_exact_keys(
+                delivery, {"binding", "deliveryId", "lease", "dispatchedAt"}, "Preflight delivery"
+            )
+            binding = self._preflight_exact_keys(
+                delivery["binding"],
+                {
+                    "formatVersion", "requestId", "target", "proposal", "plan",
+                    "executionId", "leafId", "override", "expectedState", "replayId",
+                    "step", "review", "revision", "replay", "artifacts", "catalogs",
+                    "acceptance", "action", "sourceLeaf", "selectedTrack", "requestedAt",
+                    "bindingContentSha256",
+                },
+                "Preflight binding",
+            )
+            for field in ("requestId", "replayId"):
+                self._preflight_uuid(binding[field], f"Preflight {field}")
+            self._preflight_uuid(delivery["deliveryId"], "Preflight delivery id")
+            content = {key: value for key, value in binding.items() if key != "bindingContentSha256"}
+            if binding["bindingContentSha256"] != CompanionTransport._canonical_sha256(content):
+                raise RuntimeError("binding_invalid: binding canonical hash changed")
+            lease = delivery["lease"]
+            lease = self._preflight_exact_keys(
+                lease,
+                {"leaseId", "sessionId", "target", "documentIncarnationId", "expiresAt"},
+                "Preflight lease",
+            )
+            for field in ("leaseId", "sessionId", "documentIncarnationId"):
+                self._preflight_uuid(lease[field], f"Preflight lease {field}")
+            current_lease = transport.current_document_lease
+            if current_lease is None or lease != current_lease:
+                raise RuntimeError("authority_invalid: delivery lease is not the current document lease")
+            if binding["target"] != request["target"] or lease["target"] != request["target"]:
+                raise RuntimeError("authority_invalid: preflight targets another Companion")
+            if any(binding[field] != request[field] for field in (
+                "formatVersion", "requestId", "plan", "executionId", "leafId", "override", "expectedState"
+            )) or binding["proposal"].get("id") != request["proposalId"]:
+                raise RuntimeError("authority_invalid: binding changed the client request")
+            proposal = self._preflight_exact_keys(
+                binding["proposal"], {"id", "contentSha256"}, "Preflight proposal"
+            )
+            self._preflight_uuid(proposal["id"], "Preflight proposal id")
+            self._preflight_sha256(
+                proposal["contentSha256"], "Preflight proposal content hash"
+            )
+            local_decision = self._last_accepted_proposal_decision
+            expected_decision = None if local_decision is None else {
+                "protocolVersion": "1.6.0",
+                "decisionId": local_decision["decisionId"],
+                "proposalId": local_decision["proposalId"],
+                "adapterId": local_decision["adapterId"],
+                "instanceId": local_decision["instanceId"],
+                "decision": local_decision["decision"],
+                "occurredAt": local_decision["decidedAt"],
+            }
+            acceptance = binding.get("acceptance")
+            acceptance = self._preflight_exact_keys(
+                acceptance,
+                {"decision", "decisionContentSha256", "receipt"},
+                "Preflight acceptance",
+            )
+            accepted_decision = self._preflight_exact_keys(
+                acceptance["decision"],
+                {
+                    "protocolVersion", "decisionId", "proposalId", "adapterId",
+                    "instanceId", "decision", "occurredAt",
+                },
+                "Preflight accepted decision",
+            )
+            receipt = self._preflight_exact_keys(
+                acceptance["receipt"],
+                {
+                    "sequence", "subjectType", "subjectId", "authentication",
+                    "adapterId", "instanceId", "sessionFingerprintSha256", "receivedAt",
+                },
+                "Preflight acceptance receipt",
+            )
+            self._preflight_uuid(accepted_decision["decisionId"], "Preflight decision id")
+            self._preflight_uuid(accepted_decision["proposalId"], "Preflight proposal id")
+            self._preflight_uuid(accepted_decision["instanceId"], "Preflight decision instance id")
+            self._preflight_uuid(receipt["subjectId"], "Preflight receipt subject id")
+            self._preflight_uuid(receipt["instanceId"], "Preflight receipt instance id")
+            self._preflight_sha256(
+                acceptance["decisionContentSha256"], "Preflight decision content hash"
+            )
+            self._preflight_sha256(
+                receipt["sessionFingerprintSha256"], "Preflight session fingerprint"
+            )
+            requested_at = self._preflight_timestamp(
+                binding["requestedAt"], "Preflight request time"
+            )
+            dispatched_at = self._preflight_timestamp(
+                delivery["dispatchedAt"], "Preflight dispatch time"
+            )
+            expires_at = self._preflight_timestamp(lease["expiresAt"], "Preflight lease expiry")
+            decision_at = self._preflight_timestamp(
+                accepted_decision["occurredAt"], "Preflight decision time"
+            )
+            received_at = self._preflight_timestamp(
+                receipt["receivedAt"], "Preflight acceptance receipt time"
+            )
+            if (
+                self._last_accepted_proposal_id != request["proposalId"]
+                or accepted_decision != expected_decision
+                or expected_decision is None
+                or expected_decision["decisionId"] in self._pending_proposal_decisions
+                or acceptance["decisionContentSha256"]
+                != CompanionTransport._canonical_sha256(accepted_decision)
+                or receipt["subjectType"] != "guide_proposal_decision"
+                or receipt["subjectId"] != accepted_decision["decisionId"]
+                or receipt["authentication"] != "negotiated_companion_lease"
+                or receipt["adapterId"] != "blender"
+                or receipt["instanceId"] != self.instance_id
+                or isinstance(receipt["sequence"], bool)
+                or not isinstance(receipt["sequence"], int)
+                or receipt["sequence"] <= 0
+                or not decision_at <= received_at <= requested_at <= dispatched_at < expires_at
+            ):
+                raise RuntimeError("authority_invalid: accepted decision authority changed")
+            replay = self._preflight_exact_keys(
+                binding["replay"], {"id", "bindingContentSha256"}, "Preflight replay"
+            )
+            if replay["id"] != binding["replayId"]:
+                raise RuntimeError("binding_invalid: replay identity changed")
+            self._preflight_sha256(
+                replay["bindingContentSha256"], "Preflight replay binding hash"
+            )
+            review = self._preflight_exact_keys(
+                binding["review"], {"id", "contentSha256"}, "Preflight review"
+            )
+            self._preflight_uuid(review["id"], "Preflight review id")
+            self._preflight_sha256(review["contentSha256"], "Preflight review hash")
+            revision = self._preflight_exact_keys(
+                binding["revision"],
+                {"requestContentSha256", "diffContentSha256"},
+                "Preflight revision",
+            )
+            artifacts = self._preflight_exact_keys(
+                binding["artifacts"],
+                {"procedureTreeContentSha256", "sourceLeafContentSha256"},
+                "Preflight artifacts",
+            )
+            for label, value in (
+                ("revision request", revision["requestContentSha256"]),
+                ("revision diff", revision["diffContentSha256"]),
+                ("procedure tree", artifacts["procedureTreeContentSha256"]),
+                ("source leaf", artifacts["sourceLeafContentSha256"]),
+            ):
+                self._preflight_sha256(value, f"Preflight {label} hash")
+            session = get_session()
+            expected_plan = {
+                "protocolVersion": "1.6.0", "id": session.plan_id,
+                "revision": session.revision, "contentSha256": session.plan_content_sha256,
+            }
+            last_report = self.last_report
+            if (
+                not session.started or session.execution_id is None
+                or binding["plan"] != expected_plan
+                or binding["executionId"] != session.execution_id
+                or not isinstance(last_report, dict)
+                or binding["expectedState"] != {
+                    "reportId": last_report.get("reportId"), "sequence": last_report.get("sequence")
+                }
+                or binding["expectedState"]["sequence"]
+                > getattr(transport, "last_delivered_sequence", self.last_delivered_sequence)
+            ):
+                raise RuntimeError("preflight_rejected: active walkthrough state changed")
+            next_index = session.active_index + 1
+            candidate = session.steps[next_index] if 0 <= next_index < len(session.steps) else None
+            source_step = None if candidate is None else self._source_step(session, candidate.id)
+            if (
+                candidate is None or source_step is None or candidate.id != binding["leafId"]
+                or source_step != binding["step"]
+                or source_step.get("action") != binding["action"]
+                or source_step.get("executionTrackOverride") != binding["override"]
+            ):
+                raise RuntimeError("preflight_rejected: exact next leaf changed")
+            source_leaf = binding["sourceLeaf"]
+            selected_track = binding["selectedTrack"]
+            override = binding["override"]
+            source_tracks = (
+                source_leaf.get("menuTracks")
+                if override.get("modality") == "menu"
+                else source_leaf.get("shortcutTracks")
+            )
+            if (
+                not isinstance(source_leaf, dict) or not isinstance(selected_track, dict)
+                or source_leaf.get("id") != binding["leafId"]
+                or source_leaf.get("action") != binding["action"]
+                or artifacts.get("sourceLeafContentSha256")
+                != CompanionTransport._canonical_sha256(source_leaf)
+                or selected_track.get("id") != override.get("trackId")
+                or selected_track.get("modality") != override.get("modality")
+                or override.get("trackContentSha256")
+                != CompanionTransport._canonical_sha256(selected_track)
+                or not isinstance(selected_track.get("proofExecution"), dict)
+                or override.get("proofExecutionContentSha256")
+                != CompanionTransport._canonical_sha256(selected_track["proofExecution"])
+                or not isinstance(source_tracks, list)
+                or not any(track == selected_track for track in source_tracks)
+            ):
+                raise RuntimeError("binding_invalid: source leaf or selected track hash changed")
+            catalogs = self._preflight_exact_keys(
+                binding["catalogs"], {"action", "interaction"}, "Preflight catalogs"
+            )
+            self._preflight_exact_keys(
+                catalogs["action"], {"version", "contentSha256"}, "Preflight ActionCatalog"
+            )
+            self._preflight_exact_keys(
+                catalogs["interaction"],
+                {"version", "contentSha256", "recipeId"},
+                "Preflight InteractionCatalog",
+            )
+            action_catalog = bundled_action_catalog_data()
+            raw_interaction_catalog = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+            recipe = BUNDLED_INTERACTION_CATALOG.recipe_for(binding["action"]["name"])
+            if (
+                catalogs.get("action") != {
+                    "version": BLENDER_ACTION_CATALOG_VERSION,
+                    "contentSha256": CompanionTransport._canonical_sha256(action_catalog),
+                }
+                or catalogs.get("interaction") != {
+                    "version": BUNDLED_INTERACTION_CATALOG.catalog_version,
+                    "contentSha256": CompanionTransport._canonical_sha256(raw_interaction_catalog),
+                    "recipeId": override.get("recipeId"),
+                }
+                or recipe is None or recipe.id != override.get("recipeId")
+                or recipe.action_name != binding["action"]["name"]
+            ):
+                raise RuntimeError("preflight_rejected: bundled catalog authority changed")
+            if self.shortcut_mutation_blocked:
+                raise RuntimeError("history_locked: native history is locked")
+        except RuntimeError:
+            raise
+        except (IndexError, KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"binding_invalid: {error}") from error
+        return delivery, binding
+
+    def _handle_execution_track_preflight_delivery(self, delivery: Any) -> None:
+        transport = self._transport
+        if transport is None:
+            return
+        status = "verified_unavailable"
+        authority_verified = True
+        reason_code = "executor_unavailable"
+        error_message = "Exact execution-track authority verified; action executor is unavailable"
+        try:
+            delivery, binding = self._validate_execution_track_preflight_delivery(delivery)
+        except RuntimeError as error:
+            text = str(error)
+            prefix, separator, detail = text.partition(":")
+            reason_code = prefix if separator and prefix in {
+                "authority_invalid", "binding_invalid", "history_locked", "preflight_rejected"
+            } else "preflight_rejected"
+            error_message = detail.strip() if separator else text
+            status = "rejected"
+            authority_verified = False
+            identity = self._execution_track_preflight_result_identity(delivery)
+            if identity is None:
+                self.execution_track_preflight_message = error_message
+                self.error = error_message
+                self.status = "Track preflight rejected"
+                return
+        else:
+            identity = self._execution_track_preflight_result_identity(delivery)
+            if identity is None:
+                self.execution_track_preflight_message = (
+                    "Validated delivery lost its terminal result identity"
+                )
+                self.error = self.execution_track_preflight_message
+                self.status = "Track preflight rejected"
+                return
+        result = {
+            **identity,
+            "status": status,
+            "authorityVerified": authority_verified,
+            "capability": "preflight_only",
+            "reasonCode": reason_code,
+            "error": error_message,
+            "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        self.execution_track_preflight_status = deepcopy(result)
+        self.execution_track_preflight_message = error_message
+        self.status = (
+            "Track authority verified; executor unavailable"
+            if authority_verified else "Track preflight rejected"
+        )
+        if not authority_verified:
+            self.error = error_message
+        transport.submit_execution_track_preflight_result(result)
+
+    def _execution_track_preflight_result_identity(
+        self, delivery: Any
+    ) -> dict[str, Any] | None:
+        """Extract only a complete protocol-valid terminal identity from hostile input."""
+        try:
+            if not isinstance(delivery, dict):
+                return None
+            binding = delivery.get("binding")
+            lease = delivery.get("lease")
+            if not isinstance(binding, dict) or not isinstance(lease, dict):
+                return None
+            proposal = binding.get("proposal")
+            plan = binding.get("plan")
+            target = binding.get("target")
+            if (
+                not isinstance(proposal, dict)
+                or not isinstance(plan, dict)
+                or not isinstance(target, dict)
+            ):
+                return None
+            identity = {
+                "formatVersion": binding.get("formatVersion"),
+                "requestId": binding.get("requestId"),
+                "replayId": binding.get("replayId"),
+                "deliveryId": delivery.get("deliveryId"),
+                "bindingContentSha256": binding.get("bindingContentSha256"),
+                "target": deepcopy(target),
+                "leaseId": lease.get("leaseId"),
+                "proposalId": proposal.get("id"),
+                "planId": plan.get("id"),
+                "planRevision": plan.get("revision"),
+                "executionId": binding.get("executionId"),
+                "leafId": binding.get("leafId"),
+            }
+            if identity["formatVersion"] != "1.0.0":
+                return None
+            for field in (
+                "requestId", "replayId", "deliveryId", "leaseId", "proposalId",
+                "executionId",
+            ):
+                self._preflight_uuid(identity[field], f"Preflight result {field}")
+            self._preflight_sha256(
+                identity["bindingContentSha256"], "Preflight result binding hash"
+            )
+            if identity["target"] != {
+                "adapterId": "blender", "instanceId": self.instance_id
+            }:
+                return None
+            if not isinstance(identity["planId"], str) or not identity["planId"]:
+                return None
+            if (
+                isinstance(identity["planRevision"], bool)
+                or not isinstance(identity["planRevision"], int)
+                or identity["planRevision"] <= 0
+            ):
+                return None
+            if not isinstance(identity["leafId"], str) or not identity["leafId"]:
+                return None
+            return identity
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _action_result_payload(
         delivery: dict[str, Any],
         *,
@@ -3801,8 +4284,86 @@ class CompanionController:
                     message = transport.incoming.get_nowait()
                 except Empty:
                     break
+                message_kind = message.get("kind")
+                if message_kind in {
+                    "execution_track_preflight_delivery",
+                    "execution_track_preflight_status",
+                    "execution_track_preflight_create_rejected",
+                    "execution_track_preflight_result_rejected",
+                    "execution_track_preflight_result_acknowledged",
+                }:
+                    current_request = self.execution_track_preflight_request
+                    current_request_id = (
+                        current_request.get("requestId")
+                        if isinstance(current_request, dict)
+                        else None
+                    )
+                    if message_kind == "execution_track_preflight_delivery":
+                        candidate_delivery = message.get("request")
+                        candidate_binding = (
+                            candidate_delivery.get("binding")
+                            if isinstance(candidate_delivery, dict)
+                            else None
+                        )
+                        message_request_id = (
+                            candidate_binding.get("requestId")
+                            if isinstance(candidate_binding, dict)
+                            else None
+                        )
+                    else:
+                        message_request_id = message.get("requestId")
+                    if (
+                        not isinstance(current_request_id, str)
+                        or message_request_id != current_request_id
+                    ):
+                        continue
                 if message.get("kind") == "action_execute_request":
                     self._handle_action_execute_request(message.get("request"))
+                elif message.get("kind") == "execution_track_preflight_delivery":
+                    self._handle_execution_track_preflight_delivery(
+                        message.get("request")
+                    )
+                elif message.get("kind") == "execution_track_preflight_status":
+                    incoming_status = message.get("status")
+                    current_status = self.execution_track_preflight_status
+                    current_terminal = (
+                        isinstance(current_status, dict)
+                        and current_status.get("status")
+                        in {"verified_unavailable", "rejected"}
+                    )
+                    incoming_terminal = (
+                        isinstance(incoming_status, dict)
+                        and incoming_status.get("status")
+                        in {"verified_unavailable", "rejected"}
+                    )
+                    if current_terminal and not incoming_terminal:
+                        continue
+                    self.execution_track_preflight_status = deepcopy(incoming_status)
+                    wire_status = (
+                        message.get("status", {}).get("status")
+                        if isinstance(message.get("status"), dict)
+                        else None
+                    )
+                    self.execution_track_preflight_message = (
+                        f"Track verification status: {wire_status} (no execution performed)"
+                        if isinstance(wire_status, str)
+                        else "Track verification status received (no execution performed)"
+                    )
+                elif message.get("kind") in {
+                    "execution_track_preflight_create_rejected",
+                    "execution_track_preflight_result_rejected",
+                }:
+                    self.error = str(
+                        message.get("message") or "Runtime rejected execution-track preflight"
+                    )
+                    self.execution_track_preflight_message = self.error
+                    self.status = "Track preflight reporting failed closed"
+                    self.execution_track_preflight_request = None
+                elif message.get("kind") == "execution_track_preflight_result_acknowledged":
+                    self.execution_track_preflight_message = (
+                        "Track preflight result acknowledged; no execution was performed"
+                    )
+                    self.execution_track_preflight_request = None
                 elif message.get("kind") in {
                     "menu_control_proof_request",
                     "menu_control_proof_execute_request",

@@ -142,6 +142,10 @@ class _Session:
 class _Companion:
     proposed_plan = None
     shortcut_mutation_blocked = False
+    connected = True
+    execution_track_preflight_message = ""
+    execution_track_preflight_status = None
+    execution_track_preflight_request = None
 
     def __init__(self) -> None:
         self.reports: list[tuple[str, object, str | None]] = []
@@ -291,6 +295,7 @@ class ExecutionTrackOverrideOperatorTests(unittest.TestCase):
         panel._draw_walkthrough_controls(
             layout,
             session,
+            companion,
             proposal_pending=False,
             history_error="",
         )
@@ -303,6 +308,25 @@ class ExecutionTrackOverrideOperatorTests(unittest.TestCase):
             "Next 01  Locked: execution track executor unavailable",
             layout.boxes[0].labels,
         )
+
+    def test_panel_disables_verify_while_a_preflight_is_active(self) -> None:
+        step = domain.load_task_tree_data(plan_with_override())
+        session = _Session(step)
+        companion = _Companion()
+        companion.execution_track_preflight_request = {"requestId": "active"}
+        _load_operators(session, companion, [])
+        panel = _load_panel()
+        layout = _Layout()
+
+        panel._draw_walkthrough_controls(
+            layout,
+            session,
+            companion,
+            proposal_pending=False,
+            history_error="",
+        )
+
+        self.assertFalse(layout.rows[2].enabled)
 
 
 if __name__ == "__main__":

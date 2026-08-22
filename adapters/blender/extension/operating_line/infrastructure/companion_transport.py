@@ -210,6 +210,9 @@ class CompanionTransport:
         self.dialogue_runs: Queue[dict[str, Any]] = Queue()
         self.initial_plan_runs: Queue[dict[str, Any]] = Queue()
         self.action_results: Queue[dict[str, Any]] = Queue()
+        self.execution_track_preflight_creates: Queue[dict[str, Any]] = Queue()
+        self.execution_track_preflight_status_requests: Queue[str] = Queue()
+        self.execution_track_preflight_results: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_progress: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_results: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
@@ -226,6 +229,8 @@ class CompanionTransport:
         self._session_snapshot: CompanionSessionSnapshot | None = None
         self._seen_replay_current_state_verification_ids: set[str] = set()
         self._seen_action_request_ids: set[str] = set()
+        self._seen_execution_track_preflight_request_ids: set[str] = set()
+        self._execution_track_preflight_poll_enabled = False
         self._seen_shortcut_proof_request_ids: set[str] = set()
         self._seen_shortcut_proof_recovery_ids: set[str] = set()
         self._seen_menu_control_proof_request_ids: set[str] = set()
@@ -335,6 +340,76 @@ class CompanionTransport:
         if not isinstance(result, dict):
             raise ValueError("Action result must be an object")
         self.action_results.put(dict(result))
+
+    def create_execution_track_preflight(self, request: dict[str, Any]) -> None:
+        """Queue one client-known, zero-side-effect execution-track preflight."""
+        if not isinstance(request, dict):
+            raise ValueError("Execution-track preflight request must be an object")
+        self.execution_track_preflight_creates.put(deepcopy(request))
+
+    def submit_execution_track_preflight_result(self, result: dict[str, Any]) -> None:
+        """Queue one terminal result produced by Blender's main-thread validator."""
+        if not isinstance(result, dict):
+            raise ValueError("Execution-track preflight result must be an object")
+        self.execution_track_preflight_results.put(deepcopy(result))
+
+    def request_execution_track_preflight_status(self, request_id: str) -> None:
+        """Queue an authenticated status lookup for one immutable request."""
+        validated = self._validated_required_uuid(
+            request_id, "Execution-track preflight request id"
+        )
+        self.execution_track_preflight_status_requests.put(validated)
+
+    @staticmethod
+    def _execution_track_preflight_result_identity(
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        identity_fields = (
+            "formatVersion", "requestId", "replayId", "deliveryId",
+            "bindingContentSha256", "target", "leaseId", "proposalId", "planId",
+            "planRevision", "executionId", "leafId",
+        )
+        return {field: deepcopy(result.get(field)) for field in identity_fields}
+
+    @classmethod
+    def _downgrade_verified_preflight_authority_change(
+        cls, result: dict[str, Any], error: HTTPError
+    ) -> dict[str, Any] | None:
+        """Convert only Runtime's dedicated verified-authority conflict once upstream."""
+        runtime_payload = getattr(error, "runtime_payload", None)
+        if (
+            error.code != 409
+            or not isinstance(runtime_payload, dict)
+            or runtime_payload.get("error")
+            != "execution_track_preflight_verified_authority_changed"
+            or result.get("status") != "verified_unavailable"
+            or result.get("authorityVerified") is not True
+            or result.get("reasonCode")
+            not in {"executor_unavailable", "modality_not_supported"}
+        ):
+            return None
+        identity = cls._execution_track_preflight_result_identity(result)
+        message = runtime_payload.get("message")
+        detail = (
+            message.strip()
+            if isinstance(message, str) and message.strip()
+            else "Runtime authority changed after local verification"
+        )
+        downgraded = deepcopy(result)
+        downgraded.update(
+            {
+                "status": "rejected",
+                "authorityVerified": False,
+                "reasonCode": "authority_invalid",
+                "error": detail[:2_000],
+                "occurredAt": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            }
+        )
+        if cls._execution_track_preflight_result_identity(downgraded) != identity:
+            raise ValueError("Execution-track preflight downgrade changed immutable identity")
+        return downgraded
 
     def submit_shortcut_proof_progress(self, progress: dict[str, Any]) -> None:
         """Queue append-only shortcut receipt progress on its independent channel."""
@@ -617,6 +692,11 @@ class CompanionTransport:
             or path == "/api/v1/companion/state"
             or path == "/api/v1/companion/proposal-decision"
             or path == "/api/v1/companion/action-result"
+            or path == "/api/v1/companion/execution-track-preflight"
+            or path.startswith("/api/v1/companion/execution-track-preflight?")
+            or path == "/api/v1/companion/execution-track-preflight/poll"
+            or path.startswith("/api/v1/companion/execution-track-preflight/poll?")
+            or path == "/api/v1/companion/execution-track-preflight/result"
             or path.startswith("/api/v1/companion/shortcut-proof?")
             or path == "/api/v1/companion/shortcut-proof-progress"
             or path == "/api/v1/companion/shortcut-proof-result"
@@ -994,6 +1074,40 @@ class CompanionTransport:
             self._poll_action_request()
             self._poll_menu_control_proof_request()
             self._poll_shortcut_proof_request()
+        if (
+            session.negotiated_guide_protocol_version == "1.6.0"
+            and self._execution_track_preflight_poll_enabled
+        ):
+            self._poll_execution_track_preflight()
+
+    def _poll_execution_track_preflight(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/execution-track-preflight/poll?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(
+            response, {"request"}, "Execution-track preflight poll"
+        )
+        delivery = response["request"]
+        if delivery is None:
+            return
+        if not isinstance(delivery, dict):
+            raise ValueError("Execution-track preflight delivery must be an object")
+        binding = delivery.get("binding")
+        request_id = binding.get("requestId") if isinstance(binding, dict) else None
+        self._validated_required_uuid(
+            request_id, "Execution-track preflight request id"
+        )
+        if request_id in self._seen_execution_track_preflight_request_ids:
+            return
+        if len(self._seen_execution_track_preflight_request_ids) >= 256:
+            self._seen_execution_track_preflight_request_ids.pop()
+        self._seen_execution_track_preflight_request_ids.add(request_id)
+        self.incoming.put(
+            {"kind": "execution_track_preflight_delivery", "request": deepcopy(delivery)}
+        )
 
     @staticmethod
     def _validated_required_uuid(value: Any, label: str) -> str:
@@ -3774,6 +3888,9 @@ class CompanionTransport:
         session_retry_delay = min(max(0.05, self._poll_interval), 5.0)
         pending_report: dict[str, Any] | None = None
         pending_action_result: dict[str, Any] | None = None
+        pending_execution_track_preflight_create: dict[str, Any] | None = None
+        pending_execution_track_preflight_status_request: str | None = None
+        pending_execution_track_preflight_result: dict[str, Any] | None = None
         pending_shortcut_progress: dict[str, Any] | None = None
         pending_shortcut_result: dict[str, Any] | None = None
         pending_shortcut_recovery_ack: dict[str, Any] | None = None
@@ -3795,6 +3912,7 @@ class CompanionTransport:
         initial_plan_run_signature: str | None = None
         shortcut_reporting_blocked: set[str] = set()
         menu_control_reporting_blocked: set[str] = set()
+        downgraded_preflight_identities: set[str] = set()
         refresh_replan_providers = True
         refresh_dialogue_providers = False
         refresh_initial_plan_providers = False
@@ -3807,6 +3925,9 @@ class CompanionTransport:
             not self._stop.is_set()
             or pending_report is not None
             or pending_action_result is not None
+            or pending_execution_track_preflight_create is not None
+            or pending_execution_track_preflight_status_request is not None
+            or pending_execution_track_preflight_result is not None
             or pending_shortcut_progress is not None
             or pending_shortcut_result is not None
             or pending_shortcut_recovery_ack is not None
@@ -3820,6 +3941,9 @@ class CompanionTransport:
             or pending_dialogue_run is not None
             or not self.outgoing.empty()
             or not self.action_results.empty()
+            or not self.execution_track_preflight_creates.empty()
+            or not self.execution_track_preflight_status_requests.empty()
+            or not self.execution_track_preflight_results.empty()
             or not self.shortcut_proof_progress.empty()
             or not self.shortcut_proof_results.empty()
             or not self.shortcut_proof_recovery_acks.empty()
@@ -4392,6 +4516,138 @@ class CompanionTransport:
                             )
                             pending_action_result = None
                             request_succeeded = True
+                if pending_execution_track_preflight_create is None:
+                    try:
+                        pending_execution_track_preflight_create = (
+                            self.execution_track_preflight_creates.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_execution_track_preflight_create is not None:
+                    request_id = pending_execution_track_preflight_create.get("requestId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/execution-track-preflight",
+                            pending_execution_track_preflight_create,
+                        )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_preflight_create_rejected",
+                                "requestId": request_id,
+                                "message": (
+                                    "Runtime permanently rejected execution-track "
+                                    f"preflight creation (HTTP {error.code})"
+                                ),
+                            }
+                        )
+                    else:
+                        self._execution_track_preflight_poll_enabled = (
+                            response.get("status") == "queued"
+                        )
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_preflight_status",
+                                "requestId": request_id,
+                                "status": deepcopy(response),
+                            }
+                        )
+                    pending_execution_track_preflight_create = None
+                    request_succeeded = True
+                if pending_execution_track_preflight_status_request is None:
+                    try:
+                        pending_execution_track_preflight_status_request = (
+                            self.execution_track_preflight_status_requests.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_execution_track_preflight_status_request is not None:
+                    request_id = pending_execution_track_preflight_status_request
+                    response = self._request_json(
+                        "GET",
+                        "/api/v1/companion/execution-track-preflight?"
+                        + urlencode({"requestId": request_id}),
+                    )
+                    self.incoming.put(
+                        {
+                            "kind": "execution_track_preflight_status",
+                            "requestId": request_id,
+                            "status": deepcopy(response),
+                        }
+                    )
+                    pending_execution_track_preflight_status_request = None
+                    request_succeeded = True
+                if pending_execution_track_preflight_result is None:
+                    try:
+                        pending_execution_track_preflight_result = (
+                            self.execution_track_preflight_results.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_execution_track_preflight_result is not None:
+                    request_id = pending_execution_track_preflight_result.get("requestId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/execution-track-preflight/result",
+                            pending_execution_track_preflight_result,
+                        )
+                        self._validate_exact_keys(
+                            response, {"result"}, "Execution-track preflight result ack"
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime did not acknowledge execution-track preflight result"
+                            )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        downgraded = self._downgrade_verified_preflight_authority_change(
+                            pending_execution_track_preflight_result, error
+                        )
+                        identity_sha256 = (
+                            self._canonical_sha256(
+                                self._execution_track_preflight_result_identity(
+                                    pending_execution_track_preflight_result
+                                )
+                            )
+                            if downgraded is not None
+                            else None
+                        )
+                        if (
+                            downgraded is not None
+                            and identity_sha256 is not None
+                            and identity_sha256 not in downgraded_preflight_identities
+                        ):
+                            downgraded_preflight_identities.add(identity_sha256)
+                            pending_execution_track_preflight_result = downgraded
+                            continue
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_preflight_result_rejected",
+                                "requestId": request_id,
+                                "message": (
+                                    "Runtime permanently rejected execution-track "
+                                    f"preflight result (HTTP {error.code})"
+                                ),
+                            }
+                        )
+                    else:
+                        self._execution_track_preflight_poll_enabled = False
+                        if isinstance(request_id, str):
+                            self.execution_track_preflight_status_requests.put(request_id)
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_preflight_result_acknowledged",
+                                "requestId": request_id,
+                                "result": response["result"],
+                            }
+                        )
+                    pending_execution_track_preflight_result = None
+                    request_succeeded = True
                 if pending_menu_control_progress is None:
                     try:
                         pending_menu_control_progress = self.menu_control_proof_progress.get_nowait()

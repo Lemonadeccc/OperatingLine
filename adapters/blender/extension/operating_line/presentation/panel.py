@@ -51,6 +51,7 @@ def _draw_node(layout, node, session, companion, depth: int = 0) -> None:
 def _draw_walkthrough_controls(
     layout,
     session,
+    companion,
     *,
     proposal_pending: bool,
     history_error: str,
@@ -91,6 +92,28 @@ def _draw_walkthrough_controls(
         text=f"{_step_ordinal(next_index if next_step else None)} Next",
         icon=STATE_ICONS[GuidanceState.NEXT] if next_step else "CHECKMARK",
     )
+    if (
+        next_step is not None
+        and getattr(next_step, "execution_track_override", None) is not None
+    ):
+        verify = layout.row()
+        verify.scale_y = 1.15
+        verify.enabled = (
+            companion.connected
+            and not proposal_pending
+            and companion.execution_track_preflight_request is None
+        )
+        verify.operator(
+            "operating_line.verify_execution_track",
+            text=f"Verify Track {_step_ordinal(next_index)}",
+            icon="VIEWZOOM",
+        )
+        if companion.execution_track_preflight_message:
+            draw_wrapped_text(
+                layout,
+                companion.execution_track_preflight_message,
+                icon="INFO",
+            )
 
     gate = session.observation_gate
     if gate is not None and gate.status != "recovered":
@@ -275,6 +298,7 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
         _draw_walkthrough_controls(
             layout,
             session,
+            companion,
             proposal_pending=companion.proposed_plan is not None,
             history_error=history_error,
         )

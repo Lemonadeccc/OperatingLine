@@ -239,6 +239,25 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
         return _execute_next(self, context)
 
 
+class OPERATINGLINE_OT_verify_execution_track(bpy.types.Operator):
+    bl_idname = "operating_line.verify_execution_track"
+    bl_label = "Verify Track"
+    bl_description = (
+        "Verify the exact accepted menu or shortcut track without executing or changing Blender"
+    )
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            request = companion.request_execution_track_preflight()
+        except (KeyError, RuntimeError, TypeError, ValueError) as error:
+            companion.execution_track_preflight_message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Track verification {request['requestId'][:8]} queued")
+        return {"FINISHED"}
+
+
 class OPERATINGLINE_OT_recheck_observations(bpy.types.Operator):
     bl_idname = "operating_line.recheck_observations"
     bl_label = "Recheck Observations"
@@ -993,6 +1012,7 @@ CLASSES = (
     OPERATINGLINE_OT_run_dialogue_provider,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
+    OPERATINGLINE_OT_verify_execution_track,
     OPERATINGLINE_OT_recheck_observations,
     OPERATINGLINE_OT_open_add_menu,
     OPERATINGLINE_OT_guided_menu_action,
