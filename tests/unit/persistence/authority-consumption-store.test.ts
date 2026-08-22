@@ -53,6 +53,7 @@ function completion(
     blender_decision_consumed: 'blender_execution_completed',
     blender_history_transition_consumed: 'blender_history_transition_completed',
     training_decision_consumed: 'training_run_completed',
+    dataset_release_authorization_consumed: 'dataset_release_completed',
   } as const;
   return {
     formatVersion: '1.0.0',
