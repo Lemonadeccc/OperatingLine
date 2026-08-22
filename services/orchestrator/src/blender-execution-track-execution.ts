@@ -100,6 +100,21 @@ export interface BlenderExecutionTrackExecutionLiveAuthority {
   readonly documentAuthoritySha256: string;
 }
 
+export interface BlenderExecutionTrackExecutionRecoveryAckAuthorization {
+  readonly result: 'accepted' | 'duplicate';
+}
+
+export interface BlenderExecutionTrackExecutionRecoveryAckCommitOptions {
+  readonly appendEvent: BlenderExecutionTrackExecutionEventStore['appendEvent'];
+}
+
+interface InternalRecoveryAckAuthorization extends BlenderExecutionTrackExecutionRecoveryAckAuthorization {
+  readonly ack: CompanionExecutionTrackExecutionRecoveryAck;
+  readonly liveAuthority: BlenderExecutionTrackExecutionLiveAuthority;
+  readonly authorizedAt: string;
+  readonly revision: number;
+}
+
 const activeStatuses = new Set<CompanionExecutionTrackExecutionStatus['status']>([
   'queued',
   'dispatched',
@@ -158,10 +173,44 @@ function eventTypeFor(status: CompanionExecutionTrackExecutionStatus): Execution
 
 interface RecoveryDurableReferences {
   terminalMarkerContentSha256: string | null;
+  terminalResultContentSha256?: string | null;
   managedStartContentSha256: string | null;
   baselineContentSha256: string | null;
   commitIntentId: string | null;
   commitIntentContentSha256: string | null;
+}
+
+function recoveryReferencesForStored(stored: StoredExecution): RecoveryDurableReferences {
+  const references = recoveryReferences(
+    stored.status.progress,
+    stored.managedStartSubmission?.managedStart,
+  );
+  if (
+    stored.status.status !== 'failed_managed' ||
+    stored.status.result?.status !== 'failed_managed'
+  )
+    return references;
+  if (stored.recoveryRequest?.source === 'failed_managed_repair') {
+    const repairReferences = stored.recoveryRequest.durableReferences;
+    return {
+      terminalMarkerContentSha256: repairReferences.terminalMarkerContentSha256,
+      ...(repairReferences.terminalResultContentSha256 === undefined
+        ? {}
+        : { terminalResultContentSha256: repairReferences.terminalResultContentSha256 }),
+      managedStartContentSha256: repairReferences.managedStartContentSha256,
+      baselineContentSha256: repairReferences.baselineContentSha256,
+      commitIntentId: repairReferences.commitIntentId,
+      commitIntentContentSha256: repairReferences.commitIntentContentSha256,
+    };
+  }
+  const evidence = stored.recoveryAck?.evidence;
+  if (evidence?.kind === 'persisted_managed_terminal')
+    return {
+      ...references,
+      terminalMarkerContentSha256: evidence.terminalMarker.contentSha256,
+      terminalResultContentSha256: evidence.terminalResultContentSha256,
+    };
+  return references;
 }
 
 function recoveryReferences(
@@ -196,6 +245,12 @@ function recoveryReferences(
 }
 
 function recoverySourceFor(stored: StoredExecution) {
+  if (stored.status.status === 'failed_managed') {
+    return stored.recoveryAck?.evidence.kind === 'persisted_managed_terminal' ||
+      stored.recoveryRequest?.source === 'failed_managed_repair'
+      ? 'failed_managed_repair'
+      : 'companion_reported';
+  }
   return (
     stored.status.serverRecoveryEvidence?.source ??
     (stored.status.result?.status === 'recovery_required' ? 'companion_reported' : undefined)
@@ -207,10 +262,9 @@ function assertRecoveryRequestMatchesStored(
   request: CompanionExecutionTrackExecutionRecoveryRequest,
 ): void {
   const expectedReferences =
-    stored.status.serverRecoveryEvidence?.durableReferences ??
-    recoveryReferences(stored.status.progress, stored.managedStartSubmission?.managedStart);
+    stored.status.serverRecoveryEvidence?.durableReferences ?? recoveryReferencesForStored(stored);
   if (
-    stored.status.status !== 'recovery_required' ||
+    (stored.status.status !== 'recovery_required' && stored.status.status !== 'failed_managed') ||
     request.originalDeliveryId !== stored.status.deliveryId ||
     request.bindingContentSha256 !== stored.status.binding.bindingContentSha256 ||
     !isDeepStrictEqual(request.target, stored.status.binding.target) ||
@@ -231,6 +285,12 @@ function recoveryRotationMatches(
   previous: CompanionExecutionTrackExecutionRecoveryRequest,
   next: CompanionExecutionTrackExecutionRecoveryRequest,
 ): boolean {
+  const advancedToManagedRepair =
+    previous.source !== 'failed_managed_repair' &&
+    next.source === 'failed_managed_repair' &&
+    previous.durableReferences.terminalResultContentSha256 == null &&
+    next.durableReferences.terminalResultContentSha256 != null &&
+    next.durableReferences.terminalMarkerContentSha256 !== null;
   return (
     next.requestId === previous.requestId &&
     isDeepStrictEqual(next.target, previous.target) &&
@@ -240,8 +300,9 @@ function recoveryRotationMatches(
     isDeepStrictEqual(next.acceptedProgress, previous.acceptedProgress) &&
     next.acceptedProgressChainHeadContentSha256 ===
       previous.acceptedProgressChainHeadContentSha256 &&
-    isDeepStrictEqual(next.durableReferences, previous.durableReferences) &&
-    next.source === previous.source &&
+    (isDeepStrictEqual(next.durableReferences, previous.durableReferences) ||
+      advancedToManagedRepair) &&
+    (next.source === previous.source || advancedToManagedRepair) &&
     next.mode === previous.mode &&
     next.automaticReplay === previous.automaticReplay &&
     Date.parse(next.requestedAt) > Date.parse(previous.requestedAt) &&
@@ -274,13 +335,27 @@ function assertRecoveryAckTransition(
     }
     return;
   }
+  if (ack.evidence.kind === 'managed_repair_terminal') {
+    if (
+      previous.status.status !== 'failed_managed' ||
+      previous.status.result?.status !== 'failed_managed' ||
+      !isDeepStrictEqual(previous.status.result, ack.evidence.failedTerminalResult) ||
+      next.status.status !== 'failed_managed_repaired' ||
+      !isDeepStrictEqual(next.status.result, previous.status.result) ||
+      next.status.serverRecoveryEvidence !== undefined ||
+      ack.retainsTargetLock
+    ) {
+      throw new Error('Managed repair acknowledgement changed its failed terminal or repair lock');
+    }
+    return;
+  }
   if (
     ack.evidence.kind === 'unresolved_current_state' ||
     next.status.result === undefined ||
     !isDeepStrictEqual(next.status.result, ack.evidence.terminalResult) ||
     next.status.status !== ack.evidence.terminalResult.status ||
     next.status.serverRecoveryEvidence !== undefined ||
-    ack.retainsTargetLock === true
+    ack.retainsTargetLock !== (ack.evidence.terminalResult.status === 'failed_managed')
   ) {
     throw new Error('Reconciled recovery acknowledgement changed its terminal result or lock');
   }
@@ -362,7 +437,11 @@ function assertStoredTransition(
       terminalResult.deliveryId !== next.status.deliveryId ||
       terminalResult.bindingContentSha256 !== next.status.binding.bindingContentSha256 ||
       !isDeepStrictEqual(terminalResult.target, next.status.binding.target) ||
-      terminalResult.status !== next.status.status ||
+      (terminalResult.status !== next.status.status &&
+        !(
+          terminalResult.status === 'failed_managed' &&
+          next.status.status === 'failed_managed_repaired'
+        )) ||
       Date.parse(terminalResult.occurredAt) > Date.parse(next.status.updatedAt) ||
       (next.managedStartSubmission !== undefined &&
         !leaseIsMonotonic(next.managedStartSubmission.currentLease, terminalResult.currentLease)))
@@ -492,8 +571,11 @@ function assertStoredTransition(
     'managed_action_in_progress->recovery_required',
     'recovery_required->recovery_required',
     'recovery_required->succeeded',
+    'recovery_required->failed_managed',
     'recovery_required->failed_no_mutation',
     'recovery_required->failed_restored',
+    'failed_managed->failed_managed',
+    'failed_managed->failed_managed_repaired',
   ]);
   if (!allowed.has(transition)) throw new Error(`Invalid execution transition ${transition}`);
 }
@@ -530,7 +612,7 @@ function assertEventTypeMatches(eventType: string, stored: StoredExecution): voi
     eventType !== eventTypeFor(stored.status) &&
     !(
       eventType === 'blender.execution-track-execution.recovery-requested' &&
-      stored.status.status === 'recovery_required' &&
+      (stored.status.status === 'recovery_required' || stored.status.status === 'failed_managed') &&
       stored.recoveryRequest !== undefined
     ) &&
     !(
@@ -676,6 +758,7 @@ export function createBlenderExecutionTrackExecutionCoordinator(
   const createId = options.createId ?? randomUUID;
   const executions = new Map<string, StoredExecution>();
   const targetOwners = new Map<string, string>();
+  const recoveryAckAuthorizations = new WeakSet<InternalRecoveryAckAuthorization>();
 
   const apply = (stored: StoredExecution): void => {
     const requestId = stored.status.binding.requestId;
@@ -700,6 +783,7 @@ export function createBlenderExecutionTrackExecutionCoordinator(
     clearRecoveryAck = false,
     documentAuthoritySha256?: string,
     managedStartSubmission?: CompanionExecutionTrackExecutionManagedStartSubmission,
+    appendEventSink?: BlenderExecutionTrackExecutionEventStore['appendEvent'],
   ): CompanionExecutionTrackExecutionStatus => {
     const parsedStatus = companionExecutionTrackExecutionStatusSchema.parse(status);
     const previous = executions.get(parsedStatus.binding.requestId);
@@ -744,12 +828,16 @@ export function createBlenderExecutionTrackExecutionCoordinator(
     assertStoredTransition(previous, stored);
     const eventType = overrideEventType ?? eventTypeFor(parsedStatus);
     assertEventTypeMatches(eventType, stored);
-    const event = options.eventStore.appendEvent({
+    const eventInput = {
       id: eventIdForStored(eventType, stored),
       eventType,
       payload: stored,
       createdAt: parsedStatus.updatedAt,
-    });
+    };
+    const event =
+      appendEventSink === undefined
+        ? options.eventStore.appendEvent(eventInput)
+        : appendEventSink(eventInput);
     assertStoredEvent(event, stored);
     apply(stored);
     return parsedStatus;
@@ -842,6 +930,7 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       status.status === 'failed_no_mutation' ||
       status.status === 'failed_restored' ||
       status.status === 'failed_managed' ||
+      status.status === 'failed_managed_repaired' ||
       status.status === 'recovery_required'
     ) {
       return status;
@@ -967,6 +1056,16 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       );
     }
     return existing;
+  };
+
+  const isResultDuplicate = (input: CompanionExecutionTrackExecutionResult): boolean => {
+    const result = companionExecutionTrackExecutionResultSchema.parse(input);
+    return isDeepStrictEqual(executions.get(result.requestId)?.status.result, result);
+  };
+
+  const isRecoveryAckDuplicate = (input: CompanionExecutionTrackExecutionRecoveryAck): boolean => {
+    const ack = companionExecutionTrackExecutionRecoveryAckSchema.parse(input);
+    return isDeepStrictEqual(executions.get(ack.requestId)?.recoveryAck, ack);
   };
 
   const queue = (
@@ -1365,7 +1464,7 @@ export function createBlenderExecutionTrackExecutionCoordinator(
         404,
         'Execution not found',
       );
-    if (stored.status.status !== 'recovery_required')
+    if (stored.status.status !== 'recovery_required' && stored.status.status !== 'failed_managed')
       throw new BlenderExecutionTrackExecutionError(
         'execution_track_execution_not_recoverable',
         409,
@@ -1411,7 +1510,7 @@ export function createBlenderExecutionTrackExecutionCoordinator(
     const pending = [...executions.values()]
       .filter(
         ({ status }) =>
-          status.status === 'recovery_required' &&
+          (status.status === 'recovery_required' || status.status === 'failed_managed') &&
           status.binding.target.adapterId === adapterId &&
           status.binding.target.instanceId === instanceId &&
           status.lease?.sessionId === replacementLease.sessionId &&
@@ -1430,7 +1529,12 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       isDeepStrictEqual(pending.recoveryRequest.replacementLease, replacementLease) &&
       Date.parse(requestedAt) < Date.parse(pending.recoveryRequest.replacementLease.expiresAt)
     ) {
-      return pending.recoveryRequest;
+      try {
+        assertRecoveryRequestMatchesStored(pending, pending.recoveryRequest);
+        return pending.recoveryRequest;
+      } catch {
+        // Durable authority advanced (for example, a marker ACK enabled repair), so rotate below.
+      }
     }
     if (Date.parse(requestedAt) >= Date.parse(replacementLease.expiresAt)) return null;
     const request = companionExecutionTrackExecutionRecoveryRequestSchema.parse({
@@ -1446,10 +1550,8 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       acceptedProgressChainHeadContentSha256: pending.status.progress?.contentSha256 ?? null,
       durableReferences:
         pending.status.serverRecoveryEvidence?.durableReferences ??
-        recoveryReferences(pending.status.progress, pending.managedStartSubmission?.managedStart),
-      source:
-        pending.status.serverRecoveryEvidence?.source ??
-        (pending.status.result?.status === 'recovery_required' ? 'companion_reported' : undefined),
+        recoveryReferencesForStored(pending),
+      source: recoverySourceFor(pending),
       mode: 'read_only_reconcile',
       automaticReplay: false,
       requestedAt,
@@ -1457,9 +1559,12 @@ export function createBlenderExecutionTrackExecutionCoordinator(
     return requestRecovery(request);
   };
 
-  const acceptRecoveryAck = (
+  const processRecoveryAck = (
     input: CompanionExecutionTrackExecutionRecoveryAck,
     liveAuthority: BlenderExecutionTrackExecutionLiveAuthority,
+    commit: boolean,
+    authorizedAt?: string,
+    appendEventSink?: BlenderExecutionTrackExecutionEventStore['appendEvent'],
   ): 'accepted' | 'duplicate' => {
     const ack = companionExecutionTrackExecutionRecoveryAckSchema.parse(input);
     const stored = executions.get(ack.requestId);
@@ -1469,15 +1574,26 @@ export function createBlenderExecutionTrackExecutionCoordinator(
         404,
         'Execution not found',
       );
-    const receivedAt = now();
+    const receivedAt = authorizedAt ?? now();
     if (
       parseSha256(liveAuthority.documentAuthoritySha256) !== stored.documentAuthoritySha256 ||
       !isDeepStrictEqual(liveAuthority.target, stored.status.binding.target) ||
       !isDeepStrictEqual(liveAuthority.lease.target, liveAuthority.target) ||
-      stored.recoveryRequest === undefined ||
-      !isDeepStrictEqual(liveAuthority.lease, stored.recoveryRequest.replacementLease) ||
       Date.parse(ack.occurredAt) > Date.parse(receivedAt) ||
       Date.parse(receivedAt) >= Date.parse(liveAuthority.lease.expiresAt)
+    ) {
+      throw new BlenderExecutionTrackExecutionError(
+        'execution_track_execution_recovery_live_authority',
+        409,
+        'Recovery acknowledgement does not match live replacement authority',
+      );
+    }
+    if (stored.recoveryAck !== undefined && isDeepStrictEqual(stored.recoveryAck, ack)) {
+      return 'duplicate';
+    }
+    if (
+      stored.recoveryRequest === undefined ||
+      !isDeepStrictEqual(liveAuthority.lease, stored.recoveryRequest.replacementLease)
     ) {
       throw new BlenderExecutionTrackExecutionError(
         'execution_track_execution_recovery_live_authority',
@@ -1499,7 +1615,11 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       (ack.outcome === 'recovery_required' &&
         (ack.evidence.kind !== 'unresolved_current_state' || !ack.retainsTargetLock)) ||
       (ack.outcome === 'reconciled' &&
-        (ack.evidence.kind === 'unresolved_current_state' || ack.retainsTargetLock))
+        (ack.evidence.kind === 'unresolved_current_state' ||
+          ack.retainsTargetLock !==
+            (ack.evidence.kind === 'managed_repair_terminal'
+              ? false
+              : ack.evidence.terminalResult.status === 'failed_managed')))
     ) {
       throw new BlenderExecutionTrackExecutionError(
         'execution_track_execution_recovery_ack_semantics',
@@ -1508,7 +1628,6 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       );
     }
     if (stored.recoveryAck !== undefined) {
-      if (isDeepStrictEqual(stored.recoveryAck, ack)) return 'duplicate';
       throw new BlenderExecutionTrackExecutionError(
         'execution_track_execution_recovery_ack_conflict',
         409,
@@ -1518,16 +1637,27 @@ export function createBlenderExecutionTrackExecutionCoordinator(
     if (
       stored.status.result !== undefined &&
       stored.status.result.status !== 'recovery_required' &&
-      ack.evidence.kind !== 'unresolved_current_state'
+      ack.evidence.kind !== 'unresolved_current_state' &&
+      ack.evidence.kind !== 'managed_repair_terminal'
     ) {
-      if (isDeepStrictEqual(stored.status.result, ack.evidence.terminalResult)) return 'duplicate';
-      throw new BlenderExecutionTrackExecutionError(
-        'execution_track_execution_recovery_ack_conflict',
-        409,
-        'Recovery already reconciled a different result',
-      );
+      const bindsUnattestedFailedTerminal =
+        stored.status.status === 'failed_managed' &&
+        stored.recoveryAck === undefined &&
+        ack.evidence.kind === 'persisted_managed_terminal' &&
+        ack.evidence.terminalResult.status === 'failed_managed' &&
+        isDeepStrictEqual(stored.status.result, ack.evidence.terminalResult);
+      if (!bindsUnattestedFailedTerminal) {
+        if (isDeepStrictEqual(stored.status.result, ack.evidence.terminalResult))
+          return 'duplicate';
+        throw new BlenderExecutionTrackExecutionError(
+          'execution_track_execution_recovery_ack_conflict',
+          409,
+          'Recovery already reconciled a different result',
+        );
+      }
     }
     if (ack.outcome === 'recovery_required') {
+      if (!commit) return 'accepted';
       append(
         companionExecutionTrackExecutionStatusSchema.parse({
           ...stored.status,
@@ -1536,6 +1666,10 @@ export function createBlenderExecutionTrackExecutionCoordinator(
         stored.recoveryRequest,
         'blender.execution-track-execution.reconciled',
         ack,
+        false,
+        undefined,
+        undefined,
+        appendEventSink,
       );
       return 'accepted';
     }
@@ -1545,6 +1679,36 @@ export function createBlenderExecutionTrackExecutionCoordinator(
         422,
         'Reconciled recovery requires terminal evidence',
       );
+    }
+    if (ack.evidence.kind === 'managed_repair_terminal') {
+      if (
+        stored.status.status !== 'failed_managed' ||
+        stored.status.result?.status !== 'failed_managed' ||
+        !isDeepStrictEqual(stored.status.result, ack.evidence.failedTerminalResult)
+      ) {
+        throw new BlenderExecutionTrackExecutionError(
+          'execution_track_execution_managed_repair_terminal',
+          409,
+          'Managed repair does not bind the exact retained failed terminal',
+        );
+      }
+      if (!commit) return 'accepted';
+      append(
+        companionExecutionTrackExecutionStatusSchema.parse({
+          ...stored.status,
+          status: 'failed_managed_repaired',
+          serverRecoveryEvidence: undefined,
+          updatedAt: receivedAt,
+        }),
+        stored.recoveryRequest,
+        'blender.execution-track-execution.reconciled',
+        ack,
+        false,
+        undefined,
+        undefined,
+        appendEventSink,
+      );
+      return 'accepted';
     }
     if (
       ack.evidence.kind === 'persisted_managed_terminal' &&
@@ -1559,13 +1723,14 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       throw new BlenderExecutionTrackExecutionError(
         'execution_track_execution_unpersisted_managed_start',
         409,
-        'Managed success cannot be reconciled without the exact persisted managed-start submission',
+        'Managed terminal cannot be reconciled without the exact persisted managed-start submission',
       );
     }
     const result = ack.evidence.terminalResult;
-    if (result.status === 'succeeded') {
+    if (result.status === 'succeeded' || result.status === 'failed_managed') {
       options.validateManagedResult(result, stored.status);
     }
+    if (!commit) return 'accepted';
     append(
       companionExecutionTrackExecutionStatusSchema.parse({
         ...stored.status,
@@ -1577,16 +1742,77 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       stored.recoveryRequest,
       'blender.execution-track-execution.reconciled',
       ack,
+      false,
+      undefined,
+      undefined,
+      appendEventSink,
     );
     return 'accepted';
   };
 
+  const authorizeRecoveryAck = (
+    input: CompanionExecutionTrackExecutionRecoveryAck,
+    liveAuthority: BlenderExecutionTrackExecutionLiveAuthority,
+  ): BlenderExecutionTrackExecutionRecoveryAckAuthorization => {
+    const ack = companionExecutionTrackExecutionRecoveryAckSchema.parse(input);
+    const authorizedAt = now();
+    const result = processRecoveryAck(ack, liveAuthority, false, authorizedAt);
+    const stored = executions.get(ack.requestId);
+    if (stored === undefined) throw new Error('Authorized recovery acknowledgement disappeared');
+    const authorization: InternalRecoveryAckAuthorization = {
+      result,
+      ack,
+      liveAuthority,
+      authorizedAt,
+      revision: stored.revision,
+    };
+    recoveryAckAuthorizations.add(authorization);
+    return authorization;
+  };
+
+  const commitAuthorizedRecoveryAck = (
+    input: BlenderExecutionTrackExecutionRecoveryAckAuthorization,
+    commitOptions?: BlenderExecutionTrackExecutionRecoveryAckCommitOptions,
+  ): 'accepted' | 'duplicate' => {
+    const authorization = input as InternalRecoveryAckAuthorization;
+    const stored = executions.get(authorization.ack.requestId);
+    if (
+      !recoveryAckAuthorizations.has(authorization) ||
+      stored === undefined ||
+      stored.revision !== authorization.revision
+    ) {
+      throw new BlenderExecutionTrackExecutionError(
+        'execution_track_execution_recovery_authorization_stale',
+        409,
+        'Recovery acknowledgement authorization is stale or was not issued by this coordinator',
+      );
+    }
+    recoveryAckAuthorizations.delete(authorization);
+    return processRecoveryAck(
+      authorization.ack,
+      authorization.liveAuthority,
+      true,
+      authorization.authorizedAt,
+      commitOptions?.appendEvent,
+    );
+  };
+
+  const acceptRecoveryAck = (
+    input: CompanionExecutionTrackExecutionRecoveryAck,
+    liveAuthority: BlenderExecutionTrackExecutionLiveAuthority,
+  ): 'accepted' | 'duplicate' =>
+    commitAuthorizedRecoveryAck(authorizeRecoveryAck(input, liveAuthority));
+
   return {
     acceptProgress,
     acceptRecoveryAck,
+    authorizeRecoveryAck,
+    commitAuthorizedRecoveryAck,
     acceptResult,
     findForCreate,
     get,
+    isRecoveryAckDuplicate,
+    isResultDuplicate,
     listTargetLockOwners,
     ownsTarget,
     poll,

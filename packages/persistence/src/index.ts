@@ -49,6 +49,11 @@ export interface CompanionStateInput {
 
 export type RecordCompanionStateResult = 'accepted' | 'duplicate' | 'stale' | 'conflict';
 
+export interface CommitCompanionStateWithExecutionEventResult {
+  reportResult: RecordCompanionStateResult;
+  event: StoredExecutionEvent | null;
+}
+
 export interface ProcedureLeafReplayInput {
   replayId: string;
   proposalId: string;
@@ -976,6 +981,11 @@ export interface OperatingLineDatabase {
     report: T,
     provenance?: AuthenticatedSessionProvenance,
   ): RecordCompanionStateResult;
+  commitCompanionStateWithExecutionEvent<T extends CompanionStateInput>(
+    report: T,
+    provenance: AuthenticatedSessionProvenance,
+    event: ExecutionEventInput & { createdAt: string },
+  ): CommitCompanionStateWithExecutionEventResult;
   getManagedReplayReceipt(
     subjectType: ManagedReplayReceiptSubjectType,
     subjectId: string,
@@ -5962,6 +5972,157 @@ export function openOperatingLineDatabase(
         }
         return JSON.parse(payload) as unknown;
       });
+    },
+    commitCompanionStateWithExecutionEvent(report, provenance, event) {
+      const reportPayload = canonicalJson(report);
+      const eventPayload = canonicalJson(event.payload);
+      const candidate = event.payload as {
+        status?: { binding?: { requestId?: unknown; target?: unknown }; updatedAt?: unknown };
+        recoveryRequest?: { recoveryId?: unknown };
+        recoveryAck?: { evidence?: { kind?: unknown; recoveredReport?: unknown } };
+      };
+      const requestId = candidate.status?.binding?.requestId;
+      const recoveryId = candidate.recoveryRequest?.recoveryId;
+      const target = candidate.status?.binding?.target as
+        { adapterId?: unknown; instanceId?: unknown } | undefined;
+      if (
+        event.eventType !== 'blender.execution-track-execution.reconciled' ||
+        typeof requestId !== 'string' ||
+        typeof recoveryId !== 'string' ||
+        event.id !== `blender-execution-track-execution:${requestId}:recovery:${recoveryId}:ack` ||
+        event.createdAt !== candidate.status?.updatedAt ||
+        candidate.recoveryAck?.evidence?.kind !== 'managed_repair_terminal' ||
+        canonicalJson(candidate.recoveryAck.evidence.recoveredReport) !== reportPayload ||
+        target?.adapterId !== report.adapterId ||
+        target.instanceId !== report.instanceId
+      ) {
+        throw new Error(
+          'Atomic Companion recovery event is not deterministically bound to its recovered report',
+        );
+      }
+
+      const receivedAt = new Date().toISOString();
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingReport = findStateReport.get(report.reportId) as
+          | { adapter_id: string; instance_id: string; sequence: number; payload: string }
+          | undefined;
+        const latestState = findLatestStatePayload.get(report.adapterId, report.instanceId) as
+          { report_id: string; sequence: number; payload: string } | undefined;
+        const existingReceipt = findManagedReplayReceipt.get(
+          'companion_state_report',
+          report.reportId,
+        ) as
+          | {
+              subject_type: unknown;
+              report_id: unknown;
+              trust_source: unknown;
+              adapter_id: unknown;
+              instance_id: unknown;
+              session_fingerprint_sha256: unknown;
+            }
+          | undefined;
+        const existingEventRow = findEvent.get(event.id);
+        const companionStateEventRow = findEvent.get(`companion-state:${report.reportId}`);
+
+        if (existingReport !== undefined) {
+          const existingEvent =
+            existingEventRow === undefined ? null : parseExecutionEventRow(existingEventRow);
+          const companionStateEvent =
+            companionStateEventRow === undefined
+              ? null
+              : parseExecutionEventRow(companionStateEventRow);
+          const exactDurableReport =
+            existingReport.adapter_id === report.adapterId &&
+            existingReport.instance_id === report.instanceId &&
+            existingReport.sequence === report.sequence &&
+            existingReport.payload === reportPayload &&
+            latestState?.report_id === report.reportId &&
+            latestState.sequence === report.sequence &&
+            latestState.payload === reportPayload &&
+            existingReceipt?.subject_type === 'companion_state_report' &&
+            existingReceipt.report_id === report.reportId &&
+            existingReceipt.trust_source === 'negotiated_companion_lease' &&
+            existingReceipt.adapter_id === report.adapterId &&
+            existingReceipt.instance_id === report.instanceId &&
+            existingReceipt.session_fingerprint_sha256 === provenance.sessionFingerprintSha256 &&
+            companionStateEvent?.eventType === 'companion.state.reported' &&
+            canonicalJson(companionStateEvent.payload) === reportPayload;
+          const exactRecoveryEvent =
+            existingEvent !== null &&
+            existingEvent.eventType === event.eventType &&
+            existingEvent.createdAt === event.createdAt &&
+            canonicalJson(existingEvent.payload) === eventPayload;
+          if (!exactDurableReport || (existingEvent !== null && !exactRecoveryEvent)) {
+            sqlite.exec('ROLLBACK;');
+            return { reportResult: 'conflict', event: null };
+          }
+          if (existingEvent === null) {
+            insertEvent.run(event.id, event.eventType, eventPayload, event.createdAt);
+            const repairedEventRow = findEvent.get(event.id);
+            if (repairedEventRow === undefined) {
+              throw new Error('SQLite did not return the repaired recovery execution event');
+            }
+            const repairedEvent = parseExecutionEventRow(repairedEventRow);
+            sqlite.exec('COMMIT;');
+            return { reportResult: 'accepted', event: repairedEvent };
+          }
+          sqlite.exec('COMMIT;');
+          return { reportResult: 'duplicate', event: existingEvent };
+        }
+
+        if (latestState !== undefined && report.sequence <= latestState.sequence) {
+          sqlite.exec('ROLLBACK;');
+          return { reportResult: 'stale', event: null };
+        }
+        if (
+          existingReceipt !== undefined ||
+          existingEventRow !== undefined ||
+          companionStateEventRow !== undefined
+        ) {
+          sqlite.exec('ROLLBACK;');
+          return { reportResult: 'conflict', event: null };
+        }
+
+        insertStateReport.run(
+          report.reportId,
+          report.adapterId,
+          report.instanceId,
+          report.sequence,
+          reportPayload,
+        );
+        insertCompanionStateReportReceipt.run(
+          report.reportId,
+          report.adapterId,
+          report.instanceId,
+          provenance.sessionFingerprintSha256,
+          receivedAt,
+        );
+        upsertLatestState.run(
+          report.adapterId,
+          report.instanceId,
+          report.reportId,
+          report.sequence,
+          reportPayload,
+        );
+        insertEvent.run(
+          `companion-state:${report.reportId}`,
+          'companion.state.reported',
+          reportPayload,
+          receivedAt,
+        );
+        insertEvent.run(event.id, event.eventType, eventPayload, event.createdAt);
+        const storedEventRow = findEvent.get(event.id);
+        if (storedEventRow === undefined) {
+          throw new Error('SQLite did not return the atomic recovery execution event');
+        }
+        const storedEvent = parseExecutionEventRow(storedEventRow);
+        sqlite.exec('COMMIT;');
+        return { reportResult: 'accepted', event: storedEvent };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
     },
     recordCompanionState(report, provenance) {
       const payload = canonicalJson(report);

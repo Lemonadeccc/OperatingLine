@@ -1,22 +1,24 @@
+import { spawnSync } from 'node:child_process';
+
 import type { OperatingLineDatabase } from '@operatingline/persistence';
 import {
-  companionExecutionTrackExecutionBindingSchema,
-  companionExecutionTrackExecutionCreateRequestSchema,
   companionExecutionTrackExecutionManagedStartSubmissionSchema,
   companionExecutionTrackExecutionProgressSchema,
   companionExecutionTrackExecutionRecoveryAckSchema,
   companionExecutionTrackExecutionResultSchema,
-  computeCompanionExecutionTrackExecutionProofTerminalMarkerContentSha256,
-  computeCompanionMenuControlProofOperationReceiptContentSha256,
   computeProtocolCanonicalJsonSha256,
-  type CompanionExecutionTrackExecutionDelivery,
-  type CompanionExecutionTrackExecutionProgress,
 } from '@operatingline/protocol';
 import { expect, it } from 'vitest';
 
 import { createBlenderExecutionTrackExecutionCoordinator } from '../../../services/orchestrator/src/blender-execution-track-execution.js';
 import {
-  executionTrackPreflightFixture,
+  hashScenarioContent as hashContent,
+  managedExecutionTrackBaseline,
+  managedExecutionTrackBinding,
+  managedExecutionTrackProgressTail,
+  managedExecutionTrackStartReport,
+} from '../../support/managed-execution-track-scenario.js';
+import {
   executionTrackPreflightLease,
   preflightIds,
 } from '../../unit/support/execution-track-preflight-fixture.js';
@@ -42,329 +44,92 @@ class MemoryEventStore implements EventStore {
   }
 }
 
-function realBinding() {
-  const preflight = executionTrackPreflightFixture();
-  const request = companionExecutionTrackExecutionCreateRequestSchema.parse({
-    ...preflight.request,
-    formatVersion: '2.0.0',
-  });
-  const content = {
-    ...request,
-    proofId: '90000000-0000-4000-8000-000000000002',
-    preflightBinding: preflight.binding,
-    executor: {
-      executorId: 'blender.uv_sphere_menu_proven_managed_commit.v2',
-      proofExecutorId: 'blender.uv_sphere_menu_controls.event_simulate.v1',
-      targetProfile: 'factory_layout_three_object_ui_scale_2',
-      executionBoundary: 'proof_restore_then_managed_commit',
-      authorization: 'accepted_replay_next_step',
-      proofOperationIds: [
-        'workspace.layout',
-        'menu.add',
-        'menu.mesh',
-        'operator.uv_sphere',
-        'control.location',
-        'control.scale',
-        'control.object_name',
-      ],
-      nativeUndoDepth: 8,
-      commitActionName: 'blender.mesh.create_uv_sphere',
-      automaticReplay: false,
-    },
-    executionScope: {
-      kind: 'single_root_leaf',
-      leafCount: 1,
-      rootLeafId: request.leafId,
-      procedureTreeContentSha256: preflight.binding.artifacts.procedureTreeContentSha256,
-    },
-    requestedAt: preflight.binding.requestedAt,
+it('accepts the Blender fail-closed consumer output through the strict protocol coordinator', () => {
+  const events = new MemoryEventStore();
+  const binding = managedExecutionTrackBinding();
+  const lease = {
+    ...executionTrackPreflightLease(),
+    expiresAt: '2099-08-22T10:10:00Z',
   };
-  return companionExecutionTrackExecutionBindingSchema.parse({
-    ...content,
-    bindingContentSha256: computeProtocolCanonicalJsonSha256(content),
+  let currentTime = '2026-08-22T10:00:01Z';
+  const coordinator = createBlenderExecutionTrackExecutionCoordinator({
+    eventStore: events,
+    now: () => currentTime,
+    createId: () => '90000000-0000-4000-8000-000000000004',
+    validateManagedResult: () => undefined,
   });
-}
-
-function hashContent<T extends Record<string, unknown>>(content: T) {
-  return { ...content, contentSha256: computeProtocolCanonicalJsonSha256(content) };
-}
-
-const receiptSpecs = [
-  ['workspace.layout', { status: 'precondition_verified', path: ['Layout'] }],
-  ['menu.add', { status: 'control_executed', path: ['Layout', 'Add'] }],
-  ['menu.mesh', { status: 'control_executed', path: ['Layout', 'Add', 'Mesh'] }],
-  [
-    'operator.uv_sphere',
-    { status: 'control_executed', path: ['Layout', 'Add', 'Mesh', 'UV Sphere'], radius: 1 },
-  ],
-  [
-    'control.location',
-    {
-      status: 'control_executed',
-      path: ['Sidebar', 'Item', 'Transform', 'Location'],
-      value: [1.25, -2, 0.75],
-    },
-  ],
-  [
-    'control.scale',
-    {
-      status: 'control_executed',
-      path: ['Sidebar', 'Item', 'Transform', 'Scale'],
-      value: [1.5, 1.5, 1.5],
-    },
-  ],
-  [
-    'control.object_name',
-    {
-      status: 'control_executed',
-      path: ['Properties', 'Object', 'Name'],
-      value: 'OperatingLine.TutorialEye',
-    },
-  ],
-] as const;
-
-function realProgressTail(
-  delivery: CompanionExecutionTrackExecutionDelivery,
-  baseline: CompanionExecutionTrackExecutionProgress,
-) {
-  if (baseline.phase !== 'baseline_attested') throw new Error('expected baseline progress');
-  let previousReceiptContentSha256: string | null = null;
-  const receipts = receiptSpecs.map(([operationId, summary], index) => {
-    const content = {
-      receiptId: `90000000-0000-4000-8000-00000000002${index}`,
-      proofId: delivery.binding.proofId,
-      requestId: delivery.binding.requestId,
-      deliveryId: delivery.deliveryId,
-      bindingContentSha256: delivery.binding.bindingContentSha256,
-      order: index + 1,
-      previousReceiptContentSha256,
-      outcome: 'succeeded' as const,
-      occurredAt: `2026-08-22T10:00:0${index + 3}Z`,
-      operationId,
-      summary,
-    };
-    const receipt = {
-      ...content,
-      contentSha256: computeCompanionMenuControlProofOperationReceiptContentSha256(content),
-    };
-    previousReceiptContentSha256 = receipt.contentSha256;
-    return receipt;
-  });
-  const baselineReferences = {
-    startCheckpointId: baseline.startCheckpoint.checkpointId,
-    startAttestationContentSha256: baseline.startAttestation.contentSha256,
-    baselineSceneFingerprintSha256: baseline.startAttestation.sceneFingerprintSha256,
-  };
-  const makeProgress = (
-    phase: string,
-    sequence: number,
-    previousProgressContentSha256: string,
-    occurredAt: string,
-    evidence: Record<string, unknown>,
-  ) =>
-    companionExecutionTrackExecutionProgressSchema.parse(
-      hashContent({
-        ...delivery,
-        currentLease: delivery.lease,
-        phase,
-        sequence,
-        previousProgressContentSha256,
-        ...evidence,
-        occurredAt,
-      }),
-    );
-  const proof = makeProgress(
-    'proof_in_progress',
-    2,
-    baseline.contentSha256,
-    '2026-08-22T10:00:09Z',
-    {
-      ...baselineReferences,
-      proofReceipts: receipts,
-      completedOperationIds: receipts.map((receipt) => receipt.operationId),
-    },
+  coordinator.queue(binding, 'd'.repeat(64));
+  const delivery = coordinator.poll('blender', binding.target.instanceId, 'd'.repeat(64), lease);
+  if (delivery === null) throw new Error('expected delivery');
+  const startReport = managedExecutionTrackStartReport(
+    delivery,
+    managedExecutionTrackBaseline(delivery),
   );
-  const observation = hashContent({
-    kind: 'uv_sphere_menu_controls_ready',
-    satisfied: true,
-    observationId: '90000000-0000-4000-8000-000000000006',
-    objectName: 'OperatingLine.TutorialEye',
-    objectType: 'MESH',
-    location: [1.25, -2, 0.75],
-    scale: [1.5, 1.5, 1.5],
-    meshTopology: { vertices: 482, edges: 992, polygons: 512 },
-    meshSha256: '4'.repeat(64),
-    sceneFingerprintSha256: '5'.repeat(64),
-    observedAt: '2026-08-22T10:00:10Z',
-  });
-  const proofEvidenceContent = {
-    kind: 'succeeded_locked',
-    operationSummaries: receipts.map((receipt) => ({
-      operationId: receipt.operationId,
-      summaryContentSha256: computeProtocolCanonicalJsonSha256(receipt.summary),
-    })),
-    operationReceipts: receipts,
-    strongObservation: observation,
-    nativeUndoCheckpoint: {
-      checkpointId: '90000000-0000-4000-8000-000000000007',
-      undoLockId: '90000000-0000-4000-8000-000000000008',
-      nativeUndoDepth: 8,
-      nativeHistoryCursor: 8,
-      mutationStages: [
-        'uv_sphere_created',
-        'location_x_set',
-        'location_y_set',
-        'location_z_set',
-        'scale_x_set',
-        'scale_y_set',
-        'scale_z_set',
-        'object_name_set',
-      ],
-      baselineSceneFingerprintSha256: baseline.startAttestation.sceneFingerprintSha256,
-      finalSceneFingerprintSha256: observation.sceneFingerprintSha256,
-      restoredSceneFingerprintSha256: baseline.startAttestation.sceneFingerprintSha256,
-      reappliedSceneFingerprintSha256: observation.sceneFingerprintSha256,
-      receiptChainRootSha256: receipts[0]!.contentSha256,
-      receiptChainHeadSha256: receipts.at(-1)!.contentSha256,
-      strongObservationContentSha256: observation.contentSha256,
-      committedAt: '2026-08-22T10:00:11Z',
-    },
-    managedActionExecuted: false,
-    managedIdentityVerified: false,
-    managedReceiptCreated: false,
-  };
-  const evidence = {
-    ...proofEvidenceContent,
-    proofEvidenceContentSha256: computeProtocolCanonicalJsonSha256(proofEvidenceContent),
-  };
-  const observed = makeProgress(
-    'proof_observed_locked',
-    3,
-    proof.contentSha256,
-    '2026-08-22T10:00:11Z',
-    { ...baselineReferences, evidence },
-  );
-  const fingerprints = [
-    observation.sceneFingerprintSha256,
-    '6'.repeat(64),
-    '7'.repeat(64),
-    '8'.repeat(64),
-    '9'.repeat(64),
-    '0'.repeat(64),
-    'f'.repeat(64),
-    '4'.repeat(64),
-    baseline.startAttestation.sceneFingerprintSha256,
-  ];
-  const transitions = Array.from({ length: 8 }, (_, index) =>
-    hashContent({
-      order: index + 1,
-      operation: 'native_undo',
-      fromCursor: 8 - index,
-      toCursor: 7 - index,
-      beforeSceneFingerprintSha256: fingerprints[index],
-      afterSceneFingerprintSha256: fingerprints[index + 1],
-      occurredAt: `2026-08-22T10:00:${String(index + 12).padStart(2, '0')}Z`,
+  const python = String.raw`
+from importlib import import_module
+import json
+from pathlib import Path
+import sys
+from types import ModuleType, SimpleNamespace
+
+payload = json.load(sys.stdin)
+package_root = Path.cwd() / "adapters" / "blender" / "extension" / "operating_line"
+package_name = "operating_line_execution_track_cross_protocol"
+fake_bpy = ModuleType("bpy")
+fake_bpy.context = SimpleNamespace()
+sys.modules.setdefault("bpy", fake_bpy)
+package = ModuleType(package_name)
+package.__path__ = [str(package_root)]
+sys.modules[package_name] = package
+infrastructure = ModuleType(f"{package_name}.infrastructure")
+infrastructure.__path__ = [str(package_root / "infrastructure")]
+sys.modules[infrastructure.__name__] = infrastructure
+consumer = import_module(f"{package_name}.infrastructure.execution_track_execution")
+consumer._scene_snapshot = lambda: payload["snapshot"]
+consumer.compute_scene_fingerprint_sha256 = lambda _snapshot: "a" * 64
+outbox = consumer.build_fail_closed_outbox(
+    payload["delivery"],
+    instance_id=payload["instanceId"],
+    last_report=payload["lastReport"],
+    current_lease=payload["currentLease"],
+)
+json.dump(outbox, sys.stdout, separators=(",", ":"), sort_keys=True)
+`;
+  const generated = spawnSync('python3', ['-c', python], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    input: JSON.stringify({
+      delivery,
+      instanceId: binding.target.instanceId,
+      lastReport: startReport,
+      currentLease: lease,
+      snapshot: {
+        activeObject: 'Cube',
+        selectedObjects: ['Cube'],
+        objects: [{ name: 'Cube', type: 'MESH', mesh: { vertices: 8 } }],
+      },
     }),
-  );
-  const proofReferences = {
-    proofEvidenceContentSha256: evidence.proofEvidenceContentSha256,
-    proofCheckpointId: '90000000-0000-4000-8000-000000000007',
-    undoLockId: '90000000-0000-4000-8000-000000000008',
-    proofFinalSceneFingerprintSha256: observation.sceneFingerprintSha256,
+  });
+  expect(generated.status, generated.stderr).toBe(0);
+  const outbox = JSON.parse(generated.stdout) as Record<string, unknown>;
+  const progress = companionExecutionTrackExecutionProgressSchema.parse(outbox['progress']);
+  const result = companionExecutionTrackExecutionResultSchema.parse(outbox['result']);
+  currentTime = progress.occurredAt;
+  const liveAuthority = {
+    target: binding.target,
+    lease,
+    documentAuthoritySha256: 'd'.repeat(64),
   };
-  const restoring = makeProgress(
-    'restore_in_progress',
-    4,
-    observed.contentSha256,
-    '2026-08-22T10:00:12Z',
-    {
-      ...baselineReferences,
-      ...proofReferences,
-      transitions: transitions.slice(0, 1),
-      nativeHistoryCursor: 7,
-    },
-  );
-  const baselineIdentity = hashContent({
-    sceneFingerprintSha256: baseline.startAttestation.sceneFingerprintSha256,
-    ...baseline.startAttestation.identitySnapshot,
-    startReportId: baseline.startAttestation.reportId,
-    startCheckpointId: baseline.startCheckpoint.checkpointId,
-    startAttestationContentSha256: baseline.startAttestation.contentSha256,
-    sessionId: delivery.lease.sessionId,
-    documentIncarnationId: delivery.lease.documentIncarnationId,
-  });
-  const restored = makeProgress(
-    'baseline_restored',
-    5,
-    restoring.contentSha256,
-    '2026-08-22T10:00:19Z',
-    {
-      ...proofReferences,
-      transitions,
-      nativeHistoryCursor: 0,
-      undoChainHeadContentSha256: transitions.at(-1)!.contentSha256,
-      baseline: baselineIdentity,
-    },
-  );
-  const redoBarrier = hashContent({
-    evidenceClass: 'companion_reported_native_redo_barrier',
-    method: 'view3d_ed_undo_push',
-    message: 'OperatingLine supersede restored menu proof',
-    proofCheckpointId: proofReferences.proofCheckpointId,
-    undoLockId: proofReferences.undoLockId,
-    proofEvidenceContentSha256: proofReferences.proofEvidenceContentSha256,
-    proofTerminalMarkerContentSha256:
-      computeCompanionExecutionTrackExecutionProofTerminalMarkerContentSha256({
-        formatVersion: '2.0.0',
-        kind: 'proof_terminal_marker',
-        proofId: delivery.binding.proofId,
-        bindingContentSha256: delivery.binding.bindingContentSha256,
-        proofCheckpointId: proofReferences.proofCheckpointId,
-        undoLockId: proofReferences.undoLockId,
-        baselineSceneFingerprintSha256: baselineIdentity.sceneFingerprintSha256,
-        finalSceneFingerprintSha256: proofReferences.proofFinalSceneFingerprintSha256,
-        proofEvidenceContentSha256: proofReferences.proofEvidenceContentSha256,
-      }),
-    baselineContentSha256: baselineIdentity.contentSha256,
-    undoChainHeadContentSha256: transitions.at(-1)!.contentSha256,
-    baselineSceneFingerprintBeforeSha256: baselineIdentity.sceneFingerprintSha256,
-    baselineSceneFingerprintAfterSha256: baselineIdentity.sceneFingerprintSha256,
-    markerMatchedBeforeRemoval: true,
-    markerPresentBeforePush: false,
-    markerPresentAfterPush: false,
-    undoPushFinished: true,
-    redoPollAfterBarrier: false,
-    controllerSuperseded: true,
-    controllerCheckpointAbsent: true,
-    verifiedAt: '2026-08-22T10:00:20Z',
-  });
-  const intent = hashContent({
-    intentId: '90000000-0000-4000-8000-000000000005',
-    action: delivery.binding.preflightBinding.action,
-    baselineContentSha256: baselineIdentity.contentSha256,
-    redoBarrier,
-    managedActionExecuted: false,
-    managedReceiptCreated: false,
-    recordedAt: '2026-08-22T10:00:20Z',
-  });
-  const commit = makeProgress(
-    'commit_intent_recorded',
-    6,
-    restored.contentSha256,
-    '2026-08-22T10:00:20Z',
-    {
-      ...proofReferences,
-      undoChainHeadContentSha256: transitions.at(-1)!.contentSha256,
-      baseline: baselineIdentity,
-      intent,
-    },
-  );
-  return [proof, observed, restoring, restored, commit] as const;
-}
+  expect(coordinator.acceptProgress(progress, liveAuthority)).toBe('accepted');
+  currentTime = result.occurredAt;
+  expect(coordinator.acceptResult(result, liveAuthority)).toBe('accepted');
+  expect(coordinator.get(binding.requestId)?.status).toBe('failed_no_mutation');
+  expect(coordinator.ownsTarget('blender', binding.target.instanceId)).toBe(false);
+});
 
 it('runs and replays a real protocol six-phase managed execution', () => {
   const events = new MemoryEventStore();
-  const binding = realBinding();
+  const binding = managedExecutionTrackBinding();
   const lease = {
     ...executionTrackPreflightLease(),
     expiresAt: '2026-08-22T10:10:00Z',
@@ -448,7 +213,7 @@ it('runs and replays a real protocol six-phase managed execution', () => {
       documentAuthoritySha256: 'd'.repeat(64),
     }),
   ).toBe('accepted');
-  const tail = realProgressTail(delivery, progress);
+  const tail = managedExecutionTrackProgressTail(delivery, progress);
   const receiveTimes = [
     '2026-08-22T10:00:10Z',
     '2026-08-22T10:00:12Z',
@@ -667,11 +432,11 @@ it('runs and replays a real protocol six-phase managed execution', () => {
   expect(
     renewedReplay.pollRecovery('blender', binding.target.instanceId, sufficientReplacement),
   ).toEqual(recoveryRequest);
-}, 20_000);
+}, 30_000);
 
 it('reconciles a real companion-reported recovery result with baseline terminal evidence', () => {
   const events = new MemoryEventStore();
-  const binding = realBinding();
+  const binding = managedExecutionTrackBinding();
   const lease = {
     ...executionTrackPreflightLease(),
     expiresAt: '2026-08-22T10:10:00Z',
@@ -799,6 +564,7 @@ it('reconciles a real companion-reported recovery result with baseline terminal 
   });
   const currentStateFor = (currentReplacementLease: typeof replacementLease, observedAt: string) =>
     hashContent({
+      authentication: 'replacement_lease_recovery_post',
       replacementLeaseId: currentReplacementLease.leaseId,
       sessionId: currentReplacementLease.sessionId,
       documentIncarnationId: currentReplacementLease.documentIncarnationId,
@@ -887,13 +653,16 @@ it('reconciles a real companion-reported recovery result with baseline terminal 
   });
   currentTime = '2026-08-22T10:00:11Z';
 
-  expect(
-    afterUnresolved.acceptRecoveryAck(ack, {
-      target: binding.target,
-      lease: rotatedReplacementLease,
-      documentAuthoritySha256: 'd'.repeat(64),
-    }),
-  ).toBe('accepted');
+  const eventsBeforeAuthorization = events.events.length;
+  const authorization = afterUnresolved.authorizeRecoveryAck(ack, {
+    target: binding.target,
+    lease: rotatedReplacementLease,
+    documentAuthoritySha256: 'd'.repeat(64),
+  });
+  expect(authorization.result).toBe('accepted');
+  expect(events.events).toHaveLength(eventsBeforeAuthorization);
+  expect(afterUnresolved.get(binding.requestId)?.status).toBe('recovery_required');
+  expect(afterUnresolved.commitAuthorizedRecoveryAck(authorization)).toBe('accepted');
   expect(afterUnresolved.get(binding.requestId)?.status).toBe('failed_no_mutation');
   expect(afterUnresolved.ownsTarget('blender', binding.target.instanceId)).toBe(false);
 

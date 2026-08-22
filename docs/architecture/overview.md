@@ -605,6 +605,9 @@ dispatch 之前以 `execution_track_executor_unavailable` 锁住 Next，action-l
 [ADR 0102](../adr/0102-trusted-execution-failure-replan.md) 与
 [ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md) 与
 [ADR 0104](../adr/0104-reviewed-execution-track-override.md)。
+独立的 MCP `operatingline.blender.execution-track.execute` 当前仅用于安全能力探测：Companion 验证并证明精确
+baseline，把协议 outbox 元数据持久化到 Scene，然后在任何 proof、目标 action、restore 或 managed commit 前以
+`failed_no_mutation` 终止并释放 Runtime 锁。该路径会写协议元数据，但不会声称执行了菜单轨迹或目标建模操作。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
 hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。Subdivision Surface `1.39.0` 的执行权

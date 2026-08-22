@@ -11,6 +11,13 @@ import {
   actionCatalogSchema,
   canonicalizeProtocolJsonValue,
   companionActionExecutionStatusSchema,
+  companionExecutionTrackExecutionBindingSchema,
+  companionExecutionTrackExecutionCreateRequestSchema,
+  companionExecutionTrackExecutionPollDeliverySchema,
+  companionExecutionTrackExecutionRecoveryAckSchema,
+  companionExecutionTrackExecutionRecoveryPollDeliverySchema,
+  companionExecutionTrackExecutionResultSchema,
+  companionExecutionTrackExecutionStatusSchema,
   compileProcedureTreeToGuidePlan,
   computeProcedureLeafReplayFailureRecoveryAttestationContentSha256,
   guideProposalSchema,
@@ -31,6 +38,25 @@ import {
 } from '../../../services/orchestrator/src/procedure-execution-failure-replan-runtime.js';
 import { buildProcedureLeafReplayBinding } from '../../../services/orchestrator/src/procedure-replay.js';
 import { startRuntime } from '../../../services/orchestrator/src/index.js';
+import {
+  managedExecutionTrackBaseline,
+  managedExecutionTrackBinding,
+  managedExecutionTrackFailedTerminalMarker,
+  managedExecutionTrackFailureReport,
+  managedExecutionTrackFailureResult,
+  managedExecutionTrackManagedStart,
+  managedExecutionTrackProgressTail,
+  managedExecutionTrackRecoveredReport,
+  managedExecutionTrackRepairAck,
+  managedExecutionTrackStartReport,
+  managedExecutionTrackSuccessReport,
+  managedExecutionTrackSuccessResult,
+  managedExecutionTrackTimeline,
+} from '../../support/managed-execution-track-scenario.js';
+import {
+  executionTrackPreflightFixture,
+  preflightIds,
+} from '../support/execution-track-preflight-fixture.js';
 
 const ids = {
   replay: '11111111-1111-4111-8111-111111111111',
@@ -43,11 +69,14 @@ const ids = {
   request: '88888888-8888-4888-8888-888888888888',
   delivery: '99999999-9999-4999-8999-999999999999',
   expectedReport: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  startCheckpoint: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
 } as const;
 const requestedAt = '2026-08-21T09:59:58Z';
 const dispatchedAt = '2026-08-21T09:59:59Z';
 const occurredAt = '2026-08-21T10:00:00Z';
 const attestedAt = '2026-08-21T10:00:01Z';
+const strategyTargetLeafId = 'snowman.head.eyes.left';
+const strategyFirstLeafId = 'snowman.head.eyes.prerequisite';
 
 function withoutKey<T extends object, K extends keyof T>(value: T, key: K): Omit<T, K> {
   return Object.fromEntries(Object.entries(value).filter(([name]) => name !== key)) as Omit<T, K>;
@@ -73,7 +102,7 @@ function strategyActionCatalog() {
 }
 
 function candidate(
-  options: { readonly proofBackedStrategy?: boolean } = {},
+  options: { readonly proofBackedStrategy?: boolean; readonly laterLeaf?: boolean } = {},
 ): ProcedureAuthoringCandidateTree {
   const tree = JSON.parse(
     readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
@@ -81,19 +110,44 @@ function candidate(
   tree['actionCatalogVersion'] = blenderActionCatalog.catalogVersion;
   tree['interactionCatalogVersion'] = blenderInteractionCatalog.catalogVersion;
   tree['hostVersionRange'] = blenderInteractionCatalog.hostVersionRange;
-  for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
+  const nodes = tree['nodes'] as Array<Record<string, unknown>>;
+  if (options.laterLeaf === true) {
+    const targetIndex = nodes.findIndex((node) => node['id'] === strategyTargetLeafId);
+    const target = nodes[targetIndex];
+    if (targetIndex < 0 || target?.['kind'] !== 'leaf') {
+      throw new Error('Expected strategy target leaf');
+    }
+    const first = structuredClone(target);
+    first['id'] = strategyFirstLeafId;
+    first['order'] = 1;
+    first['dependsOn'] = [];
+    first['title'] = '创建先决 UV 球体';
+    first['intent'] = '先创建一个独立球体以解锁目标叶';
+    target['order'] = 2;
+    target['dependsOn'] = [strategyFirstLeafId];
+    nodes.splice(targetIndex, 0, first);
+  }
+  for (const node of nodes) {
     if (node['kind'] !== 'leaf') continue;
     const leafId = String(node['id']);
     const action = node['action'] as
       { name?: string; arguments?: Record<string, unknown> } | undefined;
     if (action?.name === 'blender.mesh.create_uv_sphere' && action.arguments !== undefined) {
       if (options.proofBackedStrategy === true) {
-        action.arguments = {
-          resourceId: 'proof.uv_sphere.eye',
-          objectName: 'OperatingLine.TutorialEye',
-          radius: 1.5,
-          location: [1.25, -2, 0.75],
-        };
+        action.arguments =
+          leafId === strategyFirstLeafId
+            ? {
+                resourceId: 'proof.uv_sphere.prerequisite',
+                objectName: 'OperatingLine.TutorialPrerequisite',
+                radius: 1.5,
+                location: [-1.25, -2, 0.75],
+              }
+            : {
+                resourceId: 'proof.uv_sphere.eye',
+                objectName: 'OperatingLine.TutorialEye',
+                radius: 1.5,
+                location: [1.25, -2, 0.75],
+              };
       }
       node['expectedObservations'] = [
         {
@@ -127,12 +181,13 @@ function candidate(
 function fixture(
   options: {
     readonly proofBackedStrategy?: boolean;
+    readonly laterLeaf?: boolean;
     readonly actionCatalog?: typeof blenderActionCatalog;
   } = {},
 ) {
   const tree = candidate(options);
   const actionCatalog = options.actionCatalog ?? blenderActionCatalog;
-  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  const leaf = tree.nodes.find((node) => node.id === strategyTargetLeafId);
   if (leaf?.kind !== 'leaf' || leaf.action === null) throw new Error('Expected managed leaf');
   const packet = {
     formatVersion: '1.0.0',
@@ -251,12 +306,16 @@ function fixture(
     catalogVersion: actionCatalog.catalogVersion,
     proposedAt: requestedAt,
   } as const;
+  const coverage = materialization.coverage.find((entry) => entry.leafId === leaf.id);
+  if (coverage?.recipeId === null || coverage?.recipeId === undefined) {
+    throw new Error('Expected target leaf materialization coverage');
+  }
   const binding = buildProcedureLeafReplayBinding({
     request,
     materialization,
     proposal,
     planContentSha256,
-    recipeId: materialization.coverage[0]!.recipeId,
+    recipeId: coverage.recipeId,
     actionName: leaf.action.name,
     createdAt: requestedAt,
   });
@@ -269,6 +328,47 @@ function fixture(
   if (groundedLeaf?.kind !== 'leaf' || groundedLeaf.action === null || step === undefined) {
     throw new Error('Expected grounded leaf and compiled step');
   }
+  const startCheckpoint = {
+    formatVersion: '1.0.0',
+    evidenceClass: 'companion_reported_native_undo_checkpoint',
+    checkpointId: ids.startCheckpoint,
+    previousCheckpointId: null,
+    operation: 'start',
+    committedAt: dispatchedAt,
+    marker: { key: '_operating_line_native_history_v1', matched: true },
+    journal: { entryPresent: true, snapshotMatchesSession: true, artifactsBackedUp: true },
+    session: {
+      plan: { id: plan.id, revision: plan.revision },
+      planContentSha256,
+      executionId: ids.execution,
+      activeStepId: null,
+      completedStepIds: [],
+      receiptStepIds: [],
+    },
+  } as const;
+  const startReport = {
+    protocolVersion: '1.5.0',
+    reportId: ids.expectedReport,
+    sequence: 7,
+    adapterId: 'blender',
+    instanceId: ids.instance,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.3',
+    plan: { id: plan.id, revision: plan.revision },
+    planContentSha256,
+    executionId: ids.execution,
+    phase: 'running',
+    activeStepId: null,
+    completedStepIds: [],
+    transition: 'walkthrough_started',
+    stepId: null,
+    observations: [],
+    observationGate: null,
+    artifactAttestation: null,
+    nativeUndoCheckpoint: startCheckpoint,
+    error: null,
+    occurredAt: dispatchedAt,
+  } as const;
   const failureReport = {
     protocolVersion: '1.5.0',
     reportId: ids.report,
@@ -315,6 +415,21 @@ function fixture(
       decision: 'accepted',
       occurredAt: dispatchedAt,
     },
+    authorization: {
+      actionExecutionRequestId: ids.request,
+      startState: {
+        reportId: startReport.reportId,
+        sequence: startReport.sequence,
+        reportContentSha256: hash(startReport),
+        checkpointId: startCheckpoint.checkpointId,
+        checkpointContentSha256: hash(startCheckpoint),
+        phase: 'running',
+        activeStepId: startReport.activeStepId,
+        checkpointOperation: startCheckpoint.operation,
+        completedStepIds: startReport.completedStepIds,
+        receiptStepIds: startCheckpoint.session.receiptStepIds,
+      },
+    },
     failureReport,
     recoveryReport: null,
     evidenceClass: 'companion_reported_managed_action_failure_recovery',
@@ -325,7 +440,8 @@ function fixture(
       recoverySessionFingerprintSha256: null,
       proposalReceipt: { sequence: 1, receivedAt: requestedAt },
       decisionReceipt: { sequence: 2, receivedAt: dispatchedAt },
-      failureReportReceipt: { sequence: 3, receivedAt: occurredAt },
+      startReportReceipt: { sequence: 3, receivedAt: dispatchedAt },
+      failureReportReceipt: { sequence: 4, receivedAt: occurredAt },
       recoveryReportReceipt: null,
     },
     bindingContentSha256: binding.integrity.contentSha256,
@@ -620,6 +736,35 @@ async function companionLeaseHeaders(runtime: { readonly baseUrl: string }) {
   return { ...headers, 'x-operatingline-companion-lease': session.leaseId };
 }
 
+async function callMcpTool(
+  runtime: { readonly mcpEndpoint: string },
+  id: number,
+  name: string,
+  argumentsValue: unknown,
+) {
+  const response = await fetch(runtime.mcpEndpoint, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json, text/event-stream',
+      authorization: 'Bearer failure-replan-strategy-token',
+      'content-type': 'application/json',
+      'mcp-protocol-version': '2025-11-25',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: { name, arguments: argumentsValue },
+    }),
+  });
+  expect(response.status).toBe(200);
+  const dataLine = (await response.text()).split('\n').find((line) => line.startsWith('data: '));
+  if (dataLine === undefined) throw new Error('Expected one MCP SSE data event');
+  return JSON.parse(dataLine.slice('data: '.length)) as {
+    result?: { isError?: boolean; content?: Array<{ text?: string }>; structuredContent?: unknown };
+  };
+}
+
 function acceptedTrackDecision(proposalId: string) {
   return {
     protocolVersion: '1.6.0',
@@ -636,6 +781,7 @@ async function acceptTrackAndReportReadyState(
   runtime: { readonly baseUrl: string },
   databasePath: string,
   decisionKind: 'accepted' | 'rejected' = 'accepted',
+  options: { readonly completedPrefix?: boolean } = {},
 ) {
   const reviewed = await reviewStrategyProposal(runtime);
   const decision = {
@@ -661,6 +807,30 @@ async function acceptTrackAndReportReadyState(
   );
   if (step?.executionTrackOverride === undefined)
     throw new Error('Expected reviewed override step');
+  const completedPrefixStep =
+    options.completedPrefix === true
+      ? proposal.plan.steps.find(
+          (candidateStep) =>
+            candidateStep.action !== null && step.dependsOn.includes(candidateStep.id),
+        )
+      : undefined;
+  if (options.completedPrefix === true && completedPrefixStep === undefined) {
+    throw new Error('Expected completed prerequisite step');
+  }
+  const completedStepIds =
+    completedPrefixStep === undefined ? [] : ([completedPrefixStep.id] as const);
+  const activeStepId = completedPrefixStep?.id ?? null;
+  const transition = completedPrefixStep === undefined ? 'walkthrough_started' : 'step_succeeded';
+  const observations =
+    completedPrefixStep === undefined
+      ? []
+      : [
+          {
+            kind: completedPrefixStep.expectedObservations[0]!.kind,
+            satisfied: true,
+            details: completedPrefixStep.expectedObservations[0]!.parameters,
+          },
+        ];
   const planContentSha256 = hash(proposal.plan);
   const executionId = randomUUID();
   const reportId = randomUUID();
@@ -677,19 +847,19 @@ async function acceptTrackAndReportReadyState(
     planContentSha256,
     executionId,
     phase: 'running',
-    activeStepId: null,
-    completedStepIds: [],
-    transition: 'walkthrough_started',
-    stepId: null,
-    observations: [],
+    activeStepId,
+    completedStepIds,
+    transition,
+    stepId: activeStepId,
+    observations,
     observationGate: null,
     artifactAttestation: null,
     nativeUndoCheckpoint: {
       formatVersion: '1.0.0',
       evidenceClass: 'companion_reported_native_undo_checkpoint',
       checkpointId: randomUUID(),
-      previousCheckpointId: null,
-      operation: 'start',
+      previousCheckpointId: completedPrefixStep === undefined ? null : randomUUID(),
+      operation: completedPrefixStep === undefined ? 'start' : 'next',
       committedAt: reportedAt,
       marker: { key: '_operating_line_native_history_v1', matched: true },
       journal: {
@@ -701,9 +871,9 @@ async function acceptTrackAndReportReadyState(
         plan: { id: proposal.plan.id, revision: proposal.plan.revision },
         planContentSha256,
         executionId,
-        activeStepId: null,
-        completedStepIds: [],
-        receiptStepIds: [],
+        activeStepId,
+        completedStepIds,
+        receiptStepIds: completedStepIds,
       },
     },
     error: null,
@@ -721,6 +891,7 @@ async function acceptTrackAndReportReadyState(
     sessionHello: reviewed.sessionHello,
     proposal,
     report,
+    completedPrefixStep,
     request: {
       formatVersion: '1.0.0',
       requestId: randomUUID(),
@@ -1356,6 +1527,1388 @@ describe('procedure execution failure replan runtime resolver', () => {
       rmSync(temporaryDirectory, { recursive: true, force: true });
     }
   });
+
+  it('authorizes a format 2 execution-track request and persists one canonical queued binding', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-authorize-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const ready = await acceptTrackAndReportReadyState(runtime, databasePath);
+      const request = companionExecutionTrackExecutionCreateRequestSchema.parse({
+        ...ready.request,
+        formatVersion: '2.0.0',
+      });
+      const beforeExecute = openOperatingLineDatabase(databasePath);
+      try {
+        expect(beforeExecute.getGuideProposal(request.proposalId)).not.toBeNull();
+        expect(beforeExecute.getProcedureExecutionFailureReplanReview(ids.request)).not.toBeNull();
+        expect(
+          beforeExecute.getGuideProposalDecision(request.proposalId, 'blender', ids.instance),
+        ).toMatchObject({ decision: 'accepted' });
+        expect(
+          beforeExecute.getCompanionStateReport(request.expectedState.reportId),
+        ).not.toBeNull();
+        expect(
+          beforeExecute.getManagedReplayReceipt(
+            'companion_state_report',
+            request.expectedState.reportId,
+          ),
+        ).toMatchObject({ authentication: 'negotiated_companion_lease' });
+        expect(
+          beforeExecute.listExecutionEventsByTypes(['blender.execution-track-execution.queued']),
+        ).toHaveLength(0);
+      } finally {
+        beforeExecute.close();
+      }
+
+      const response = await callMcpTool(
+        runtime,
+        19_001,
+        'operatingline.blender.execution-track.execute',
+        request,
+      );
+      expect(response.result?.isError, response.result?.content?.[0]?.text).not.toBe(true);
+      const status = companionExecutionTrackExecutionStatusSchema.parse(
+        response.result?.structuredContent,
+      );
+      const binding = companionExecutionTrackExecutionBindingSchema.parse(status.binding);
+      expect(status.status).toBe('queued');
+      expect(binding).toMatchObject({
+        formatVersion: '2.0.0',
+        requestId: request.requestId,
+        target: request.target,
+        proposalId: request.proposalId,
+        plan: request.plan,
+        executionId: request.executionId,
+        leafId: request.leafId,
+        expectedState: request.expectedState,
+        preflightBinding: {
+          formatVersion: '1.0.0',
+          requestId: request.requestId,
+          acceptance: {
+            decision: { decision: 'accepted' },
+            receipt: { authentication: 'negotiated_companion_lease' },
+          },
+        },
+        executor: {
+          executorId: 'blender.uv_sphere_menu_proven_managed_commit.v2',
+          authorization: 'accepted_replay_next_step',
+          automaticReplay: false,
+        },
+      });
+      expect(binding.bindingContentSha256).toBe(hash(withoutKey(binding, 'bindingContentSha256')));
+
+      const afterExecute = openOperatingLineDatabase(databasePath);
+      try {
+        const queuedEvents = afterExecute.listExecutionEventsByTypes([
+          'blender.execution-track-execution.queued',
+        ]);
+        expect(queuedEvents).toHaveLength(1);
+        expect(queuedEvents[0]?.payload).toMatchObject({ status });
+      } finally {
+        afterExecute.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('executes the accepted later leaf after preserving its completed dependency prefix', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-later-leaf-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(
+      databasePath,
+      fixture({ proofBackedStrategy: true, laterLeaf: true, actionCatalog }),
+    );
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const ready = await acceptTrackAndReportReadyState(runtime, databasePath, 'accepted', {
+        completedPrefix: true,
+      });
+      const firstStep = ready.completedPrefixStep;
+      if (firstStep === undefined || ready.report.nativeUndoCheckpoint === undefined) {
+        throw new Error('Expected completed prerequisite and its native checkpoint');
+      }
+      const request = companionExecutionTrackExecutionCreateRequestSchema.parse({
+        ...ready.request,
+        formatVersion: '2.0.0',
+      });
+      const targetStep = ready.proposal.plan.steps.find((step) => step.id === request.leafId);
+      expect(
+        ready.proposal.plan.steps.filter((step) => step.action !== null).map((step) => step.id),
+      ).toEqual([firstStep.id, request.leafId]);
+      expect(targetStep?.dependsOn).toEqual([firstStep.id]);
+
+      const durableAuthority = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          durableAuthority.getProcedureExecutionFailureReplanReview(ids.request),
+        ).toMatchObject({ finalStatus: 'accepted' });
+        expect(
+          durableAuthority.getGuideProposalDecision(request.proposalId, 'blender', ids.instance),
+        ).toMatchObject({ decision: 'accepted' });
+        expect(
+          durableAuthority.getManagedReplayReceipt(
+            'companion_state_report',
+            request.expectedState.reportId,
+          ),
+        ).toMatchObject({ authentication: 'negotiated_companion_lease' });
+      } finally {
+        durableAuthority.close();
+      }
+
+      const queuedResponse = await callMcpTool(
+        runtime,
+        19_010,
+        'operatingline.blender.execution-track.execute',
+        request,
+      );
+      expect(queuedResponse.result?.isError, queuedResponse.result?.content?.[0]?.text).not.toBe(
+        true,
+      );
+      const queued = companionExecutionTrackExecutionStatusSchema.parse(
+        queuedResponse.result?.structuredContent,
+      );
+      const binding = companionExecutionTrackExecutionBindingSchema.parse(queued.binding);
+      expect(queued.status).toBe('queued');
+      expect(binding.authorizedStartState).toEqual({
+        reportContentSha256: hash(ready.report),
+        checkpoint: {
+          checkpointId: ready.report.nativeUndoCheckpoint.checkpointId,
+          previousCheckpointId: ready.report.nativeUndoCheckpoint.previousCheckpointId,
+          operation: 'next',
+          contentSha256: hash(ready.report.nativeUndoCheckpoint),
+        },
+        activeStepId: firstStep.id,
+        completedStepIds: [firstStep.id],
+        receiptStepIds: [firstStep.id],
+        successPhase: 'completed',
+      });
+
+      const pollUrl = new URL('/api/v1/companion/execution-track-execution', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', ids.instance);
+      const deliveryResponse = await fetch(pollUrl, { headers: ready.headers });
+      expect(deliveryResponse.status).toBe(200);
+      const delivery = companionExecutionTrackExecutionPollDeliverySchema.parse(
+        await deliveryResponse.json(),
+      ).request;
+      if (delivery === null) throw new Error('Expected later-leaf managed delivery');
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+
+      const timeline = managedExecutionTrackTimeline(delivery.dispatchedAt);
+      const baseline = managedExecutionTrackBaseline(
+        delivery,
+        timeline,
+        ready.report.nativeUndoCheckpoint,
+      );
+      const progressChain = [
+        baseline,
+        ...managedExecutionTrackProgressTail(delivery, baseline, timeline),
+      ];
+      expect(progressChain).toHaveLength(6);
+      for (const progress of progressChain) {
+        const progressResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/execution-track-execution/progress`,
+          { method: 'POST', headers: ready.headers, body: JSON.stringify(progress) },
+        );
+        expect(progressResponse.status, JSON.stringify(await progressResponse.clone().json())).toBe(
+          200,
+        );
+        await expect(progressResponse.json()).resolves.toEqual({ result: 'accepted' });
+      }
+
+      const commit = progressChain.at(-1)!;
+      const managedStart = managedExecutionTrackManagedStart(delivery, commit, timeline);
+      const managedStartResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/managed-start`,
+        { method: 'POST', headers: ready.headers, body: JSON.stringify(managedStart) },
+      );
+      expect(
+        managedStartResponse.status,
+        JSON.stringify(await managedStartResponse.clone().json()),
+      ).toBe(200);
+      await expect(managedStartResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const successReport = managedExecutionTrackSuccessReport(delivery, baseline, {
+        occurredAt: timeline(23),
+      });
+      expect(successReport.completedStepIds).toEqual([firstStep.id, request.leafId]);
+      expect(successReport.nativeUndoCheckpoint?.session.receiptStepIds).toEqual([
+        firstStep.id,
+        request.leafId,
+      ]);
+      const reportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(successReport),
+      });
+      expect(reportResponse.status, JSON.stringify(await reportResponse.clone().json())).toBe(200);
+      await expect(reportResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const successResult = managedExecutionTrackSuccessResult(
+        delivery,
+        baseline,
+        commit,
+        managedStart,
+        successReport,
+        timeline(24),
+      );
+      expect(successResult.managedCheckpoint.receiptStepIds).toEqual([
+        firstStep.id,
+        request.leafId,
+      ]);
+      const resultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/result`,
+        { method: 'POST', headers: ready.headers, body: JSON.stringify(successResult) },
+      );
+      expect(resultResponse.status, JSON.stringify(await resultResponse.clone().json())).toBe(200);
+      await expect(resultResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const terminalResponse = await callMcpTool(
+        runtime,
+        19_011,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      const terminal = companionExecutionTrackExecutionStatusSchema.parse(
+        terminalResponse.result?.structuredContent,
+      );
+      expect(terminal.status).toBe('succeeded');
+      expect(terminal.result).toEqual(successResult);
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves the expected-state receipt authorization failure without queueing', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-authorize-fail-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const ready = await acceptTrackAndReportReadyState(runtime, databasePath);
+      const request = companionExecutionTrackExecutionCreateRequestSchema.parse({
+        ...ready.request,
+        formatVersion: '2.0.0',
+        expectedState: { ...ready.request.expectedState, reportId: randomUUID() },
+      });
+      const response = await callMcpTool(
+        runtime,
+        19_002,
+        'operatingline.blender.execution-track.execute',
+        request,
+      );
+      expect(response.result?.isError).toBe(true);
+      expect(JSON.parse(response.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        error: 'execution_track_execution_expected_receipt_missing',
+      });
+
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          database.listExecutionEventsByTypes(['blender.execution-track-execution.queued']),
+        ).toHaveLength(0);
+      } finally {
+        database.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('hard-gates managed success on the exact durable report and preserves terminal replay', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-execution-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const preflight = executionTrackPreflightFixture();
+    const request = companionExecutionTrackExecutionCreateRequestSchema.parse({
+      ...preflight.request,
+      formatVersion: '2.0.0',
+    });
+    const binding = managedExecutionTrackBinding();
+    const documentAuthoritySha256 = createHash('sha256')
+      .update('operatingline:blender-menu-control-proof-document-authority:v1\0')
+      .update('blender\0')
+      .update(`${preflightIds.instance}\0${preflightIds.session}\0${preflightIds.document}`)
+      .digest('hex');
+    const queuedStatus = companionExecutionTrackExecutionStatusSchema.parse({
+      binding,
+      status: 'queued',
+      updatedAt: binding.requestedAt,
+    });
+    const seeded = openOperatingLineDatabase(databasePath);
+    try {
+      seeded.appendEvent({
+        id: `blender-execution-track-execution:${request.requestId}:queued`,
+        eventType: 'blender.execution-track-execution.queued',
+        payload: {
+          status: queuedStatus,
+          documentAuthoritySha256,
+          progressChain: [],
+          revision: 1,
+        },
+        createdAt: queuedStatus.updatedAt,
+      });
+    } finally {
+      seeded.close();
+    }
+    let runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const hello = {
+        ...companionHello(preflightIds.instance),
+        sessionId: preflightIds.session,
+        documentIncarnationId: preflightIds.document,
+      };
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(hello),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as { leaseId: string; expiresAt: string };
+      const scenarioLease = {
+        leaseId: session.leaseId,
+        sessionId: preflightIds.session,
+        target: binding.target,
+        documentIncarnationId: preflightIds.document,
+        expiresAt: session.expiresAt,
+      };
+      const reportSeedDelivery = companionExecutionTrackExecutionPollDeliverySchema.parse({
+        request: {
+          binding,
+          deliveryId: randomUUID(),
+          lease: scenarioLease,
+          dispatchedAt: new Date().toISOString(),
+        },
+      }).request;
+      if (reportSeedDelivery === null) throw new Error('expected report seed delivery');
+      const startReport = managedExecutionTrackStartReport(
+        reportSeedDelivery,
+        managedExecutionTrackBaseline(
+          reportSeedDelivery,
+          managedExecutionTrackTimeline(reportSeedDelivery.dispatchedAt),
+        ),
+      );
+      const startReportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+          'x-operatingline-companion-lease': session.leaseId,
+        },
+        body: JSON.stringify(startReport),
+      });
+      expect(startReportResponse.status).toBe(200);
+      await expect(startReportResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const queued = await callMcpTool(
+        runtime,
+        20_001,
+        'operatingline.blender.execution-track.execute',
+        request,
+      );
+      expect(queued.result?.isError, queued.result?.content?.[0]?.text).not.toBe(true);
+      expect(queued.result?.structuredContent).toMatchObject({
+        status: 'queued',
+        binding: {
+          requestId: request.requestId,
+          target: request.target,
+          proposalId: request.proposalId,
+          executionId: request.executionId,
+          expectedState: request.expectedState,
+          executor: {
+            executorId: 'blender.uv_sphere_menu_proven_managed_commit.v2',
+            automaticReplay: false,
+          },
+        },
+      });
+
+      const duplicate = await callMcpTool(
+        runtime,
+        20_002,
+        'operatingline.blender.execution-track.execute',
+        request,
+      );
+      expect(duplicate.result?.structuredContent).toEqual(queued.result?.structuredContent);
+
+      const status = await callMcpTool(
+        runtime,
+        20_003,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(status.result?.isError).not.toBe(true);
+      expect(status.result?.structuredContent).toEqual(queued.result?.structuredContent);
+
+      const pollUrl = new URL('/api/v1/companion/execution-track-execution', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', preflightIds.instance);
+      const leaseHeaders = {
+        authorization: 'Bearer failure-replan-strategy-token',
+        'content-type': 'application/json',
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const deliveryResponse = await fetch(pollUrl, { headers: leaseHeaders });
+      expect(deliveryResponse.status).toBe(200);
+      const delivery = companionExecutionTrackExecutionPollDeliverySchema.parse(
+        await deliveryResponse.json(),
+      ).request;
+      if (delivery === null) throw new Error('expected managed delivery');
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+      const timeline = managedExecutionTrackTimeline(delivery.dispatchedAt);
+      const baseline = managedExecutionTrackBaseline(delivery, timeline);
+      const progressChain = [
+        baseline,
+        ...managedExecutionTrackProgressTail(delivery, baseline, timeline),
+      ];
+      for (const progress of progressChain) {
+        const progressResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/execution-track-execution/progress`,
+          { method: 'POST', headers: leaseHeaders, body: JSON.stringify(progress) },
+        );
+        expect(progressResponse.status).toBe(200);
+        await expect(progressResponse.json()).resolves.toEqual({ result: 'accepted' });
+      }
+      const commit = progressChain.at(-1)!;
+      const managedStartSubmission = managedExecutionTrackManagedStart(delivery, commit, timeline);
+      const managedStartResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/managed-start`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(managedStartSubmission),
+        },
+      );
+      expect(managedStartResponse.status).toBe(200);
+      await expect(managedStartResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const inProgress = await callMcpTool(
+        runtime,
+        20_004,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(inProgress.result?.structuredContent).toMatchObject({
+        status: 'managed_action_in_progress',
+        deliveryId: delivery.deliveryId,
+      });
+
+      const successReport = managedExecutionTrackSuccessReport(delivery, baseline, {
+        occurredAt: new Date().toISOString(),
+      });
+      const missingReportResult = managedExecutionTrackSuccessResult(
+        delivery,
+        baseline,
+        commit,
+        managedStartSubmission,
+        successReport,
+        new Date().toISOString(),
+      );
+      const missingReportResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/result`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+            'x-operatingline-companion-lease': session.leaseId,
+          },
+          body: JSON.stringify(missingReportResult),
+        },
+      );
+      expect(missingReportResponse.status).toBe(409);
+      await expect(missingReportResponse.json()).resolves.toEqual({
+        error: 'execution_track_execution_report_not_current',
+        message:
+          'Managed result report is not yet the current durable Companion state; retry the same result',
+        retryable: true,
+      });
+      const unchanged = await callMcpTool(
+        runtime,
+        20_005,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(unchanged.result?.structuredContent).toEqual(inProgress.result?.structuredContent);
+
+      const reportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(successReport),
+      });
+      expect(reportResponse.status).toBe(200);
+      await expect(reportResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const acceptedResultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/result`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(missingReportResult) },
+      );
+      expect(
+        acceptedResultResponse.status,
+        JSON.stringify(await acceptedResultResponse.clone().json()),
+      ).toBe(200);
+      await expect(acceptedResultResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const succeeded = await callMcpTool(
+        runtime,
+        20_006,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(succeeded.result?.structuredContent).toMatchObject({ status: 'succeeded' });
+
+      const newerReport = managedExecutionTrackSuccessReport(delivery, baseline, {
+        reportId: randomUUID(),
+        sequence: successReport.sequence + 1,
+        occurredAt: new Date().toISOString(),
+        checkpointId: randomUUID(),
+      });
+      const newerReportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(newerReport),
+      });
+      expect(newerReportResponse.status).toBe(200);
+      await expect(newerReportResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const lostAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/result`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(missingReportResult) },
+      );
+      expect(lostAckResponse.status).toBe(200);
+      await expect(lostAckResponse.json()).resolves.toEqual({ result: 'duplicate' });
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken: 'failure-replan-strategy-token',
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+      });
+      const replayed = await callMcpTool(
+        runtime,
+        20_007,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(replayed.result?.structuredContent).toEqual(succeeded.result?.structuredContent);
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it('reconciles a persisted baseline terminal after restart through the replacement-lease POST', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-recovery-post-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const preflight = executionTrackPreflightFixture();
+    const request = companionExecutionTrackExecutionCreateRequestSchema.parse({
+      ...preflight.request,
+      formatVersion: '2.0.0',
+    });
+    const binding = managedExecutionTrackBinding();
+    const documentAuthoritySha256 = createHash('sha256')
+      .update('operatingline:blender-menu-control-proof-document-authority:v1\0')
+      .update('blender\0')
+      .update(`${preflightIds.instance}\0${preflightIds.session}\0${preflightIds.document}`)
+      .digest('hex');
+    const queuedStatus = companionExecutionTrackExecutionStatusSchema.parse({
+      binding,
+      status: 'queued',
+      updatedAt: binding.requestedAt,
+    });
+    const seeded = openOperatingLineDatabase(databasePath);
+    try {
+      seeded.appendEvent({
+        id: `blender-execution-track-execution:${request.requestId}:queued`,
+        eventType: 'blender.execution-track-execution.queued',
+        payload: {
+          status: queuedStatus,
+          documentAuthoritySha256,
+          progressChain: [],
+          revision: 1,
+        },
+        createdAt: queuedStatus.updatedAt,
+      });
+    } finally {
+      seeded.close();
+    }
+
+    let runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const hello = {
+        ...companionHello(preflightIds.instance),
+        sessionId: preflightIds.session,
+        documentIncarnationId: preflightIds.document,
+      };
+      const firstSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(hello),
+      });
+      expect(firstSessionResponse.status).toBe(200);
+      const firstSession = (await firstSessionResponse.json()) as {
+        leaseId: string;
+        expiresAt: string;
+      };
+      const firstLease = {
+        leaseId: firstSession.leaseId,
+        sessionId: preflightIds.session,
+        target: binding.target,
+        documentIncarnationId: preflightIds.document,
+        expiresAt: firstSession.expiresAt,
+      };
+      const firstHeaders = {
+        authorization: 'Bearer failure-replan-strategy-token',
+        'content-type': 'application/json',
+        'x-operatingline-companion-lease': firstSession.leaseId,
+      };
+      const reportSeedDelivery = companionExecutionTrackExecutionPollDeliverySchema.parse({
+        request: {
+          binding,
+          deliveryId: randomUUID(),
+          lease: firstLease,
+          dispatchedAt: new Date().toISOString(),
+        },
+      }).request;
+      if (reportSeedDelivery === null) throw new Error('expected report seed delivery');
+      const startReport = managedExecutionTrackStartReport(
+        reportSeedDelivery,
+        managedExecutionTrackBaseline(
+          reportSeedDelivery,
+          managedExecutionTrackTimeline(reportSeedDelivery.dispatchedAt),
+        ),
+      );
+      const startReportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: firstHeaders,
+        body: JSON.stringify(startReport),
+      });
+      expect(startReportResponse.status).toBe(200);
+      await expect(startReportResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const queued = await callMcpTool(
+        runtime,
+        20_101,
+        'operatingline.blender.execution-track.execute',
+        request,
+      );
+      expect(queued.result?.isError, queued.result?.content?.[0]?.text).not.toBe(true);
+      const pollUrl = new URL('/api/v1/companion/execution-track-execution', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', preflightIds.instance);
+      const deliveryResponse = await fetch(pollUrl, { headers: firstHeaders });
+      expect(deliveryResponse.status).toBe(200);
+      const delivery = companionExecutionTrackExecutionPollDeliverySchema.parse(
+        await deliveryResponse.json(),
+      ).request;
+      if (delivery === null) throw new Error('expected fail-closed managed delivery');
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+
+      const timeline = managedExecutionTrackTimeline(delivery.dispatchedAt);
+      const baseline = managedExecutionTrackBaseline(delivery, timeline);
+      const progressResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/progress`,
+        { method: 'POST', headers: firstHeaders, body: JSON.stringify(baseline) },
+      );
+      expect(progressResponse.status).toBe(200);
+      await expect(progressResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const durableTerminal = companionExecutionTrackExecutionResultSchema.parse({
+        formatVersion: '2.0.0',
+        requestId: delivery.binding.requestId,
+        deliveryId: delivery.deliveryId,
+        bindingContentSha256: delivery.binding.bindingContentSha256,
+        target: delivery.binding.target,
+        leaseId: delivery.lease.leaseId,
+        currentLease: delivery.lease,
+        proposalId: delivery.binding.proposalId,
+        planId: delivery.binding.plan.id,
+        planRevision: delivery.binding.plan.revision,
+        executionId: delivery.binding.executionId,
+        leafId: delivery.binding.leafId,
+        occurredAt: timeline(3),
+        status: 'failed_no_mutation',
+        startCheckpointId: baseline.startCheckpoint.checkpointId,
+        baselineAttestationContentSha256: baseline.startAttestation.contentSha256,
+        lastProgressContentSha256: baseline.contentSha256,
+        error: 'proof/restore executor unavailable; no target mutation was attempted',
+      });
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken: 'failure-replan-strategy-token',
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+      });
+      const replacementSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(hello),
+        },
+      );
+      expect(replacementSessionResponse.status).toBe(200);
+      const replacementSession = (await replacementSessionResponse.json()) as {
+        leaseId: string;
+        expiresAt: string;
+      };
+      expect(replacementSession.leaseId).not.toBe(firstSession.leaseId);
+      const replacementHeaders = {
+        authorization: 'Bearer failure-replan-strategy-token',
+        'content-type': 'application/json',
+        'x-operatingline-companion-lease': replacementSession.leaseId,
+      };
+      const recoveryPollUrl = new URL(
+        '/api/v1/companion/execution-track-execution/recovery',
+        runtime.baseUrl,
+      );
+      recoveryPollUrl.searchParams.set('adapterId', 'blender');
+      recoveryPollUrl.searchParams.set('instanceId', preflightIds.instance);
+      const recoveryPollResponse = await fetch(recoveryPollUrl, {
+        headers: replacementHeaders,
+      });
+      expect(recoveryPollResponse.status).toBe(200);
+      const recoveryRequest = companionExecutionTrackExecutionRecoveryPollDeliverySchema.parse(
+        await recoveryPollResponse.json(),
+      ).request;
+      if (recoveryRequest === null) throw new Error('expected restart recovery challenge');
+      expect(recoveryRequest.replacementLease.leaseId).toBe(replacementSession.leaseId);
+      expect(recoveryRequest.acceptedProgress).toEqual(baseline);
+
+      const observedAt = new Date(Date.parse(recoveryRequest.requestedAt) + 1).toISOString();
+      const ackOccurredAt = new Date(Date.parse(recoveryRequest.requestedAt) + 2).toISOString();
+      const currentStateContent = {
+        authentication: 'replacement_lease_recovery_post',
+        replacementLeaseId: recoveryRequest.replacementLease.leaseId,
+        sessionId: recoveryRequest.replacementLease.sessionId,
+        documentIncarnationId: recoveryRequest.replacementLease.documentIncarnationId,
+        reportId: baseline.startAttestation.reportId,
+        sequence: baseline.startAttestation.sequence,
+        sceneFingerprintSha256: baseline.startAttestation.sceneFingerprintSha256,
+        ...baseline.startAttestation.identitySnapshot,
+        observedAt,
+      } as const;
+      const currentState = {
+        ...currentStateContent,
+        contentSha256: hash(currentStateContent),
+      };
+      const recoveryAck = companionExecutionTrackExecutionRecoveryAckSchema.parse({
+        formatVersion: '2.0.0',
+        request: recoveryRequest,
+        recoveryId: recoveryRequest.recoveryId,
+        requestId: recoveryRequest.requestId,
+        originalDeliveryId: recoveryRequest.originalDeliveryId,
+        bindingContentSha256: recoveryRequest.bindingContentSha256,
+        replacementLeaseId: recoveryRequest.replacementLease.leaseId,
+        acceptedProgressChainHeadContentSha256:
+          recoveryRequest.acceptedProgressChainHeadContentSha256,
+        durableReferences: recoveryRequest.durableReferences,
+        outcome: 'reconciled',
+        evidence: {
+          kind: 'baseline_terminal',
+          terminalResult: durableTerminal,
+          terminalResultContentSha256: hash(durableTerminal),
+          progress: baseline,
+          currentState,
+        },
+        retainsTargetLock: false,
+        automaticReplay: false,
+        occurredAt: ackOccurredAt,
+      });
+      const missingLeaseResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(recoveryAck),
+        },
+      );
+      expect(missingLeaseResponse.status).toBe(409);
+      const originalLeaseResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: firstHeaders,
+          body: JSON.stringify(recoveryAck),
+        },
+      );
+      expect(originalLeaseResponse.status).toBe(409);
+      const recoveryAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: replacementHeaders,
+          body: JSON.stringify(recoveryAck),
+        },
+      );
+      expect(
+        recoveryAckResponse.status,
+        JSON.stringify(await recoveryAckResponse.clone().json()),
+      ).toBe(200);
+      await expect(recoveryAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const duplicateAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: replacementHeaders,
+          body: JSON.stringify(recoveryAck),
+        },
+      );
+      expect(duplicateAckResponse.status).toBe(200);
+      await expect(duplicateAckResponse.json()).resolves.toEqual({ result: 'duplicate' });
+      const terminal = await callMcpTool(
+        runtime,
+        20_102,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(terminal.result?.structuredContent).toMatchObject({
+        status: 'failed_no_mutation',
+        result: durableTerminal,
+      });
+
+      const rotatedSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(hello),
+      });
+      expect(rotatedSessionResponse.status).toBe(200);
+      const rotatedSession = (await rotatedSessionResponse.json()) as { leaseId: string };
+      expect(rotatedSession.leaseId).not.toBe(replacementSession.leaseId);
+      const replacedLeaseResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+            'x-operatingline-companion-lease': rotatedSession.leaseId,
+          },
+          body: JSON.stringify(recoveryAck),
+        },
+      );
+      expect(replacedLeaseResponse.status).toBe(409);
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken: 'failure-replan-strategy-token',
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+      });
+      const replayed = await callMcpTool(
+        runtime,
+        20_103,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(replayed.result?.structuredContent).toEqual(terminal.result?.structuredContent);
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('persists a failed-managed marker before atomically recording its repaired state', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-repair-post-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const preflight = executionTrackPreflightFixture();
+    const request = companionExecutionTrackExecutionCreateRequestSchema.parse({
+      ...preflight.request,
+      formatVersion: '2.0.0',
+    });
+    const binding = managedExecutionTrackBinding();
+    const documentAuthoritySha256 = createHash('sha256')
+      .update('operatingline:blender-menu-control-proof-document-authority:v1\0')
+      .update('blender\0')
+      .update(`${preflightIds.instance}\0${preflightIds.session}\0${preflightIds.document}`)
+      .digest('hex');
+    const queuedStatus = companionExecutionTrackExecutionStatusSchema.parse({
+      binding,
+      status: 'queued',
+      updatedAt: binding.requestedAt,
+    });
+    const seeded = openOperatingLineDatabase(databasePath);
+    try {
+      seeded.appendEvent({
+        id: `blender-execution-track-execution:${request.requestId}:queued`,
+        eventType: 'blender.execution-track-execution.queued',
+        payload: {
+          status: queuedStatus,
+          documentAuthoritySha256,
+          progressChain: [],
+          revision: 1,
+        },
+        createdAt: queuedStatus.updatedAt,
+      });
+    } finally {
+      seeded.close();
+    }
+
+    let runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const hello = {
+        ...companionHello(preflightIds.instance),
+        sessionId: preflightIds.session,
+        documentIncarnationId: preflightIds.document,
+      };
+      const firstSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(hello),
+      });
+      expect(firstSessionResponse.status).toBe(200);
+      const firstSession = (await firstSessionResponse.json()) as {
+        leaseId: string;
+        expiresAt: string;
+      };
+      const firstLease = {
+        leaseId: firstSession.leaseId,
+        sessionId: preflightIds.session,
+        target: binding.target,
+        documentIncarnationId: preflightIds.document,
+        expiresAt: firstSession.expiresAt,
+      };
+      const firstHeaders = {
+        authorization: 'Bearer failure-replan-strategy-token',
+        'content-type': 'application/json',
+        'x-operatingline-companion-lease': firstSession.leaseId,
+      };
+      const reportSeedDelivery = companionExecutionTrackExecutionPollDeliverySchema.parse({
+        request: {
+          binding,
+          deliveryId: randomUUID(),
+          lease: firstLease,
+          dispatchedAt: new Date().toISOString(),
+        },
+      }).request;
+      if (reportSeedDelivery === null) throw new Error('expected report seed delivery');
+      const startReport = managedExecutionTrackStartReport(
+        reportSeedDelivery,
+        managedExecutionTrackBaseline(
+          reportSeedDelivery,
+          managedExecutionTrackTimeline(reportSeedDelivery.dispatchedAt),
+        ),
+      );
+      const startReportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: firstHeaders,
+        body: JSON.stringify(startReport),
+      });
+      expect(startReportResponse.status).toBe(200);
+      await expect(startReportResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const queued = await callMcpTool(
+        runtime,
+        20_201,
+        'operatingline.blender.execution-track.execute',
+        request,
+      );
+      expect(queued.result?.isError, queued.result?.content?.[0]?.text).not.toBe(true);
+      const pollUrl = new URL('/api/v1/companion/execution-track-execution', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', preflightIds.instance);
+      const deliveryResponse = await fetch(pollUrl, { headers: firstHeaders });
+      expect(deliveryResponse.status).toBe(200);
+      const delivery = companionExecutionTrackExecutionPollDeliverySchema.parse(
+        await deliveryResponse.json(),
+      ).request;
+      if (delivery === null) throw new Error('expected failed-managed delivery');
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+
+      const timeline = managedExecutionTrackTimeline(delivery.dispatchedAt);
+      const baseline = managedExecutionTrackBaseline(delivery, timeline);
+      const progressChain = [
+        baseline,
+        ...managedExecutionTrackProgressTail(delivery, baseline, timeline),
+      ];
+      for (const progress of progressChain) {
+        const progressResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/execution-track-execution/progress`,
+          { method: 'POST', headers: firstHeaders, body: JSON.stringify(progress) },
+        );
+        expect(progressResponse.status).toBe(200);
+        await expect(progressResponse.json()).resolves.toEqual({ result: 'accepted' });
+      }
+      const commit = progressChain.at(-1)!;
+      const managedStart = managedExecutionTrackManagedStart(delivery, commit, timeline);
+      const managedStartResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/managed-start`,
+        { method: 'POST', headers: firstHeaders, body: JSON.stringify(managedStart) },
+      );
+      expect(managedStartResponse.status).toBe(200);
+      await expect(managedStartResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const failureReport = managedExecutionTrackFailureReport(delivery, baseline, {
+        occurredAt: timeline(23),
+      });
+      const failureReportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: firstHeaders,
+        body: JSON.stringify(failureReport),
+      });
+      expect(failureReportResponse.status).toBe(200);
+      await expect(failureReportResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const failedResult = managedExecutionTrackFailureResult(
+        delivery,
+        baseline,
+        commit,
+        managedStart,
+        failureReport,
+        timeline(24),
+      );
+      const failedResultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/result`,
+        { method: 'POST', headers: firstHeaders, body: JSON.stringify(failedResult) },
+      );
+      expect(
+        failedResultResponse.status,
+        JSON.stringify(await failedResultResponse.clone().json()),
+      ).toBe(200);
+      await expect(failedResultResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const failedMarker = managedExecutionTrackFailedTerminalMarker(failedResult);
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken: 'failure-replan-strategy-token',
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+      });
+      const replacementSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(hello),
+        },
+      );
+      expect(replacementSessionResponse.status).toBe(200);
+      const replacementSession = (await replacementSessionResponse.json()) as {
+        leaseId: string;
+      };
+      const replacementHeaders = {
+        authorization: 'Bearer failure-replan-strategy-token',
+        'content-type': 'application/json',
+        'x-operatingline-companion-lease': replacementSession.leaseId,
+      };
+      const recoveryPollUrl = new URL(
+        '/api/v1/companion/execution-track-execution/recovery',
+        runtime.baseUrl,
+      );
+      recoveryPollUrl.searchParams.set('adapterId', 'blender');
+      recoveryPollUrl.searchParams.set('instanceId', preflightIds.instance);
+      const markerPollResponse = await fetch(recoveryPollUrl, { headers: replacementHeaders });
+      expect(markerPollResponse.status).toBe(200);
+      const markerRequest = companionExecutionTrackExecutionRecoveryPollDeliverySchema.parse(
+        await markerPollResponse.json(),
+      ).request;
+      if (markerRequest === null) throw new Error('expected terminal marker challenge');
+      expect(markerRequest.source).toBe('companion_reported');
+      expect(markerRequest.durableReferences.terminalMarkerContentSha256).toBeNull();
+      const markerObservedAt = new Date(Date.parse(markerRequest.requestedAt) + 1).toISOString();
+      const markerStateContent = {
+        authentication: 'replacement_lease_recovery_post',
+        replacementLeaseId: markerRequest.replacementLease.leaseId,
+        sessionId: markerRequest.replacementLease.sessionId,
+        documentIncarnationId: markerRequest.replacementLease.documentIncarnationId,
+        reportId: failedResult.managedReport.reportId,
+        sequence: failedResult.managedReport.sequence,
+        sceneFingerprintSha256: failedMarker.sceneFingerprintSha256,
+        viewLayerIdentitySha256: failedMarker.viewLayerIdentitySha256,
+        objectIdentitySha256: failedMarker.objectIdentitySha256,
+        meshIdentitySha256: failedMarker.meshIdentitySha256,
+        collectionIdentitySha256: failedMarker.collectionIdentitySha256,
+        sessionUidDomainSha256: failedMarker.sessionUidDomainSha256,
+        pointerDomainSha256: failedMarker.pointerDomainSha256,
+        linksAndSelectionSha256: failedMarker.linksAndSelectionSha256,
+        observedAt: markerObservedAt,
+      } as const;
+      const markerAck = companionExecutionTrackExecutionRecoveryAckSchema.parse({
+        formatVersion: '2.0.0',
+        request: markerRequest,
+        recoveryId: markerRequest.recoveryId,
+        requestId: markerRequest.requestId,
+        originalDeliveryId: markerRequest.originalDeliveryId,
+        bindingContentSha256: markerRequest.bindingContentSha256,
+        replacementLeaseId: markerRequest.replacementLease.leaseId,
+        acceptedProgressChainHeadContentSha256:
+          markerRequest.acceptedProgressChainHeadContentSha256,
+        durableReferences: markerRequest.durableReferences,
+        outcome: 'reconciled',
+        evidence: {
+          kind: 'persisted_managed_terminal',
+          terminalResult: failedResult,
+          terminalResultContentSha256: hash(failedResult),
+          terminalMarker: failedMarker,
+          currentState: { ...markerStateContent, contentSha256: hash(markerStateContent) },
+        },
+        retainsTargetLock: true,
+        automaticReplay: false,
+        occurredAt: new Date(Date.parse(markerRequest.requestedAt) + 2).toISOString(),
+      });
+      const markerAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: replacementHeaders,
+          body: JSON.stringify(markerAck),
+        },
+      );
+      expect(markerAckResponse.status).toBe(200);
+      await expect(markerAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+
+      const repairPollResponse = await fetch(recoveryPollUrl, { headers: replacementHeaders });
+      expect(repairPollResponse.status).toBe(200);
+      const repairRequest = companionExecutionTrackExecutionRecoveryPollDeliverySchema.parse(
+        await repairPollResponse.json(),
+      ).request;
+      if (repairRequest === null) throw new Error('expected managed repair challenge');
+      expect(repairRequest.source).toBe('failed_managed_repair');
+      expect(repairRequest.durableReferences).toMatchObject({
+        terminalResultContentSha256: hash(failedResult),
+        terminalMarkerContentSha256: failedMarker.contentSha256,
+      });
+      const repairRequestedAt = Date.parse(repairRequest.requestedAt);
+      const conflictingRecoveredReport = managedExecutionTrackRecoveredReport(
+        delivery,
+        failedResult,
+        {
+          reportId: failureReport.reportId,
+          checkpointId: randomUUID(),
+          checkpointAt: new Date(repairRequestedAt).toISOString(),
+          observationAt: new Date(repairRequestedAt + 1).toISOString(),
+          reportAt: new Date(repairRequestedAt + 2).toISOString(),
+        },
+      );
+      const conflictingRepairAck = managedExecutionTrackRepairAck(
+        repairRequest,
+        failedResult,
+        failedMarker,
+        conflictingRecoveredReport,
+        new Date(repairRequestedAt + 4).toISOString(),
+      );
+      const conflictingRepairResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: replacementHeaders,
+          body: JSON.stringify(conflictingRepairAck),
+        },
+      );
+      expect(conflictingRepairResponse.status).toBe(409);
+      await expect(conflictingRepairResponse.json()).resolves.toMatchObject({
+        error: 'execution_track_execution_repair_report_not_current',
+      });
+      const stillLocked = await callMcpTool(
+        runtime,
+        20_202,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(stillLocked.result?.structuredContent).toMatchObject({
+        status: 'failed_managed',
+        result: failedResult,
+      });
+
+      const recoveredReport = managedExecutionTrackRecoveredReport(delivery, failedResult, {
+        checkpointAt: new Date(repairRequestedAt).toISOString(),
+        observationAt: new Date(repairRequestedAt + 1).toISOString(),
+        reportAt: new Date(repairRequestedAt + 2).toISOString(),
+      });
+      const repairAck = managedExecutionTrackRepairAck(
+        repairRequest,
+        failedResult,
+        failedMarker,
+        recoveredReport,
+        new Date(repairRequestedAt + 4).toISOString(),
+      );
+      const repairAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: replacementHeaders,
+          body: JSON.stringify(repairAck),
+        },
+      );
+      expect(repairAckResponse.status, JSON.stringify(await repairAckResponse.clone().json())).toBe(
+        200,
+      );
+      await expect(repairAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const repaired = await callMcpTool(
+        runtime,
+        20_203,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(repaired.result?.structuredContent).toMatchObject({
+        status: 'failed_managed_repaired',
+        result: failedResult,
+      });
+
+      const durable = openOperatingLineDatabase(databasePath);
+      try {
+        expect(durable.getCompanionStateReport(recoveredReport.reportId)).toEqual(recoveredReport);
+        expect(
+          durable.getManagedReplayReceipt('companion_state_report', recoveredReport.reportId),
+        ).toMatchObject({
+          authentication: 'negotiated_companion_lease',
+          adapterId: binding.target.adapterId,
+          instanceId: binding.target.instanceId,
+          sessionFingerprintSha256: createHash('sha256')
+            .update(replacementSession.leaseId)
+            .digest('hex'),
+        });
+      } finally {
+        durable.close();
+      }
+      const duplicateRepairResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: replacementHeaders,
+          body: JSON.stringify(repairAck),
+        },
+      );
+      expect(duplicateRepairResponse.status).toBe(200);
+      await expect(duplicateRepairResponse.json()).resolves.toEqual({ result: 'duplicate' });
+
+      const rotatedRepairSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(hello),
+        },
+      );
+      expect(rotatedRepairSessionResponse.status).toBe(200);
+      const rotatedRepairSession = (await rotatedRepairSessionResponse.json()) as {
+        leaseId: string;
+      };
+      expect(rotatedRepairSession.leaseId).not.toBe(replacementSession.leaseId);
+      const rotatedDuplicateRepairResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+            'x-operatingline-companion-lease': rotatedRepairSession.leaseId,
+          },
+          body: JSON.stringify(repairAck),
+        },
+      );
+      expect(rotatedDuplicateRepairResponse.status).toBe(200);
+      await expect(rotatedDuplicateRepairResponse.json()).resolves.toEqual({
+        result: 'duplicate',
+      });
+
+      const differentDocumentResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ...hello, documentIncarnationId: randomUUID() }),
+      });
+      expect(differentDocumentResponse.status).toBe(200);
+      const differentDocument = (await differentDocumentResponse.json()) as { leaseId: string };
+      const wrongDocumentDuplicateResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer failure-replan-strategy-token',
+            'content-type': 'application/json',
+            'x-operatingline-companion-lease': differentDocument.leaseId,
+          },
+          body: JSON.stringify(repairAck),
+        },
+      );
+      expect(wrongDocumentDuplicateResponse.status).toBe(409);
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken: 'failure-replan-strategy-token',
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+      });
+      const replayed = await callMcpTool(
+        runtime,
+        20_204,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(replayed.result?.structuredContent).toEqual(repaired.result?.structuredContent);
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it('does not dispatch a queued binding after the target document rotates', async () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-document-drift-'));

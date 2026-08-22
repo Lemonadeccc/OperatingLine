@@ -51,6 +51,9 @@ import {
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptPacketSchema,
   type ProcedureAuthoringPromptPacket,
+  type CompanionActionExecutionDelivery,
+  type CompanionStateReport,
+  type GuideProposal,
   type CompanionShortcutProofDelivery,
 } from '@operatingline/protocol';
 
@@ -110,6 +113,7 @@ function replayNativeUndoCheckpoint(input: {
   readonly occurredAt: string;
   readonly operation?: 'next' | 'recheck';
   readonly completedStepIds?: readonly string[];
+  readonly receiptStepIds?: readonly string[];
   readonly previousCheckpointId?: string;
 }) {
   return {
@@ -134,7 +138,7 @@ function replayNativeUndoCheckpoint(input: {
       executionId: input.executionId,
       activeStepId: input.stepId,
       completedStepIds: input.completedStepIds ?? [input.stepId],
-      receiptStepIds: [input.stepId],
+      receiptStepIds: input.receiptStepIds ?? [input.stepId],
     },
   };
 }
@@ -307,6 +311,121 @@ async function callMcpTool(
   const dataLine = (await response.text()).split('\n').find((line) => line.startsWith('data: '));
   expect(dataLine).toBeDefined();
   return JSON.parse(dataLine!.slice('data: '.length)) as McpToolResponse;
+}
+
+async function startAndDispatchReplayAction(input: {
+  readonly runtime: RunningRuntime;
+  readonly leaseHeaders: Record<string, string>;
+  readonly targetInstanceId: string;
+  readonly replayId: string;
+  readonly proposal: GuideProposal;
+  readonly executionId: string;
+  readonly sequence: number;
+}) {
+  const planContentSha256 = computePlanContentSha256(input.proposal.plan);
+  const occurredAt = new Date().toISOString();
+  const startReport = {
+    protocolVersion: guideProtocolVersion,
+    reportId: randomUUID(),
+    sequence: input.sequence,
+    adapterId: 'blender',
+    instanceId: input.targetInstanceId,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.3 LTS',
+    plan: { id: input.proposal.plan.id, revision: input.proposal.plan.revision },
+    planContentSha256,
+    executionId: input.executionId,
+    phase: 'running',
+    activeStepId: null,
+    completedStepIds: [],
+    transition: 'walkthrough_started',
+    stepId: null,
+    observations: [],
+    observationGate: null,
+    artifactAttestation: null,
+    nativeUndoCheckpoint: {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_native_undo_checkpoint',
+      checkpointId: randomUUID(),
+      previousCheckpointId: null,
+      operation: 'start',
+      committedAt: occurredAt,
+      marker: { key: '_operating_line_native_history_v1', matched: true },
+      journal: {
+        entryPresent: true,
+        snapshotMatchesSession: true,
+        artifactsBackedUp: true,
+      },
+      session: {
+        plan: { id: input.proposal.plan.id, revision: input.proposal.plan.revision },
+        planContentSha256,
+        executionId: input.executionId,
+        activeStepId: null,
+        completedStepIds: [],
+        receiptStepIds: [],
+      },
+    },
+    error: null,
+    occurredAt,
+  } as const;
+  const stateResponse = await fetch(`${input.runtime.baseUrl}/api/v1/companion/state`, {
+    method: 'POST',
+    headers: input.leaseHeaders,
+    body: JSON.stringify(startReport),
+  });
+  expect(stateResponse.status, JSON.stringify(await stateResponse.clone().json())).toBe(200);
+  const actionRequest = {
+    formatVersion: '1.0.0',
+    requestId: randomUUID(),
+    replayId: input.replayId,
+    expectedState: { reportId: startReport.reportId, sequence: startReport.sequence },
+  } as const;
+  const queued = await callMcpTool(
+    input.runtime,
+    8999,
+    'operatingline.blender.action.execute',
+    actionRequest,
+  );
+  expect(queued.result?.isError, queued.result?.content?.[0]?.text).not.toBe(true);
+  const pollUrl = new URL('/api/v1/companion/action', input.runtime.baseUrl);
+  pollUrl.searchParams.set('adapterId', 'blender');
+  pollUrl.searchParams.set('instanceId', input.targetInstanceId);
+  const deliveryResponse = await fetch(pollUrl, { headers: input.leaseHeaders });
+  expect(deliveryResponse.status).toBe(200);
+  const delivery = companionActionPollDeliverySchema.parse(await deliveryResponse.json()).request;
+  if (delivery === null) throw new Error('Expected managed replay action delivery');
+  await waitUntilAfter(delivery.dispatchedAt);
+  return { actionRequest, delivery, startReport };
+}
+
+async function completeSucceededReplayAction(input: {
+  readonly runtime: RunningRuntime;
+  readonly leaseHeaders: Record<string, string>;
+  readonly delivery: CompanionActionExecutionDelivery;
+  readonly report: Pick<CompanionStateReport, 'reportId' | 'sequence' | 'occurredAt'>;
+}) {
+  const response = await fetch(`${input.runtime.baseUrl}/api/v1/companion/action-result`, {
+    method: 'POST',
+    headers: input.leaseHeaders,
+    body: JSON.stringify({
+      formatVersion: '1.0.0',
+      requestId: input.delivery.requestId,
+      replayId: input.delivery.replayId,
+      deliveryId: input.delivery.deliveryId,
+      target: input.delivery.target,
+      proposalId: input.delivery.proposalId,
+      plan: input.delivery.plan,
+      planContentSha256: input.delivery.planContentSha256,
+      executionId: input.delivery.executionId,
+      expectedState: input.delivery.expectedState,
+      stepId: input.delivery.step.id,
+      status: 'succeeded',
+      report: { reportId: input.report.reportId, sequence: input.report.sequence },
+      error: null,
+      occurredAt: input.report.occurredAt,
+    }),
+  });
+  expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
 }
 
 function procedureFixture(): Record<string, unknown> {
@@ -4931,7 +5050,7 @@ describe('procedure compilation runtime', () => {
         nativeUndoCheckpoint: {
           ...prematureStartReport.nativeUndoCheckpoint,
           checkpointId: randomUUID(),
-          previousCheckpointId: prematureStartReport.nativeUndoCheckpoint.checkpointId,
+          previousCheckpointId: null,
           committedAt: new Date(Date.parse(startedAt) - 1).toISOString(),
         },
         occurredAt: startedAt,
@@ -5988,28 +6107,367 @@ describe('procedure compilation runtime', () => {
         packet,
         tree: authoringCandidateFixture(packet),
       };
-      const multiLeafTree = replayAuthoringCandidateFixture(packet);
+      const multiLeafPromptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: '制作雪人的头部，并创建、定位、缩放和命名左眼球体。',
+          treeId: 'snowman.eye.left.multileaf.procedure',
+          revision: 1,
+          locale: 'zh-CN',
+        }),
+      });
+      expect(multiLeafPromptResponse.status).toBe(200);
+      const multiLeafPacket = procedureAuthoringPromptPacketSchema.parse(
+        await multiLeafPromptResponse.json(),
+      );
+      const multiLeafTree = replayAuthoringCandidateFixture(multiLeafPacket);
       const replayLeaf = (multiLeafTree['nodes'] as Array<Record<string, unknown>>).find(
         (node) => node['id'] === weakRequest.leafId,
       );
       if (replayLeaf === undefined) throw new Error('Expected one replay leaf');
-      const manualLeaf = structuredClone(replayLeaf);
+      const manualLeaf = JSON.parse(
+        JSON.stringify(replayLeaf)
+          .replaceAll('snowman.eye.left', 'snowman.eye.prerequisite')
+          .replaceAll('OperatingLine.EyeLeft', 'OperatingLine.EyePrerequisite'),
+      ) as Record<string, unknown>;
       manualLeaf['id'] = 'snowman.head.eyes.manual-check';
-      manualLeaf['order'] = 2;
-      manualLeaf['action'] = null;
-      manualLeaf['expectedObservations'] = [];
-      delete manualLeaf['observationPolicy'];
-      manualLeaf['rollback'] = { mode: 'checkpoint_restore', checkpointRequired: true };
-      (multiLeafTree['nodes'] as Array<Record<string, unknown>>).push(manualLeaf);
+      manualLeaf['order'] = 1;
+      replayLeaf['order'] = 2;
+      replayLeaf['dependsOn'] = [];
+      const multiLeafNodes = multiLeafTree['nodes'] as Array<Record<string, unknown>>;
+      multiLeafNodes.splice(multiLeafNodes.indexOf(replayLeaf), 0, manualLeaf);
+      const multiLeafReplayId = randomUUID();
+      const multiLeafTargetInstanceId = randomUUID();
       const multiLeafProposal = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/propose`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ ...weakRequest, replayId: randomUUID(), tree: multiLeafTree }),
+        body: JSON.stringify({
+          ...weakRequest,
+          replayId: multiLeafReplayId,
+          targetInstanceId: multiLeafTargetInstanceId,
+          packet: multiLeafPacket,
+          tree: multiLeafTree,
+        }),
       });
-      expect(multiLeafProposal.status).toBe(422);
-      await expect(multiLeafProposal.json()).resolves.toMatchObject({
-        error: 'procedure_leaf_replay_proposal_failed',
-        message: expect.stringContaining('exactly one materialized leaf'),
+      expect(multiLeafProposal.status, JSON.stringify(await multiLeafProposal.clone().json())).toBe(
+        200,
+      );
+      const multiLeafProposed = procedureLeafReplayProposalResultSchema.parse(
+        await multiLeafProposal.json(),
+      );
+      expect(multiLeafProposed).toMatchObject({
+        status: 'accepted',
+        binding: {
+          replayId: multiLeafReplayId,
+          leafId: weakRequest.leafId,
+          actionName: 'blender.mesh.create_uv_sphere',
+        },
+      });
+      expect(multiLeafProposed.binding.proposal.plan.steps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: weakRequest.leafId, action: expect.any(Object) }),
+          expect.objectContaining({ id: manualLeaf['id'], action: expect.any(Object) }),
+        ]),
+      );
+      const multiLeafProposalPlan = multiLeafProposed.binding.proposal.plan;
+      expect(
+        multiLeafProposalPlan.steps
+          .filter((candidate) => candidate.action !== null)
+          .map((candidate) => candidate.id),
+      ).toEqual([manualLeaf['id'], weakRequest.leafId]);
+      const multiLeafStep = multiLeafProposalPlan.steps.find(
+        (candidate) => candidate.id === weakRequest.leafId,
+      );
+      const multiLeafObservation = multiLeafStep?.expectedObservations[0];
+      if (
+        multiLeafStep?.action === null ||
+        multiLeafStep === undefined ||
+        multiLeafObservation === undefined
+      ) {
+        throw new Error('Expected an executable multi-leaf replay target');
+      }
+      const multiLeafSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(multiLeafTargetInstanceId)),
+      });
+      expect(multiLeafSessionResponse.status).toBe(200);
+      const multiLeafSession = (await multiLeafSessionResponse.json()) as { leaseId: string };
+      const multiLeafLeaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': multiLeafSession.leaseId,
+      };
+      const multiLeafDecision = {
+        protocolVersion: guideProtocolVersion,
+        decisionId: randomUUID(),
+        proposalId: multiLeafProposed.binding.proposal.proposalId,
+        adapterId: 'blender',
+        instanceId: multiLeafTargetInstanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const multiLeafDecisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        {
+          method: 'POST',
+          headers: multiLeafLeaseHeaders,
+          body: JSON.stringify(multiLeafDecision),
+        },
+      );
+      expect(multiLeafDecisionResponse.status).toBe(200);
+
+      const multiLeafExecutionId = randomUUID();
+      const multiLeafPlanContentSha256 = computePlanContentSha256(multiLeafProposalPlan);
+      const multiLeafStartedAt = new Date().toISOString();
+      const multiLeafStartReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: 1,
+        adapterId: 'blender',
+        instanceId: multiLeafTargetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: multiLeafProposalPlan.id, revision: multiLeafProposalPlan.revision },
+        planContentSha256: multiLeafPlanContentSha256,
+        executionId: multiLeafExecutionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: multiLeafStartedAt,
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: multiLeafProposalPlan.id, revision: multiLeafProposalPlan.revision },
+            planContentSha256: multiLeafPlanContentSha256,
+            executionId: multiLeafExecutionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        error: null,
+        occurredAt: multiLeafStartedAt,
+      } as const;
+      const multiLeafStartResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: multiLeafLeaseHeaders,
+        body: JSON.stringify(multiLeafStartReport),
+      });
+      expect(multiLeafStartResponse.status).toBe(200);
+      const prematureMultiLeafExecution = await callMcpTool(
+        runtime,
+        898,
+        'operatingline.blender.action.execute',
+        {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          replayId: multiLeafReplayId,
+          expectedState: {
+            reportId: multiLeafStartReport.reportId,
+            sequence: multiLeafStartReport.sequence,
+          },
+        },
+      );
+      expect(prematureMultiLeafExecution.result?.isError).toBe(true);
+      expect(prematureMultiLeafExecution.result?.content?.[0]?.text).toContain(
+        'exact canonical executable-prefix replay cursor',
+      );
+
+      const multiLeafPrefixOccurredAt = new Date().toISOString();
+      const multiLeafPrefixReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: 2,
+        adapterId: 'blender',
+        instanceId: multiLeafTargetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: multiLeafProposalPlan.id, revision: multiLeafProposalPlan.revision },
+        planContentSha256: multiLeafPlanContentSha256,
+        executionId: multiLeafExecutionId,
+        phase: 'running',
+        activeStepId: manualLeaf['id'],
+        completedStepIds: [manualLeaf['id']],
+        transition: 'step_succeeded',
+        stepId: manualLeaf['id'],
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+          planId: multiLeafProposalPlan.id,
+          planRevision: multiLeafProposalPlan.revision,
+          planContentSha256: multiLeafPlanContentSha256,
+          executionId: multiLeafExecutionId,
+          stepId: String(manualLeaf['id']),
+          occurredAt: multiLeafPrefixOccurredAt,
+          completedStepIds: [String(manualLeaf['id'])],
+          receiptStepIds: [String(manualLeaf['id'])],
+          previousCheckpointId: multiLeafStartReport.nativeUndoCheckpoint.checkpointId,
+        }),
+        error: null,
+        occurredAt: multiLeafPrefixOccurredAt,
+      } as const;
+      const multiLeafPrefixResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: multiLeafLeaseHeaders,
+        body: JSON.stringify(multiLeafPrefixReport),
+      });
+      expect(multiLeafPrefixResponse.status).toBe(200);
+
+      const multiLeafActionRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: multiLeafReplayId,
+        expectedState: {
+          reportId: multiLeafPrefixReport.reportId,
+          sequence: multiLeafPrefixReport.sequence,
+        },
+      } as const;
+      const multiLeafQueued = await callMcpTool(
+        runtime,
+        899,
+        'operatingline.blender.action.execute',
+        multiLeafActionRequest,
+      );
+      expect(multiLeafQueued.result?.isError, multiLeafQueued.result?.content?.[0]?.text).not.toBe(
+        true,
+      );
+      const multiLeafPollUrl = new URL('/api/v1/companion/action', runtime.baseUrl);
+      multiLeafPollUrl.searchParams.set('adapterId', 'blender');
+      multiLeafPollUrl.searchParams.set('instanceId', multiLeafTargetInstanceId);
+      const multiLeafDeliveryResponse = await fetch(multiLeafPollUrl, {
+        headers: multiLeafLeaseHeaders,
+      });
+      expect(multiLeafDeliveryResponse.status).toBe(200);
+      const multiLeafDelivery = companionActionPollDeliverySchema.parse(
+        await multiLeafDeliveryResponse.json(),
+      ).request;
+      expect(multiLeafDelivery).toMatchObject({
+        requestId: multiLeafActionRequest.requestId,
+        step: { id: weakRequest.leafId },
+      });
+      if (multiLeafDelivery === null) throw new Error('Expected multi-leaf action delivery');
+      await waitUntilAfter(multiLeafDelivery.dispatchedAt);
+      const multiLeafTerminalOccurredAt = new Date().toISOString();
+      const multiLeafTerminalReport = {
+        ...multiLeafPrefixReport,
+        reportId: randomUUID(),
+        sequence: 3,
+        phase: 'completed',
+        activeStepId: weakRequest.leafId,
+        completedStepIds: [manualLeaf['id'], weakRequest.leafId],
+        transition: 'step_succeeded',
+        stepId: weakRequest.leafId,
+        observations: [
+          {
+            kind: multiLeafObservation.kind,
+            satisfied: true,
+            details: strongPrimitiveObservationDetails({
+              parameters: multiLeafObservation.parameters,
+              topology: { vertexCount: 482, edgeCount: 992, faceCount: 512 },
+              geometryDetailKeys: ['radiusMatches'],
+            }),
+          },
+        ],
+        nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+          planId: multiLeafProposalPlan.id,
+          planRevision: multiLeafProposalPlan.revision,
+          planContentSha256: multiLeafPlanContentSha256,
+          executionId: multiLeafExecutionId,
+          stepId: weakRequest.leafId,
+          occurredAt: multiLeafTerminalOccurredAt,
+          completedStepIds: [String(manualLeaf['id']), weakRequest.leafId],
+          receiptStepIds: [String(manualLeaf['id']), weakRequest.leafId],
+          previousCheckpointId: multiLeafPrefixReport.nativeUndoCheckpoint.checkpointId,
+        }),
+        occurredAt: multiLeafTerminalOccurredAt,
+      } as const;
+      const multiLeafTerminalResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: multiLeafLeaseHeaders,
+        body: JSON.stringify(multiLeafTerminalReport),
+      });
+      expect(multiLeafTerminalResponse.status).toBe(200);
+      const multiLeafResultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/action-result`,
+        {
+          method: 'POST',
+          headers: multiLeafLeaseHeaders,
+          body: JSON.stringify({
+            formatVersion: '1.0.0',
+            requestId: multiLeafDelivery.requestId,
+            replayId: multiLeafDelivery.replayId,
+            deliveryId: multiLeafDelivery.deliveryId,
+            target: multiLeafDelivery.target,
+            proposalId: multiLeafDelivery.proposalId,
+            plan: multiLeafDelivery.plan,
+            planContentSha256: multiLeafDelivery.planContentSha256,
+            executionId: multiLeafDelivery.executionId,
+            expectedState: multiLeafDelivery.expectedState,
+            stepId: multiLeafDelivery.step.id,
+            status: 'succeeded',
+            report: {
+              reportId: multiLeafTerminalReport.reportId,
+              sequence: multiLeafTerminalReport.sequence,
+            },
+            error: null,
+            occurredAt: multiLeafTerminalReport.occurredAt,
+          }),
+        },
+      );
+      expect(
+        multiLeafResultResponse.status,
+        JSON.stringify(await multiLeafResultResponse.clone().json()),
+      ).toBe(200);
+      const multiLeafFinalizeResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: multiLeafReplayId,
+            actionExecutionRequestId: multiLeafActionRequest.requestId,
+            attestationId: randomUUID(),
+            reportId: multiLeafTerminalReport.reportId,
+          }),
+        },
+      );
+      expect(
+        multiLeafFinalizeResponse.status,
+        JSON.stringify(await multiLeafFinalizeResponse.clone().json()),
+      ).toBe(200);
+      const multiLeafFinalized = procedureLeafReplayFinalizeResultSchema.parse(
+        await multiLeafFinalizeResponse.json(),
+      );
+      expect(multiLeafFinalized).toMatchObject({
+        status: 'accepted',
+        attestation: {
+          report: {
+            completedStepIds: [manualLeaf['id'], weakRequest.leafId],
+            nativeUndoCheckpoint: {
+              session: { receiptStepIds: [manualLeaf['id'], weakRequest.leafId] },
+            },
+          },
+        },
       });
       const weakProposal = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/propose`, {
         method: 'POST',
@@ -6111,6 +6569,7 @@ describe('procedure compilation runtime', () => {
         headers,
         body: JSON.stringify({
           replayId: replayRequest.replayId,
+          actionExecutionRequestId: randomUUID(),
           attestationId: randomUUID(),
           reportId: randomUUID(),
         }),
@@ -6129,7 +6588,7 @@ describe('procedure compilation runtime', () => {
       }
       const executionId = randomUUID();
       const report = (sequence: number, hostVersion: string) => {
-        const occurredAt = new Date(Date.now() - 1_000 + sequence).toISOString();
+        const occurredAt = new Date().toISOString();
         const planContentSha256 = computePlanContentSha256(proposal.plan);
         return {
           protocolVersion: guideProtocolVersion,
@@ -6266,6 +6725,7 @@ describe('procedure compilation runtime', () => {
         headers,
         body: JSON.stringify({
           replayId: replayRequest.replayId,
+          actionExecutionRequestId: randomUUID(),
           attestationId: randomUUID(),
           reportId: legacyReport.reportId,
         }),
@@ -6279,6 +6739,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: replayRequest.replayId,
+            actionExecutionRequestId: randomUUID(),
             attestationId: randomUUID(),
             reportId: preDecisionReport.reportId,
           }),
@@ -6302,6 +6763,7 @@ describe('procedure compilation runtime', () => {
         headers,
         body: JSON.stringify({
           replayId: replayRequest.replayId,
+          actionExecutionRequestId: randomUUID(),
           attestationId: randomUUID(),
           reportId: weakReport.reportId,
         }),
@@ -6341,6 +6803,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: replayRequest.replayId,
+            actionExecutionRequestId: randomUUID(),
             attestationId: randomUUID(),
             reportId: mismatchedRetryReport.reportId,
           }),
@@ -6363,6 +6826,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: replayRequest.replayId,
+            actionExecutionRequestId: randomUUID(),
             attestationId: randomUUID(),
             reportId: missingCheckpointReport.reportId,
           }),
@@ -6370,14 +6834,93 @@ describe('procedure compilation runtime', () => {
       );
       expect(missingCheckpointFinalize.status).toBe(409);
 
-      const terminalReport = {
+      const authorizedStartOccurredAt = new Date().toISOString();
+      const authorizedStartReport = {
         ...report(7, '4.5.3 LTS'),
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: authorizedStartOccurredAt,
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+            planContentSha256: computePlanContentSha256(proposal.plan),
+            executionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        occurredAt: authorizedStartOccurredAt,
+      } as const;
+      const authorizedStartResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(authorizedStartReport),
+      });
+      expect(authorizedStartResponse.status).toBe(200);
+      const singleLeafActionRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: replayRequest.replayId,
+        expectedState: {
+          reportId: authorizedStartReport.reportId,
+          sequence: authorizedStartReport.sequence,
+        },
+      } as const;
+      const singleLeafQueued = await callMcpTool(
+        runtime,
+        9001,
+        'operatingline.blender.action.execute',
+        singleLeafActionRequest,
+      );
+      expect(
+        singleLeafQueued.result?.isError,
+        singleLeafQueued.result?.content?.[0]?.text,
+      ).not.toBe(true);
+      const singleLeafPollUrl = new URL('/api/v1/companion/action', runtime.baseUrl);
+      singleLeafPollUrl.searchParams.set('adapterId', 'blender');
+      singleLeafPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const singleLeafDeliveryResponse = await fetch(singleLeafPollUrl, { headers: leaseHeaders });
+      const singleLeafDelivery = companionActionPollDeliverySchema.parse(
+        await singleLeafDeliveryResponse.json(),
+      ).request;
+      if (singleLeafDelivery === null) throw new Error('Expected single-leaf action delivery');
+      await waitUntilAfter(singleLeafDelivery.dispatchedAt);
+
+      const terminalOccurredAt = new Date().toISOString();
+      const terminalReport = {
+        ...report(8, '4.5.3 LTS'),
         observationRetry: {
           mode: 'automatic_bounded',
           attempts: 2,
           maxAttempts: 2,
           outcome: 'succeeded_after_retry',
         },
+        nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+          planId: proposal.plan.id,
+          planRevision: proposal.plan.revision,
+          planContentSha256: computePlanContentSha256(proposal.plan),
+          executionId,
+          stepId: replayRequest.leafId,
+          occurredAt: terminalOccurredAt,
+          previousCheckpointId: authorizedStartReport.nativeUndoCheckpoint.checkpointId,
+        }),
+        occurredAt: terminalOccurredAt,
       } as const;
       const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
         method: 'POST',
@@ -6386,9 +6929,35 @@ describe('procedure compilation runtime', () => {
       });
       expect(stateResponse.status).toBe(200);
       await expect(stateResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const singleLeafResultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/action-result`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify({
+            formatVersion: '1.0.0',
+            requestId: singleLeafDelivery.requestId,
+            replayId: singleLeafDelivery.replayId,
+            deliveryId: singleLeafDelivery.deliveryId,
+            target: singleLeafDelivery.target,
+            proposalId: singleLeafDelivery.proposalId,
+            plan: singleLeafDelivery.plan,
+            planContentSha256: singleLeafDelivery.planContentSha256,
+            executionId: singleLeafDelivery.executionId,
+            expectedState: singleLeafDelivery.expectedState,
+            stepId: singleLeafDelivery.step.id,
+            status: 'succeeded',
+            report: { reportId: terminalReport.reportId, sequence: terminalReport.sequence },
+            error: null,
+            occurredAt: terminalReport.occurredAt,
+          }),
+        },
+      );
+      expect(singleLeafResultResponse.status).toBe(200);
 
       const finalizeRequest = {
         replayId: replayRequest.replayId,
+        actionExecutionRequestId: singleLeafActionRequest.requestId,
         attestationId: randomUUID(),
         reportId: terminalReport.reportId,
       };
@@ -6443,6 +7012,8 @@ describe('procedure compilation runtime', () => {
           binding: proposed.binding,
           decision: finalized.attestation.decision,
           report: finalized.attestation.report,
+          actionExecutionRequestId: singleLeafActionRequest.requestId,
+          authorizedStartReport,
           proposalReceipt: {
             ...receiptBase,
             ...finalized.attestation.provenance.proposalReceipt,
@@ -6456,6 +7027,14 @@ describe('procedure compilation runtime', () => {
             ...finalized.attestation.provenance.decisionReceipt,
             subjectType: 'guide_proposal_decision',
             subjectId: decision.decisionId,
+            authentication: 'negotiated_companion_lease',
+            sessionFingerprintSha256: finalized.attestation.provenance.sessionFingerprintSha256,
+          },
+          startReportReceipt: {
+            ...receiptBase,
+            ...finalized.attestation.provenance.startReportReceipt,
+            subjectType: 'companion_state_report',
+            subjectId: authorizedStartReport.reportId,
             authentication: 'negotiated_companion_lease',
             sessionFingerprintSha256: finalized.attestation.provenance.sessionFingerprintSha256,
           },
@@ -6558,7 +7137,7 @@ describe('procedure compilation runtime', () => {
       const currentStateReport = {
         ...terminalReport,
         reportId: randomUUID(),
-        sequence: 8,
+        sequence: 9,
         transition: 'current_state_rechecked',
         observationRetry: undefined,
         procedureReplayCurrentStateRequest: currentStateRequested.request,
@@ -6610,7 +7189,7 @@ describe('procedure compilation runtime', () => {
       const driftReport = {
         ...terminalReport,
         reportId: randomUUID(),
-        sequence: 9,
+        sequence: 10,
         transition: 'current_state_rechecked',
         observationRetry: undefined,
         observations: [
@@ -6675,6 +7254,7 @@ describe('procedure compilation runtime', () => {
         headers,
         body: JSON.stringify({
           replayId: randomUUID(),
+          actionExecutionRequestId: randomUUID(),
           attestationId: randomUUID(),
           reportId: terminalReport.reportId,
         }),
@@ -6887,6 +7467,79 @@ describe('procedure compilation runtime', () => {
       const retained = await prepareReplay('retain_for_repair');
       const retainedExecutionId = randomUUID();
       const retainedPlanSha256 = computePlanContentSha256(retained.proposal.plan);
+      const retainedStartedAt = new Date().toISOString();
+      const retainedStartReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: retained.proposal.plan.id, revision: retained.proposal.plan.revision },
+        planContentSha256: retainedPlanSha256,
+        executionId: retainedExecutionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: retainedStartedAt,
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: retained.proposal.plan.id, revision: retained.proposal.plan.revision },
+            planContentSha256: retainedPlanSha256,
+            executionId: retainedExecutionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        error: null,
+        occurredAt: retainedStartedAt,
+      } as const;
+      await postState(retainedStartReport);
+      const retainedActionRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: retained.replayRequest.replayId,
+        expectedState: {
+          reportId: retainedStartReport.reportId,
+          sequence: retainedStartReport.sequence,
+        },
+      } as const;
+      const retainedQueued = await callMcpTool(
+        runtime,
+        919,
+        'operatingline.blender.action.execute',
+        retainedActionRequest,
+      );
+      expect(retainedQueued.result?.isError, retainedQueued.result?.content?.[0]?.text).not.toBe(
+        true,
+      );
+      const retainedPollUrl = new URL('/api/v1/companion/action', runtime.baseUrl);
+      retainedPollUrl.searchParams.set('adapterId', 'blender');
+      retainedPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const retainedDeliveryResponse = await fetch(retainedPollUrl, { headers: leaseHeaders });
+      const retainedDelivery = companionActionPollDeliverySchema.parse(
+        await retainedDeliveryResponse.json(),
+      ).request;
+      if (retainedDelivery === null) throw new Error('Expected retained failure action delivery');
+      await waitUntilAfter(retainedDelivery.dispatchedAt);
       const failureOccurredAt = new Date().toISOString();
       const retainedFailureReport = {
         protocolVersion: guideProtocolVersion,
@@ -6930,11 +7583,40 @@ describe('procedure compilation runtime', () => {
           stepId: retained.replayRequest.leafId,
           occurredAt: failureOccurredAt,
           completedStepIds: [],
+          previousCheckpointId: retainedStartReport.nativeUndoCheckpoint.checkpointId,
         }),
         error: null,
         occurredAt: failureOccurredAt,
       } as const;
       await postState(retainedFailureReport);
+      const retainedResultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/action-result`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify({
+            formatVersion: '1.0.0',
+            requestId: retainedDelivery.requestId,
+            replayId: retainedDelivery.replayId,
+            deliveryId: retainedDelivery.deliveryId,
+            target: retainedDelivery.target,
+            proposalId: retainedDelivery.proposalId,
+            plan: retainedDelivery.plan,
+            planContentSha256: retainedDelivery.planContentSha256,
+            executionId: retainedDelivery.executionId,
+            expectedState: retainedDelivery.expectedState,
+            stepId: retainedDelivery.step.id,
+            status: 'failed',
+            report: {
+              reportId: retainedFailureReport.reportId,
+              sequence: retainedFailureReport.sequence,
+            },
+            error: 'The managed Observation requires retained repair.',
+            occurredAt: retainedFailureReport.occurredAt,
+          }),
+        },
+      );
+      expect(retainedResultResponse.status).toBe(200);
       const recoveryOccurredAt = new Date(Date.now() + 1).toISOString();
       const retainedRecoveryReport = {
         ...retainedFailureReport,
@@ -6957,12 +7639,14 @@ describe('procedure compilation runtime', () => {
           stepId: retained.replayRequest.leafId,
           occurredAt: recoveryOccurredAt,
           operation: 'recheck',
+          previousCheckpointId: retainedFailureReport.nativeUndoCheckpoint.checkpointId,
         }),
         occurredAt: recoveryOccurredAt,
       } as const;
       await postState(retainedRecoveryReport);
       const retainedFinalizeRequest = {
         replayId: retained.replayRequest.replayId,
+        actionExecutionRequestId: retainedActionRequest.requestId,
         attestationId: randomUUID(),
         failureReportId: retainedFailureReport.reportId,
         recoveryReportId: retainedRecoveryReport.reportId,
@@ -7008,6 +7692,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: retained.replayRequest.replayId,
+            actionExecutionRequestId: retainedActionRequest.requestId,
             attestationId: randomUUID(),
             reportId: retainedRecoveryReport.reportId,
           }),
@@ -7253,6 +7938,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: rolledBack.replayRequest.replayId,
+            actionExecutionRequestId: rolledBackActionRequest.requestId,
             attestationId: randomUUID(),
             failureReportId: rolledBackFailureReport.reportId,
           }),
@@ -7594,6 +8280,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: rolledBack.replayRequest.replayId,
+            actionExecutionRequestId: rolledBackActionRequest.requestId,
             attestationId: automaticallyRolledBack.attestation.attestationId,
             failureReportId: rolledBackFailureReport.reportId,
           }),
@@ -7648,6 +8335,74 @@ describe('procedure compilation runtime', () => {
       const retrying = await prepareReplay('rollback_step', retryPacket, 2);
       const retryExecutionId = randomUUID();
       const retryPlanSha256 = computePlanContentSha256(retrying.proposal.plan);
+      const retryStartedAt = new Date().toISOString();
+      const retryStartReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: retrying.proposal.plan.id, revision: retrying.proposal.plan.revision },
+        planContentSha256: retryPlanSha256,
+        executionId: retryExecutionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: retryStartedAt,
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: retrying.proposal.plan.id, revision: retrying.proposal.plan.revision },
+            planContentSha256: retryPlanSha256,
+            executionId: retryExecutionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        error: null,
+        occurredAt: retryStartedAt,
+      } as const;
+      await postState(retryStartReport);
+      const retryActionRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: retrying.replayRequest.replayId,
+        expectedState: { reportId: retryStartReport.reportId, sequence: retryStartReport.sequence },
+      } as const;
+      const retryQueued = await callMcpTool(
+        runtime,
+        927,
+        'operatingline.blender.action.execute',
+        retryActionRequest,
+      );
+      expect(retryQueued.result?.isError, retryQueued.result?.content?.[0]?.text).not.toBe(true);
+      const retryPollUrl = new URL('/api/v1/companion/action', runtime.baseUrl);
+      retryPollUrl.searchParams.set('adapterId', 'blender');
+      retryPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const retryDeliveryResponse = await fetch(retryPollUrl, { headers: leaseHeaders });
+      const retryDelivery = companionActionPollDeliverySchema.parse(
+        await retryDeliveryResponse.json(),
+      ).request;
+      if (retryDelivery === null) throw new Error('Expected retry action delivery');
+      await waitUntilAfter(retryDelivery.dispatchedAt);
       const retryFailureReport = {
         protocolVersion: guideProtocolVersion,
         reportId: randomUUID(),
@@ -7700,6 +8455,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: retrying.replayRequest.replayId,
+            actionExecutionRequestId: retryActionRequest.requestId,
             attestationId: randomUUID(),
             failureReportId: retryFailureReport.reportId,
           }),
@@ -7733,6 +8489,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: retrying.replayRequest.replayId,
+            actionExecutionRequestId: retryActionRequest.requestId,
             attestationId: randomUUID(),
             failureReportId: mismatchedExhaustedReport.reportId,
           }),
@@ -7759,6 +8516,28 @@ describe('procedure compilation runtime', () => {
         occurredAt: new Date().toISOString(),
       } as const;
       await postState(exhaustedReport);
+      const retryResultResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/action-result`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify({
+          formatVersion: '1.0.0',
+          requestId: retryDelivery.requestId,
+          replayId: retryDelivery.replayId,
+          deliveryId: retryDelivery.deliveryId,
+          target: retryDelivery.target,
+          proposalId: retryDelivery.proposalId,
+          plan: retryDelivery.plan,
+          planContentSha256: retryDelivery.planContentSha256,
+          executionId: retryDelivery.executionId,
+          expectedState: retryDelivery.expectedState,
+          stepId: retryDelivery.step.id,
+          status: 'failed',
+          report: { reportId: exhaustedReport.reportId, sequence: exhaustedReport.sequence },
+          error: 'Both managed attempts failed and were rolled back.',
+          occurredAt: exhaustedReport.occurredAt,
+        }),
+      });
+      expect(retryResultResponse.status).toBe(200);
       const exhaustedFinalizeResponse = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
         {
@@ -7766,6 +8545,7 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: retrying.replayRequest.replayId,
+            actionExecutionRequestId: retryActionRequest.requestId,
             attestationId: randomUUID(),
             failureReportId: exhaustedReport.reportId,
           }),
@@ -7899,10 +8679,19 @@ describe('procedure compilation runtime', () => {
       if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
         throw new Error('Expected Icosphere replay observation identities');
       }
+      const executionId = randomUUID();
+      const dispatched = await startAndDispatchReplayAction({
+        runtime,
+        leaseHeaders,
+        targetInstanceId,
+        replayId: replayRequest.replayId,
+        proposal,
+        executionId,
+        sequence: 1,
+      });
       const report = (sequence: number, vertexCount: number) => {
-        const occurredAt = new Date(Date.now() - 1_000 + sequence).toISOString();
+        const occurredAt = new Date().toISOString();
         const planContentSha256 = computePlanContentSha256(proposal.plan);
-        const executionId = randomUUID();
         return {
           protocolVersion: guideProtocolVersion,
           reportId: randomUUID(),
@@ -7965,13 +8754,14 @@ describe('procedure compilation runtime', () => {
             executionId,
             stepId: replayRequest.leafId,
             occurredAt,
+            previousCheckpointId: dispatched.startReport.nativeUndoCheckpoint.checkpointId,
           }),
           error: null,
           occurredAt,
         };
       };
 
-      const wrongTopologyReport = report(1, 42);
+      const wrongTopologyReport = report(2, 42);
       const wrongState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
         method: 'POST',
         headers: leaseHeaders,
@@ -7983,21 +8773,29 @@ describe('procedure compilation runtime', () => {
         headers,
         body: JSON.stringify({
           replayId: replayRequest.replayId,
+          actionExecutionRequestId: dispatched.actionRequest.requestId,
           attestationId: randomUUID(),
           reportId: wrongTopologyReport.reportId,
         }),
       });
       expect(wrongFinalize.status).toBe(409);
 
-      const terminalReport = report(2, 162);
+      const terminalReport = report(3, 162);
       const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
         method: 'POST',
         headers: leaseHeaders,
         body: JSON.stringify(terminalReport),
       });
       expect(stateResponse.status).toBe(200);
+      await completeSucceededReplayAction({
+        runtime,
+        leaseHeaders,
+        delivery: dispatched.delivery,
+        report: terminalReport,
+      });
       const finalizeRequest = {
         replayId: replayRequest.replayId,
+        actionExecutionRequestId: dispatched.actionRequest.requestId,
         attestationId: randomUUID(),
         reportId: terminalReport.reportId,
       };
@@ -8211,10 +9009,19 @@ describe('procedure compilation runtime', () => {
         if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
           throw new Error(`Expected ${primitive} replay observation identities`);
         }
+        const executionId = randomUUID();
+        const dispatched = await startAndDispatchReplayAction({
+          runtime,
+          leaseHeaders,
+          targetInstanceId,
+          replayId: replayRequest.replayId,
+          proposal,
+          executionId,
+          sequence: 1,
+        });
         const report = (sequence: number, vertexCount: number) => {
-          const occurredAt = new Date(Date.now() - 1_000 + sequence).toISOString();
+          const occurredAt = new Date().toISOString();
           const planContentSha256 = computePlanContentSha256(proposal.plan);
-          const executionId = randomUUID();
           return {
             protocolVersion: guideProtocolVersion,
             reportId: randomUUID(),
@@ -8277,13 +9084,14 @@ describe('procedure compilation runtime', () => {
               executionId,
               stepId: replayRequest.leafId,
               occurredAt,
+              previousCheckpointId: dispatched.startReport.nativeUndoCheckpoint.checkpointId,
             }),
             error: null,
             occurredAt,
           };
         };
 
-        const wrongTopologyReport = report(1, topology.vertexCount + 1);
+        const wrongTopologyReport = report(2, topology.vertexCount + 1);
         const wrongState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
           method: 'POST',
           headers: leaseHeaders,
@@ -8295,19 +9103,26 @@ describe('procedure compilation runtime', () => {
           headers,
           body: JSON.stringify({
             replayId: replayRequest.replayId,
+            actionExecutionRequestId: dispatched.actionRequest.requestId,
             attestationId: randomUUID(),
             reportId: wrongTopologyReport.reportId,
           }),
         });
         expect(wrongFinalize.status).toBe(409);
 
-        const terminalReport = report(2, topology.vertexCount);
+        const terminalReport = report(3, topology.vertexCount);
         const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
           method: 'POST',
           headers: leaseHeaders,
           body: JSON.stringify(terminalReport),
         });
         expect(stateResponse.status).toBe(200);
+        await completeSucceededReplayAction({
+          runtime,
+          leaseHeaders,
+          delivery: dispatched.delivery,
+          report: terminalReport,
+        });
         const finalizedResponse = await fetch(
           `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
           {
@@ -8315,6 +9130,7 @@ describe('procedure compilation runtime', () => {
             headers,
             body: JSON.stringify({
               replayId: replayRequest.replayId,
+              actionExecutionRequestId: dispatched.actionRequest.requestId,
               attestationId: randomUUID(),
               reportId: terminalReport.reportId,
             }),

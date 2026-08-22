@@ -51,6 +51,11 @@ Guide 1.6 只提供安全的、可审查的轨迹选择表达，不提供逐控�
 因此接受 Proposal 只会安装一个明确锁定的待执行计划，不会让菜单证明轨迹降级走现有 action MCP，也不会把
 审查、目录证明或 replay proof 解释为当前 Blender 状态或执行成功证明。
 
+Runtime 暴露的 `operatingline.blender.execution-track.execute` 目前也是显式 fail-closed 的能力探测，而不是上述
+逐控件执行器。Companion 只验证/证明授权 baseline，并先把协议 outbox 元数据写入 Scene；随后在 proof、目标
+action、restore 和 managed commit 之前返回 `failed_no_mutation`。因此“未尝试目标 mutation”不表示 Scene
+完全没有协议元数据写入，也不构成菜单轨迹执行证据。
+
 ## 结果
 
 - proof-backed `strategy_switch` 可以经过现有双重人工门进入可追溯 Guide revision。

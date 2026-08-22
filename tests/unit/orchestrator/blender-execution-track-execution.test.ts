@@ -387,6 +387,114 @@ describe('Blender execution-track v2 coordinator', () => {
     });
   });
 
+  it('attests a directly accepted failed terminal before issuing its repair challenge', () => {
+    const harness = dispatchedHarness();
+    const chain = progressChain(harness.sent);
+    for (const progress of chain) reportProgress(harness.coordinator, progress);
+    const submission = managedStartSubmission(harness.sent, chain);
+    reportManagedStart(harness.coordinator, submission);
+    const failedResult = {
+      requestId: harness.sent.binding.requestId,
+      deliveryId: harness.sent.deliveryId,
+      bindingContentSha256: harness.sent.binding.bindingContentSha256,
+      target,
+      currentLease: submission.currentLease,
+      status: 'failed_managed',
+      managedStart: submission.managedStart,
+      managedReport: { reportId: 'direct-failed-report', sequence: 2 },
+      managedCheckpoint: { checkpointId: 'direct-failed-checkpoint' },
+      failedObservation: { contentSha256: 'direct-failed-observation' },
+      occurredAt: '2026-08-22T10:00:10Z',
+    } as const;
+    harness.coordinator.acceptResult(failedResult as never, liveAuthority(submission.currentLease));
+
+    const restarted = createBlenderExecutionTrackExecutionCoordinator({
+      eventStore: harness.events,
+      now,
+      createId: () => 'direct-failed-marker-challenge',
+      validateManagedResult: () => undefined,
+    });
+    const markerLease = {
+      ...lease,
+      leaseId: 'direct-failed-marker-lease',
+      expiresAt: '2026-08-22T12:20:00Z',
+    } as never;
+    const markerRequest = restarted.pollRecovery('blender', target.instanceId, markerLease)!;
+    const eventsAfterMarkerChallenge = harness.events.events.length;
+    expect(restarted.pollRecovery('blender', target.instanceId, markerLease)).toEqual(
+      markerRequest,
+    );
+    expect(restarted.pollRecovery('blender', target.instanceId, markerLease)).toEqual(
+      markerRequest,
+    );
+    expect(harness.events.events).toHaveLength(eventsAfterMarkerChallenge);
+    expect(markerRequest.source).toBe('companion_reported');
+    expect(markerRequest.durableReferences).toMatchObject({
+      terminalMarkerContentSha256: null,
+    });
+    expect(markerRequest.durableReferences).not.toHaveProperty('terminalResultContentSha256');
+    const markerAck = {
+      request: markerRequest,
+      requestId: markerRequest.requestId,
+      outcome: 'reconciled',
+      evidence: {
+        kind: 'persisted_managed_terminal',
+        terminalResult: failedResult,
+        terminalResultContentSha256: 'direct-failed-result-hash',
+        terminalMarker: { contentSha256: 'direct-failed-marker-hash' },
+      },
+      retainsTargetLock: true,
+      occurredAt: markerRequest.requestedAt,
+    } as const;
+    expect(() =>
+      restarted.acceptRecoveryAck(
+        {
+          ...markerAck,
+          evidence: {
+            ...markerAck.evidence,
+            terminalResult: { ...failedResult, occurredAt: '2026-08-22T10:00:09Z' },
+          },
+        } as never,
+        recoveryLiveAuthority(markerRequest),
+      ),
+    ).toThrowError(/different result/i);
+    expect(
+      restarted.acceptRecoveryAck(markerAck as never, recoveryLiveAuthority(markerRequest)),
+    ).toBe('accepted');
+    expect(
+      restarted.acceptRecoveryAck(markerAck as never, recoveryLiveAuthority(markerRequest)),
+    ).toBe('duplicate');
+    expect(restarted.get(markerRequest.requestId)?.status).toBe('failed_managed');
+    expect(restarted.ownsTarget('blender', target.instanceId)).toBe(true);
+
+    const afterMarkerRestart = createBlenderExecutionTrackExecutionCoordinator({
+      eventStore: harness.events,
+      now,
+      createId: () => 'direct-failed-repair-challenge',
+      validateManagedResult: () => undefined,
+    });
+    const repairLease = {
+      ...lease,
+      leaseId: 'direct-failed-repair-lease',
+      expiresAt: '2026-08-22T12:30:00Z',
+    } as never;
+    const repairRequest = afterMarkerRestart.pollRecovery(
+      'blender',
+      target.instanceId,
+      repairLease,
+    )!;
+    const eventsAfterRepairChallenge = harness.events.events.length;
+    expect(afterMarkerRestart.pollRecovery('blender', target.instanceId, repairLease)).toEqual(
+      repairRequest,
+    );
+    expect(harness.events.events).toHaveLength(eventsAfterRepairChallenge);
+    expect(repairRequest.source).toBe('failed_managed_repair');
+    expect(repairRequest.durableReferences).toMatchObject({
+      terminalResultContentSha256: 'direct-failed-result-hash',
+      terminalMarkerContentSha256: 'direct-failed-marker-hash',
+    });
+  });
+
   it('uses a renewed result lease as recovery replacement authority after managed start', () => {
     const harness = dispatchedHarness();
     const chain = progressChain(harness.sent);
@@ -591,12 +699,20 @@ describe('Blender execution-track v2 coordinator', () => {
       retainsTargetLock: true,
       occurredAt: unresolved.recovery.requestedAt,
     };
+    expect(unresolved.restarted.isRecoveryAckDuplicate(unresolvedAck as never)).toBe(false);
     expect(
       unresolved.restarted.acceptRecoveryAck(
         unresolvedAck as never,
         recoveryLiveAuthority(unresolved.recovery),
       ),
     ).toBe('accepted');
+    expect(unresolved.restarted.isRecoveryAckDuplicate(unresolvedAck as never)).toBe(true);
+    expect(
+      unresolved.restarted.isRecoveryAckDuplicate({
+        ...unresolvedAck,
+        occurredAt: 'later',
+      } as never),
+    ).toBe(false);
     expect(
       unresolved.restarted.acceptRecoveryAck(
         unresolvedAck as never,
@@ -660,20 +776,184 @@ describe('Blender execution-track v2 coordinator', () => {
     const chain = progressChain(managed.sent);
     for (const progress of chain) reportProgress(managed.coordinator, progress);
     reportManagedStart(managed.coordinator, managedStartSubmission(managed.sent, chain));
+    const failedManagedResult = {
+      requestId: managed.sent.binding.requestId,
+      deliveryId: managed.sent.deliveryId,
+      bindingContentSha256: managed.sent.binding.bindingContentSha256,
+      target,
+      currentLease: chain.at(-1)!.currentLease,
+      status: 'failed_managed',
+      managedStart: managedStartSubmission(managed.sent, chain).managedStart,
+      occurredAt: '2026-08-22T10:00:10Z',
+    } as const;
+    expect(managed.coordinator.isResultDuplicate(failedManagedResult as never)).toBe(false);
     managed.coordinator.acceptResult(
-      {
-        requestId: managed.sent.binding.requestId,
-        deliveryId: managed.sent.deliveryId,
-        bindingContentSha256: managed.sent.binding.bindingContentSha256,
-        target,
-        currentLease: chain.at(-1)!.currentLease,
-        status: 'failed_managed',
-        managedStart: managedStartSubmission(managed.sent, chain).managedStart,
-        occurredAt: '2026-08-22T10:00:10Z',
-      } as never,
+      failedManagedResult as never,
       liveAuthority(chain.at(-1)!.currentLease),
     );
+    expect(managed.coordinator.isResultDuplicate(failedManagedResult as never)).toBe(true);
+    expect(
+      managed.coordinator.isResultDuplicate({
+        ...failedManagedResult,
+        occurredAt: 'later',
+      } as never),
+    ).toBe(false);
     expect(managed.coordinator.ownsTarget('blender', target.instanceId)).toBe(true);
+  });
+
+  it('reconciles a failed managed result persisted across the managed-start crash window', () => {
+    const harness = dispatchedHarness();
+    const chain = progressChain(harness.sent);
+    for (const progress of chain) reportProgress(harness.coordinator, progress);
+    const submission = managedStartSubmission(harness.sent, chain);
+    reportManagedStart(harness.coordinator, submission);
+
+    const validator = vi.fn();
+    const restarted = createBlenderExecutionTrackExecutionCoordinator({
+      eventStore: harness.events,
+      now,
+      createId: () => 'failed-managed-recovery',
+      validateManagedResult: validator,
+    });
+    const recovery = restarted.pollRecovery('blender', target.instanceId, {
+      ...lease,
+      leaseId: 'failed-managed-replacement',
+      expiresAt: '2026-08-22T12:10:00Z',
+    } as never)!;
+    const failedResult = {
+      requestId: harness.sent.binding.requestId,
+      deliveryId: harness.sent.deliveryId,
+      bindingContentSha256: harness.sent.binding.bindingContentSha256,
+      target,
+      currentLease: submission.currentLease,
+      status: 'failed_managed',
+      managedStart: submission.managedStart,
+      managedReport: { reportId: 'failed-report', sequence: 2 },
+      managedCheckpoint: { checkpointId: 'failed-checkpoint' },
+      failedObservation: { contentSha256: 'failed-observation' },
+      occurredAt: '2026-08-22T10:00:10Z',
+    } as const;
+
+    expect(
+      restarted.acceptRecoveryAck(
+        {
+          request: recovery,
+          requestId: recovery.requestId,
+          outcome: 'reconciled',
+          evidence: {
+            kind: 'persisted_managed_terminal',
+            terminalResult: failedResult,
+            terminalResultContentSha256: 'failed-result-hash',
+            terminalMarker: { contentSha256: 'failed-marker-hash' },
+          },
+          retainsTargetLock: true,
+          occurredAt: recovery.requestedAt,
+        } as never,
+        recoveryLiveAuthority(recovery),
+      ),
+    ).toBe('accepted');
+    expect(validator).toHaveBeenCalledWith(
+      failedResult,
+      expect.objectContaining({ status: 'recovery_required' }),
+    );
+    expect(restarted.get(recovery.requestId)?.status).toBe('failed_managed');
+    expect(restarted.ownsTarget('blender', target.instanceId)).toBe(true);
+
+    const replayValidator = vi.fn();
+    const replayed = createBlenderExecutionTrackExecutionCoordinator({
+      eventStore: harness.events,
+      now,
+      createId: () => 'managed-repair-recovery',
+      validateManagedResult: replayValidator,
+    });
+    expect(replayed.get(recovery.requestId)?.status).toBe('failed_managed');
+    expect(replayValidator).toHaveBeenCalledOnce();
+
+    const repair = replayed.pollRecovery('blender', target.instanceId, {
+      ...lease,
+      leaseId: 'managed-repair-replacement',
+      expiresAt: '2026-08-22T12:20:00Z',
+    } as never)!;
+    expect(repair.source).toBe('failed_managed_repair');
+    expect(repair.durableReferences).toMatchObject({
+      terminalResultContentSha256: 'failed-result-hash',
+      terminalMarkerContentSha256: 'failed-marker-hash',
+    });
+    const repairedAck = {
+      request: repair,
+      requestId: repair.requestId,
+      outcome: 'reconciled',
+      evidence: {
+        kind: 'managed_repair_terminal',
+        failedTerminalResult: failedResult,
+        failedTerminalResultContentSha256: 'failed-result-hash',
+        failedTerminalMarker: { contentSha256: 'failed-marker-hash' },
+        recoveredReport: {
+          reportId: 'repaired-report',
+          sequence: 3,
+          nativeUndoCheckpoint: {
+            checkpointId: 'repaired-checkpoint',
+            previousCheckpointId: 'failed-checkpoint',
+          },
+        },
+        recoveredReportContentSha256: 'repaired-report-hash',
+        currentState: { reportId: 'repaired-report', sequence: 3 },
+      },
+      retainsTargetLock: false,
+      occurredAt: repair.requestedAt,
+    } as const;
+    const eventsBeforeAuthorization = harness.events.events.length;
+    const authorization = replayed.authorizeRecoveryAck(
+      repairedAck as never,
+      recoveryLiveAuthority(repair),
+    );
+    expect(authorization.result).toBe('accepted');
+    expect(harness.events.events).toHaveLength(eventsBeforeAuthorization);
+    expect(replayed.get(repair.requestId)?.status).toBe('failed_managed');
+    expect(replayed.ownsTarget('blender', target.instanceId)).toBe(true);
+    expect(() =>
+      replayed.commitAuthorizedRecoveryAck(authorization, {
+        appendEvent: () => {
+          throw new Error('injected atomic persistence failure');
+        },
+      }),
+    ).toThrowError('injected atomic persistence failure');
+    expect(replayed.get(repair.requestId)?.status).toBe('failed_managed');
+    expect(replayed.ownsTarget('blender', target.instanceId)).toBe(true);
+    const retryAuthorization = replayed.authorizeRecoveryAck(
+      repairedAck as never,
+      recoveryLiveAuthority(repair),
+    );
+    expect(replayed.commitAuthorizedRecoveryAck(retryAuthorization)).toBe('accepted');
+    expect(() => replayed.commitAuthorizedRecoveryAck(authorization)).toThrowError(/stale/i);
+    expect(replayed.acceptRecoveryAck(repairedAck as never, recoveryLiveAuthority(repair))).toBe(
+      'duplicate',
+    );
+    const rotatedAuthority = {
+      ...recoveryLiveAuthority(repair),
+      lease: {
+        ...repair.replacementLease,
+        leaseId: 'rotated-repair-lease',
+        expiresAt: '2026-08-22T13:00:00Z',
+      },
+    } as never;
+    expect(replayed.acceptRecoveryAck(repairedAck as never, rotatedAuthority)).toBe('duplicate');
+    expect(() =>
+      replayed.acceptRecoveryAck(
+        { ...repairedAck, occurredAt: '2026-08-22T11:00:59Z' } as never,
+        rotatedAuthority,
+      ),
+    ).toThrowError(/live replacement authority/i);
+    expect(replayed.get(repair.requestId)?.status).toBe('failed_managed_repaired');
+    expect(replayed.ownsTarget('blender', target.instanceId)).toBe(false);
+
+    const repairedReplay = createBlenderExecutionTrackExecutionCoordinator({
+      eventStore: harness.events,
+      now,
+      validateManagedResult: () => undefined,
+    });
+    expect(repairedReplay.get(repair.requestId)?.status).toBe('failed_managed_repaired');
+    expect(repairedReplay.ownsTarget('blender', target.instanceId)).toBe(false);
   });
 
   it('issues marker-free recovery authority and preserves the persisted managed-start hash', () => {

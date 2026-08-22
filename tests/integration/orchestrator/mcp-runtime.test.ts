@@ -395,6 +395,8 @@ describe('OperatingLine runtime', () => {
                 'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
+            { name: 'operatingline.blender.execution-track.execute' },
+            { name: 'operatingline.blender.execution-track.status' },
             {
               name: 'operatingline.blender.action.execute',
               description: expect.stringContaining('Mirror Modifier'),

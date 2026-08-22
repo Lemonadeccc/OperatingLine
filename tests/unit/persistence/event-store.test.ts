@@ -24,6 +24,35 @@ function protocolJsonContentSha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
 
+function atomicRecoveryEvent(report: {
+  reportId: string;
+  adapterId: string;
+  instanceId: string;
+  sequence: number;
+}) {
+  const requestId = `request-${report.reportId}`;
+  const recoveryId = `recovery-${report.reportId}`;
+  const createdAt = '2026-08-22T12:00:00Z';
+  return {
+    id: `blender-execution-track-execution:${requestId}:recovery:${recoveryId}:ack`,
+    eventType: 'blender.execution-track-execution.reconciled',
+    payload: {
+      status: {
+        binding: {
+          requestId,
+          target: { adapterId: report.adapterId, instanceId: report.instanceId },
+        },
+        updatedAt: createdAt,
+      },
+      recoveryRequest: { recoveryId },
+      recoveryAck: {
+        evidence: { kind: 'managed_repair_terminal', recoveredReport: report },
+      },
+    },
+    createdAt,
+  } as const;
+}
+
 const procedureRefinementValidation = {
   computeCanonicalContentSha256: protocolJsonContentSha256,
   parseCreateRequest: (input: unknown) => procedureRefinementCreateRequestSchema.parse(input),
@@ -4036,5 +4065,130 @@ describe('OperatingLine persistence', () => {
       ),
     ).toThrow('CHECK constraint failed');
     database.close();
+  });
+
+  it('atomically commits a recovered Companion report, receipt, audit event, and reconciliation', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-atomic-recovery-test-'));
+    const databasePath = join(directory, 'state.db');
+    const report = {
+      reportId: randomUUID(),
+      adapterId: 'blender',
+      instanceId: randomUUID(),
+      sequence: 3,
+      phase: 'managed_recovered',
+    };
+    const event = atomicRecoveryEvent(report);
+    const provenance = { sessionFingerprintSha256: 'a'.repeat(64) };
+    try {
+      const database = openOperatingLineDatabase(databasePath);
+      const committed = database.commitCompanionStateWithExecutionEvent(report, provenance, event);
+      expect(committed).toMatchObject({ reportResult: 'accepted', event });
+      expect(database.countEvents()).toBe(2);
+      expect(database.getCompanionStateReport(report.reportId)).toEqual(report);
+      expect(
+        database.getManagedReplayReceipt('companion_state_report', report.reportId),
+      ).toMatchObject({
+        sessionFingerprintSha256: provenance.sessionFingerprintSha256,
+      });
+      database.close();
+
+      const restarted = openOperatingLineDatabase(databasePath);
+      expect(restarted.listLatestCompanionStates()).toEqual([report]);
+      expect(restarted.listExecutionEventsByTypes([event.eventType])).toEqual([
+        expect.objectContaining(event),
+      ]);
+      expect(
+        restarted.commitCompanionStateWithExecutionEvent(report, provenance, event),
+      ).toMatchObject({ reportResult: 'duplicate', event });
+      expect(restarted.countEvents()).toBe(2);
+      restarted.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('repairs only an exact same-receipt orphan and rejects receipt rebinding', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const report = {
+      reportId: randomUUID(),
+      adapterId: 'blender',
+      instanceId: randomUUID(),
+      sequence: 3,
+    };
+    const event = atomicRecoveryEvent(report);
+    const original = { sessionFingerprintSha256: 'b'.repeat(64) };
+    expect(database.recordCompanionState(report, original)).toBe('accepted');
+    expect(database.commitCompanionStateWithExecutionEvent(report, original, event)).toMatchObject({
+      reportResult: 'accepted',
+      event,
+    });
+    expect(database.countEvents()).toBe(2);
+
+    const reboundReport = { ...report, reportId: randomUUID(), sequence: 4 };
+    const reboundEvent = atomicRecoveryEvent(reboundReport);
+    expect(database.recordCompanionState(reboundReport, original)).toBe('accepted');
+    expect(
+      database.commitCompanionStateWithExecutionEvent(
+        reboundReport,
+        { sessionFingerprintSha256: 'c'.repeat(64) },
+        reboundEvent,
+      ),
+    ).toEqual({ reportResult: 'conflict', event: null });
+    expect(
+      database.getManagedReplayReceipt('companion_state_report', reboundReport.reportId),
+    ).toMatchObject({ sessionFingerprintSha256: original.sessionFingerprintSha256 });
+    expect(database.getExecutionEvent(reboundEvent.id)).toBeNull();
+
+    const staleReport = { ...report, reportId: randomUUID(), sequence: reboundReport.sequence };
+    const staleEvent = atomicRecoveryEvent(staleReport);
+    expect(
+      database.commitCompanionStateWithExecutionEvent(staleReport, original, staleEvent),
+    ).toEqual({ reportResult: 'stale', event: null });
+    expect(database.getCompanionStateReport(staleReport.reportId)).toBeNull();
+    expect(database.getExecutionEvent(staleEvent.id)).toBeNull();
+    database.close();
+  });
+
+  it('rolls back every recovered-state artifact when reconciliation insertion fails', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-atomic-recovery-rollback-'));
+    const databasePath = join(directory, 'state.db');
+    const report = {
+      reportId: randomUUID(),
+      adapterId: 'blender',
+      instanceId: randomUUID(),
+      sequence: 3,
+    };
+    const event = atomicRecoveryEvent(report);
+    try {
+      openOperatingLineDatabase(databasePath).close();
+      const injected = new DatabaseSync(databasePath);
+      injected.exec(`
+        CREATE TRIGGER fail_reconciled_event
+        BEFORE INSERT ON execution_events
+        WHEN NEW.event_type = 'blender.execution-track-execution.reconciled'
+        BEGIN
+          SELECT RAISE(FAIL, 'injected reconciliation failure');
+        END;
+      `);
+      injected.close();
+
+      const database = openOperatingLineDatabase(databasePath);
+      expect(() =>
+        database.commitCompanionStateWithExecutionEvent(
+          report,
+          { sessionFingerprintSha256: 'd'.repeat(64) },
+          event,
+        ),
+      ).toThrow('injected reconciliation failure');
+      expect(database.getCompanionStateReport(report.reportId)).toBeNull();
+      expect(
+        database.getManagedReplayReceipt('companion_state_report', report.reportId),
+      ).toBeNull();
+      expect(database.listLatestCompanionStates()).toEqual([]);
+      expect(database.countEvents()).toBe(0);
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

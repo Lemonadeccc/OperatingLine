@@ -23,6 +23,7 @@ import {
   procedureLeafReplayObservationSchema,
   procedureLeafReplayCurrentStateVerificationSchema,
   procedureLeafReplayFailureRecoveryAttestationSchema,
+  stableProcedureLeafOrder,
   type ActionCatalog,
   type CompanionStateReport,
   type CompanionProcedureReplayCurrentStateRequest,
@@ -642,6 +643,40 @@ function sameCanonicalValue(left: unknown, right: unknown): boolean {
 
 export const sameProcedureLeafReplayValue = sameCanonicalValue;
 
+export function procedureLeafReplayExecutableSteps(binding: ProcedureLeafReplayBinding) {
+  const stepById = new Map(binding.proposal.plan.steps.map((step) => [step.id, step] as const));
+  const executableSteps = stableProcedureLeafOrder(binding.materialization.tree)
+    .filter((leaf) => leaf.action !== null)
+    .map((leaf) => stepById.get(leaf.id));
+  if (
+    executableSteps.some((step) => step?.action === null || step?.action === undefined) ||
+    executableSteps.length !==
+      binding.proposal.plan.steps.filter((step) => step.action !== null).length
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Replay proposal executable steps do not match the canonical materialized leaf order',
+      409,
+    );
+  }
+  return executableSteps as Array<NonNullable<(typeof executableSteps)[number]>>;
+}
+
+function procedureLeafReplayExecutablePrefix(binding: ProcedureLeafReplayBinding): string[] {
+  const executableSteps = procedureLeafReplayExecutableSteps(binding);
+  const targetStepIndex = executableSteps.findIndex((step) => step.id === binding.leafId);
+  if (targetStepIndex < 0) {
+    throw new ProcedureLeafReplayError(
+      'Replay proposal does not contain its managed target leaf',
+      409,
+    );
+  }
+  return executableSteps.slice(0, targetStepIndex).map((step) => step.id);
+}
+
+function sameStepIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((stepId, index) => stepId === right[index]);
+}
+
 export interface PreparedProcedureLeafReplay {
   readonly actionName: ProcedureLeafReplayActionName;
   readonly recipeId: string;
@@ -662,14 +697,6 @@ export function prepareProcedureLeafReplay(
     );
   }
 
-  const leafIds = materialization.tree.nodes.flatMap((node) =>
-    node.kind === 'leaf' ? [node.id] : [],
-  );
-  if (leafIds.length !== 1 || leafIds[0] !== request.leafId) {
-    throw new ProcedureLeafReplayError(
-      'Managed leaf replay requires exactly one materialized leaf matching leafId',
-    );
-  }
   const leaf = materialization.tree.nodes.find((node) => node.id === request.leafId);
   if (leaf?.kind !== 'leaf' || leaf.action === null) {
     throw new ProcedureLeafReplayError('Replay leafId does not identify an executable leaf');
@@ -681,18 +708,14 @@ export function prepareProcedureLeafReplay(
   const actionName = parsedActionName.data;
   const actionContract = replayActionContracts[actionName];
 
-  const executablePlanSteps = materialization.compilation.plan.steps.filter(
-    (step) => step.action !== null,
-  );
-  const planStep = executablePlanSteps[0];
+  const planStep = materialization.compilation.plan.steps.find((step) => step.id === leaf.id);
   if (
-    executablePlanSteps.length !== 1 ||
-    planStep?.id !== leaf.id ||
+    planStep === undefined ||
     planStep.action?.name !== actionName ||
     !sameCanonicalValue(planStep.action.arguments, leaf.action.arguments)
   ) {
     throw new ProcedureLeafReplayError(
-      'Replay compilation must preserve the single materialized leaf action exactly',
+      'Replay compilation must preserve the selected materialized leaf action exactly',
     );
   }
 
@@ -716,8 +739,7 @@ export function prepareProcedureLeafReplay(
     );
   }
 
-  const coverage = materialization.coverage;
-  const leafCoverage = coverage[0];
+  const leafCoverage = materialization.coverage.find((entry) => entry.leafId === leaf.id);
   const expectedMenuTrackAvailability =
     leafCoverage?.menu === 'materialized'
       ? 'available'
@@ -733,8 +755,7 @@ export function prepareProcedureLeafReplay(
         ? 'unavailable'
         : null;
   if (
-    coverage.length !== 1 ||
-    leafCoverage?.leafId !== leaf.id ||
+    leafCoverage === undefined ||
     expectedMenuTrackAvailability === null ||
     !shortcutCoverageValid ||
     expectedMcpTrackAvailability === null ||
@@ -1065,14 +1086,27 @@ export function buildProcedureLeafReplayAttestation(input: {
   readonly binding: ProcedureLeafReplayBinding;
   readonly decision: GuideProposalDecision;
   readonly report: CompanionStateReport;
+  readonly actionExecutionRequestId: string;
+  readonly authorizedStartReport: CompanionStateReport;
   readonly proposalReceipt: StoredManagedReplayReceipt;
   readonly decisionReceipt: StoredManagedReplayReceipt;
+  readonly startReportReceipt: StoredManagedReplayReceipt;
   readonly reportReceipt: StoredManagedReplayReceipt;
   readonly attestationId: string;
   readonly attestedAt: string;
 }): ProcedureLeafReplayAttestation {
   const { binding, decision, report } = input;
   const proposal = binding.proposal;
+  const completedPrefix = procedureLeafReplayExecutablePrefix(binding);
+  const terminalCompletedStepIds = [...completedPrefix, binding.leafId];
+  const executableStepIds = procedureLeafReplayExecutableSteps(binding).map((step) => step.id);
+  const terminalPhase: 'running' | 'completed' = sameStepIds(
+    terminalCompletedStepIds,
+    executableStepIds,
+  )
+    ? 'completed'
+    : 'running';
+  const authorizedStartCheckpoint = input.authorizedStartReport.nativeUndoCheckpoint;
   if (
     decision.proposalId !== proposal.proposalId ||
     decision.decision !== 'accepted' ||
@@ -1084,7 +1118,7 @@ export function buildProcedureLeafReplayAttestation(input: {
       409,
     );
   }
-  const { proposalReceipt, decisionReceipt, reportReceipt } = input;
+  const { proposalReceipt, decisionReceipt, startReportReceipt, reportReceipt } = input;
   if (
     proposalReceipt.subjectType !== 'replay_proposal' ||
     proposalReceipt.subjectId !== proposal.proposalId ||
@@ -1098,6 +1132,12 @@ export function buildProcedureLeafReplayAttestation(input: {
     decisionReceipt.adapterId !== proposal.targetAdapterId ||
     decisionReceipt.instanceId !== binding.targetInstanceId ||
     decisionReceipt.sessionFingerprintSha256 === null ||
+    startReportReceipt.subjectType !== 'companion_state_report' ||
+    startReportReceipt.subjectId !== input.authorizedStartReport.reportId ||
+    startReportReceipt.authentication !== 'negotiated_companion_lease' ||
+    startReportReceipt.adapterId !== proposal.targetAdapterId ||
+    startReportReceipt.instanceId !== binding.targetInstanceId ||
+    startReportReceipt.sessionFingerprintSha256 !== decisionReceipt.sessionFingerprintSha256 ||
     reportReceipt.subjectType !== 'companion_state_report' ||
     reportReceipt.subjectId !== report.reportId ||
     reportReceipt.authentication !== 'negotiated_companion_lease' ||
@@ -1105,17 +1145,48 @@ export function buildProcedureLeafReplayAttestation(input: {
     reportReceipt.instanceId !== binding.targetInstanceId ||
     reportReceipt.sessionFingerprintSha256 !== decisionReceipt.sessionFingerprintSha256 ||
     proposalReceipt.sequence >= decisionReceipt.sequence ||
-    decisionReceipt.sequence >= reportReceipt.sequence ||
+    decisionReceipt.sequence >= startReportReceipt.sequence ||
+    startReportReceipt.sequence >= reportReceipt.sequence ||
     Date.parse(proposalReceipt.receivedAt) > Date.parse(decisionReceipt.receivedAt) ||
-    Date.parse(decisionReceipt.receivedAt) > Date.parse(reportReceipt.receivedAt)
+    Date.parse(decisionReceipt.receivedAt) > Date.parse(startReportReceipt.receivedAt) ||
+    Date.parse(startReportReceipt.receivedAt) > Date.parse(reportReceipt.receivedAt)
   ) {
     throw new ProcedureLeafReplayError(
       'Replay attestation requires one ordered authenticated Companion session receipt chain',
       409,
     );
   }
-  if (Date.parse(decision.occurredAt) > Date.parse(report.occurredAt)) {
-    throw new ProcedureLeafReplayError('Replay execution report predates proposal acceptance', 409);
+  if (
+    Date.parse(decision.occurredAt) > Date.parse(input.authorizedStartReport.occurredAt) ||
+    Date.parse(input.authorizedStartReport.occurredAt) > Date.parse(report.occurredAt)
+  ) {
+    throw new ProcedureLeafReplayError('Replay execution reports predate their authorization', 409);
+  }
+  if (
+    input.authorizedStartReport.protocolVersion !== proposal.protocolVersion ||
+    input.authorizedStartReport.adapterId !== proposal.targetAdapterId ||
+    input.authorizedStartReport.instanceId !== binding.targetInstanceId ||
+    input.authorizedStartReport.plan?.id !== proposal.plan.id ||
+    input.authorizedStartReport.plan.revision !== proposal.plan.revision ||
+    input.authorizedStartReport.planContentSha256 !== binding.planContentSha256 ||
+    input.authorizedStartReport.executionId === null ||
+    input.authorizedStartReport.phase !== 'running' ||
+    input.authorizedStartReport.transition !==
+      (completedPrefix.length === 0 ? 'walkthrough_started' : 'step_succeeded') ||
+    input.authorizedStartReport.activeStepId !== (completedPrefix.at(-1) ?? null) ||
+    input.authorizedStartReport.stepId !== (completedPrefix.at(-1) ?? null) ||
+    !sameStepIds(input.authorizedStartReport.completedStepIds, completedPrefix) ||
+    authorizedStartCheckpoint === undefined ||
+    authorizedStartCheckpoint.operation !== (completedPrefix.length === 0 ? 'start' : 'next') ||
+    (authorizedStartCheckpoint.previousCheckpointId === null) !== (completedPrefix.length === 0) ||
+    input.authorizedStartReport.observationGate !== null ||
+    input.authorizedStartReport.artifactAttestation !== null ||
+    input.authorizedStartReport.error !== null
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Replay authorization does not prove the exact canonical executable start prefix',
+      409,
+    );
   }
   if (
     report.protocolVersion !== proposal.protocolVersion ||
@@ -1125,12 +1196,12 @@ export function buildProcedureLeafReplayAttestation(input: {
     report.plan.revision !== proposal.plan.revision ||
     report.planContentSha256 !== binding.planContentSha256 ||
     report.executionId === null ||
-    report.phase !== 'completed' ||
+    report.executionId !== input.authorizedStartReport.executionId ||
+    report.phase !== terminalPhase ||
     report.transition !== 'step_succeeded' ||
     report.stepId !== binding.leafId ||
     report.activeStepId !== binding.leafId ||
-    report.completedStepIds.length !== 1 ||
-    report.completedStepIds[0] !== binding.leafId ||
+    !sameStepIds(report.completedStepIds, terminalCompletedStepIds) ||
     report.observationGate !== null ||
     report.artifactAttestation !== null ||
     report.error !== null
@@ -1161,8 +1232,10 @@ export function buildProcedureLeafReplayAttestation(input: {
   if (
     nativeUndoCheckpoint === undefined ||
     nativeUndoCheckpoint.operation !== 'next' ||
-    nativeUndoCheckpoint.session.receiptStepIds.length !== 1 ||
-    nativeUndoCheckpoint.session.receiptStepIds[0] !== binding.leafId
+    !sameStepIds(nativeUndoCheckpoint.session.receiptStepIds, [
+      ...authorizedStartCheckpoint.session.receiptStepIds,
+      binding.leafId,
+    ])
   ) {
     throw new ProcedureLeafReplayError(
       'Companion report does not prove a current native Undo checkpoint for the replay step',
@@ -1205,9 +1278,9 @@ export function buildProcedureLeafReplayAttestation(input: {
     plan: { id: proposal.plan.id, revision: proposal.plan.revision },
     planContentSha256: binding.planContentSha256,
     executionId: report.executionId,
-    phase: 'completed' as const,
+    phase: terminalPhase,
     activeStepId: binding.leafId,
-    completedStepIds: [binding.leafId],
+    completedStepIds: [...report.completedStepIds],
     transition: 'step_succeeded' as const,
     stepId: binding.leafId,
     observations: [attestedObservation],
@@ -1220,6 +1293,21 @@ export function buildProcedureLeafReplayAttestation(input: {
     replayId: binding.replayId,
     attestationId: input.attestationId,
     decision: attestedDecision,
+    authorization: {
+      actionExecutionRequestId: input.actionExecutionRequestId,
+      startState: {
+        reportId: input.authorizedStartReport.reportId,
+        sequence: input.authorizedStartReport.sequence,
+        reportContentSha256: computeProtocolCanonicalJsonSha256(input.authorizedStartReport),
+        checkpointId: authorizedStartCheckpoint.checkpointId,
+        checkpointContentSha256: computeProtocolCanonicalJsonSha256(authorizedStartCheckpoint),
+        phase: 'running',
+        activeStepId: input.authorizedStartReport.activeStepId,
+        checkpointOperation: authorizedStartCheckpoint.operation,
+        completedStepIds: [...input.authorizedStartReport.completedStepIds],
+        receiptStepIds: [...authorizedStartCheckpoint.session.receiptStepIds],
+      },
+    },
     report: attestedReport,
     evidenceClass: 'companion_reported_managed_action_leaf_replay',
     provenance: {
@@ -1232,6 +1320,10 @@ export function buildProcedureLeafReplayAttestation(input: {
       decisionReceipt: {
         sequence: decisionReceipt.sequence,
         receivedAt: decisionReceipt.receivedAt,
+      },
+      startReportReceipt: {
+        sequence: startReportReceipt.sequence,
+        receivedAt: startReportReceipt.receivedAt,
       },
       reportReceipt: {
         sequence: reportReceipt.sequence,
@@ -1288,8 +1380,11 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
   readonly decision: GuideProposalDecision;
   readonly failureReport: CompanionStateReport;
   readonly recoveryReport: CompanionStateReport | null;
+  readonly actionExecutionRequestId: string;
+  readonly authorizedStartReport: CompanionStateReport;
   readonly proposalReceipt: StoredManagedReplayReceipt;
   readonly decisionReceipt: StoredManagedReplayReceipt;
+  readonly startReportReceipt: StoredManagedReplayReceipt;
   readonly failureReportReceipt: StoredManagedReplayReceipt;
   readonly recoveryReportReceipt: StoredManagedReplayReceipt | null;
   readonly attestationId: string;
@@ -1300,12 +1395,24 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     decision,
     failureReport,
     recoveryReport,
+    authorizedStartReport,
     proposalReceipt,
     decisionReceipt,
+    startReportReceipt,
     failureReportReceipt,
     recoveryReportReceipt,
   } = input;
   const proposal = binding.proposal;
+  const completedPrefix = procedureLeafReplayExecutablePrefix(binding);
+  const terminalCompletedStepIds = [...completedPrefix, binding.leafId];
+  const executableStepIds = procedureLeafReplayExecutableSteps(binding).map((step) => step.id);
+  const terminalPhase: 'running' | 'completed' = sameStepIds(
+    terminalCompletedStepIds,
+    executableStepIds,
+  )
+    ? 'completed'
+    : 'running';
+  const authorizedStartCheckpoint = authorizedStartReport.nativeUndoCheckpoint;
   const leaf = binding.materialization.tree.nodes.find((node) => node.id === binding.leafId);
   const observationPolicy = leaf?.kind === 'leaf' ? leaf.observationPolicy : undefined;
   const failureStrategy =
@@ -1351,6 +1458,12 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     decisionReceipt.adapterId !== proposal.targetAdapterId ||
     decisionReceipt.instanceId !== binding.targetInstanceId ||
     executionFingerprint === null ||
+    startReportReceipt.subjectType !== 'companion_state_report' ||
+    startReportReceipt.subjectId !== authorizedStartReport.reportId ||
+    startReportReceipt.authentication !== 'negotiated_companion_lease' ||
+    startReportReceipt.adapterId !== proposal.targetAdapterId ||
+    startReportReceipt.instanceId !== binding.targetInstanceId ||
+    startReportReceipt.sessionFingerprintSha256 !== executionFingerprint ||
     failureReportReceipt.subjectType !== 'companion_state_report' ||
     failureReportReceipt.subjectId !== failureReport.reportId ||
     failureReportReceipt.authentication !== 'negotiated_companion_lease' ||
@@ -1358,13 +1471,41 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     failureReportReceipt.instanceId !== binding.targetInstanceId ||
     failureReportReceipt.sessionFingerprintSha256 !== executionFingerprint ||
     proposalReceipt.sequence >= decisionReceipt.sequence ||
-    decisionReceipt.sequence >= failureReportReceipt.sequence ||
+    decisionReceipt.sequence >= startReportReceipt.sequence ||
+    startReportReceipt.sequence >= failureReportReceipt.sequence ||
     Date.parse(proposalReceipt.receivedAt) > Date.parse(decisionReceipt.receivedAt) ||
-    Date.parse(decisionReceipt.receivedAt) > Date.parse(failureReportReceipt.receivedAt) ||
+    Date.parse(decisionReceipt.receivedAt) > Date.parse(startReportReceipt.receivedAt) ||
+    Date.parse(startReportReceipt.receivedAt) > Date.parse(failureReportReceipt.receivedAt) ||
     !recoveryReceiptsMatch
   ) {
     throw new ProcedureLeafReplayError(
       'Failure/recovery attestation requires an ordered authenticated receipt chain',
+      409,
+    );
+  }
+  if (
+    authorizedStartReport.protocolVersion !== proposal.protocolVersion ||
+    authorizedStartReport.adapterId !== proposal.targetAdapterId ||
+    authorizedStartReport.instanceId !== binding.targetInstanceId ||
+    authorizedStartReport.plan?.id !== proposal.plan.id ||
+    authorizedStartReport.plan.revision !== proposal.plan.revision ||
+    authorizedStartReport.planContentSha256 !== binding.planContentSha256 ||
+    authorizedStartReport.executionId === null ||
+    authorizedStartReport.phase !== 'running' ||
+    authorizedStartReport.transition !==
+      (completedPrefix.length === 0 ? 'walkthrough_started' : 'step_succeeded') ||
+    authorizedStartReport.activeStepId !== (completedPrefix.at(-1) ?? null) ||
+    authorizedStartReport.stepId !== (completedPrefix.at(-1) ?? null) ||
+    !sameStepIds(authorizedStartReport.completedStepIds, completedPrefix) ||
+    authorizedStartCheckpoint === undefined ||
+    authorizedStartCheckpoint.operation !== (completedPrefix.length === 0 ? 'start' : 'next') ||
+    (authorizedStartCheckpoint.previousCheckpointId === null) !== (completedPrefix.length === 0) ||
+    authorizedStartReport.observationGate !== null ||
+    authorizedStartReport.artifactAttestation !== null ||
+    authorizedStartReport.error !== null
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Failure/recovery authorization does not prove the exact executable start prefix',
       409,
     );
   }
@@ -1376,9 +1517,10 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     failureReport.plan.revision !== proposal.plan.revision ||
     failureReport.planContentSha256 !== binding.planContentSha256 ||
     failureReport.executionId === null ||
+    failureReport.executionId !== authorizedStartReport.executionId ||
     failureReport.transition !== 'step_observation_failed' ||
     failureReport.stepId !== binding.leafId ||
-    failureReport.completedStepIds.length !== 0 ||
+    !sameStepIds(failureReport.completedStepIds, completedPrefix) ||
     failureReport.observationGate === undefined ||
     failureReport.observationGate === null ||
     failureReport.observationGate.status === 'recovered' ||
@@ -1434,15 +1576,18 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     automaticRollback
       ? failureStrategy !== 'rollback_step' ||
         failureReport.phase !== 'running' ||
-        failureReport.activeStepId !== null ||
+        failureReport.activeStepId !== (completedPrefix.at(-1) ?? null) ||
         failureCheckpoint !== undefined ||
         recoveryReport !== null
       : failureReport.phase !== 'blocked' ||
         failureReport.activeStepId !== binding.leafId ||
         failureCheckpoint === undefined ||
         failureCheckpoint.operation !== 'next' ||
-        failureCheckpoint.session.receiptStepIds.length !== 1 ||
-        failureCheckpoint.session.receiptStepIds[0] !== binding.leafId ||
+        failureCheckpoint.previousCheckpointId !== authorizedStartCheckpoint.checkpointId ||
+        !sameStepIds(failureCheckpoint.session.receiptStepIds, [
+          ...authorizedStartCheckpoint.session.receiptStepIds,
+          binding.leafId,
+        ]) ||
         recoveryReport === null
   ) {
     throw new ProcedureLeafReplayError(
@@ -1476,10 +1621,9 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
       recoveryReport.plan.revision !== proposal.plan.revision ||
       recoveryReport.planContentSha256 !== binding.planContentSha256 ||
       recoveryReport.executionId !== failureReport.executionId ||
-      recoveryReport.phase !== 'completed' ||
+      recoveryReport.phase !== terminalPhase ||
       recoveryReport.activeStepId !== binding.leafId ||
-      recoveryReport.completedStepIds.length !== 1 ||
-      recoveryReport.completedStepIds[0] !== binding.leafId ||
+      !sameStepIds(recoveryReport.completedStepIds, terminalCompletedStepIds) ||
       recoveryReport.transition !== 'observation_recovered' ||
       recoveryReport.stepId !== binding.leafId ||
       recoveryReport.observationGate === undefined ||
@@ -1490,8 +1634,12 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
       recoveryReport.artifactAttestation !== null ||
       recoveryReport.nativeUndoCheckpoint === undefined ||
       recoveryReport.nativeUndoCheckpoint.operation !== 'recheck' ||
-      recoveryReport.nativeUndoCheckpoint.session.receiptStepIds.length !== 1 ||
-      recoveryReport.nativeUndoCheckpoint.session.receiptStepIds[0] !== binding.leafId ||
+      recoveryReport.nativeUndoCheckpoint.previousCheckpointId !==
+        failureCheckpoint?.checkpointId ||
+      !sameStepIds(recoveryReport.nativeUndoCheckpoint.session.receiptStepIds, [
+        ...authorizedStartCheckpoint.session.receiptStepIds,
+        binding.leafId,
+      ]) ||
       recoveryReport.error !== null ||
       Date.parse(recoveryReport.occurredAt) < Date.parse(failureReport.occurredAt)
     ) {
@@ -1505,7 +1653,8 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
   const finalReport = recoveryReport ?? failureReport;
   const finalReceipt = recoveryReportReceipt ?? failureReportReceipt;
   if (
-    Date.parse(decision.occurredAt) > Date.parse(failureReport.occurredAt) ||
+    Date.parse(decision.occurredAt) > Date.parse(authorizedStartReport.occurredAt) ||
+    Date.parse(authorizedStartReport.occurredAt) > Date.parse(failureReport.occurredAt) ||
     Date.parse(finalReport.occurredAt) > Date.parse(input.attestedAt) ||
     Date.parse(finalReceipt.receivedAt) > Date.parse(input.attestedAt)
   ) {
@@ -1527,7 +1676,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     planContentSha256: binding.planContentSha256,
     executionId: failureReport.executionId,
     phase: failureReport.phase as 'running' | 'blocked',
-    completedStepIds: [] as [],
+    completedStepIds: [...failureReport.completedStepIds],
     transition: 'step_observation_failed' as const,
     stepId: binding.leafId,
     observations: [
@@ -1554,9 +1703,9 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
           plan: { id: proposal.plan.id, revision: proposal.plan.revision },
           planContentSha256: binding.planContentSha256,
           executionId: failureReport.executionId,
-          phase: 'completed' as const,
+          phase: terminalPhase,
           activeStepId: binding.leafId,
-          completedStepIds: [binding.leafId] as [string],
+          completedStepIds: [...recoveryReport.completedStepIds],
           transition: 'observation_recovered' as const,
           stepId: binding.leafId,
           observations: [recoveredObservation] as [typeof recoveredObservation],
@@ -1573,6 +1722,21 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     replayId: binding.replayId,
     attestationId: input.attestationId,
     decision: attestedDecision,
+    authorization: {
+      actionExecutionRequestId: input.actionExecutionRequestId,
+      startState: {
+        reportId: authorizedStartReport.reportId,
+        sequence: authorizedStartReport.sequence,
+        reportContentSha256: computeProtocolCanonicalJsonSha256(authorizedStartReport),
+        checkpointId: authorizedStartCheckpoint.checkpointId,
+        checkpointContentSha256: computeProtocolCanonicalJsonSha256(authorizedStartCheckpoint),
+        phase: 'running',
+        activeStepId: authorizedStartReport.activeStepId,
+        checkpointOperation: authorizedStartCheckpoint.operation,
+        completedStepIds: [...authorizedStartReport.completedStepIds],
+        receiptStepIds: [...authorizedStartCheckpoint.session.receiptStepIds],
+      },
+    },
     failureReport: attestedFailureReport,
     recoveryReport: attestedRecoveryReport,
     evidenceClass: 'companion_reported_managed_action_failure_recovery',
@@ -1588,6 +1752,10 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
       decisionReceipt: {
         sequence: decisionReceipt.sequence,
         receivedAt: decisionReceipt.receivedAt,
+      },
+      startReportReceipt: {
+        sequence: startReportReceipt.sequence,
+        receivedAt: startReportReceipt.receivedAt,
       },
       failureReportReceipt: {
         sequence: failureReportReceipt.sequence,
@@ -1663,6 +1831,8 @@ export function buildProcedureLeafReplayCurrentStateRequest(input: {
   const observation = directSuccess
     ? attestation.successGate.observations[0]
     : attestation.recoveryReport?.observations[0];
+  const terminalReport = directSuccess ? attestation.report : attestation.recoveryReport;
+  const terminalCheckpoint = terminalReport?.nativeUndoCheckpoint;
   const checkpointBacked = directSuccess
     ? attestation.verificationScope.nativeUndoCheckpoint === 'companion_reported_current_at_report'
     : attestation.outcome === 'recovered_after_repair' &&
@@ -1672,7 +1842,10 @@ export function buildProcedureLeafReplayCurrentStateRequest(input: {
   if (
     !checkpointBacked ||
     attestation.verificationScope.currentHostStateAfterReport !== 'not_verified' ||
-    observation === undefined
+    observation === undefined ||
+    terminalReport === null ||
+    terminalCheckpoint === undefined ||
+    (terminalCheckpoint.operation !== 'next' && terminalCheckpoint.operation !== 'recheck')
   ) {
     throw new ProcedureLeafReplayError(
       'Current-state verification requires a checkpoint-backed replay attestation',
@@ -1696,6 +1869,14 @@ export function buildProcedureLeafReplayCurrentStateRequest(input: {
     planContentSha256: attestation.execution.plan.contentSha256,
     executionId: attestation.execution.execution.id,
     stepId: attestation.execution.step.id,
+    expectedPhase: terminalReport.phase,
+    expectedCompletedStepIds: [...terminalReport.completedStepIds],
+    expectedReceiptStepIds: [...terminalCheckpoint.session.receiptStepIds],
+    expectedCheckpoint: {
+      checkpointId: terminalCheckpoint.checkpointId,
+      operation: terminalCheckpoint.operation,
+      contentSha256: computeProtocolCanonicalJsonSha256(terminalCheckpoint),
+    },
     expectedObservation: {
       kind: observation.kind,
       contentSha256: computeProcedureLeafReplayObservationContentSha256(observation),
@@ -1756,11 +1937,10 @@ export function buildProcedureLeafReplayCurrentStateVerification(input: {
     report.planContentSha256 === request.planContentSha256 &&
     report.executionId === request.executionId;
   const stepMatches =
-    report.phase === 'completed' &&
+    report.phase === request.expectedPhase &&
     report.activeStepId === request.stepId &&
     report.stepId === request.stepId &&
-    report.completedStepIds.length === 1 &&
-    report.completedStepIds[0] === request.stepId &&
+    sameStepIds(report.completedStepIds, request.expectedCompletedStepIds) &&
     report.observationGate === null &&
     report.artifactAttestation === null &&
     report.error === null;
@@ -1774,15 +1954,16 @@ export function buildProcedureLeafReplayCurrentStateVerification(input: {
   const checkpoint = report.nativeUndoCheckpoint;
   const checkpointMatches =
     checkpoint !== undefined &&
+    checkpoint.checkpointId === request.expectedCheckpoint.checkpointId &&
+    checkpoint.operation === request.expectedCheckpoint.operation &&
+    computeProtocolCanonicalJsonSha256(checkpoint) === request.expectedCheckpoint.contentSha256 &&
     checkpoint.session.plan.id === request.plan.id &&
     checkpoint.session.plan.revision === request.plan.revision &&
     checkpoint.session.planContentSha256 === request.planContentSha256 &&
     checkpoint.session.executionId === request.executionId &&
     checkpoint.session.activeStepId === request.stepId &&
-    checkpoint.session.completedStepIds.length === 1 &&
-    checkpoint.session.completedStepIds[0] === request.stepId &&
-    checkpoint.session.receiptStepIds.length === 1 &&
-    checkpoint.session.receiptStepIds[0] === request.stepId;
+    sameStepIds(checkpoint.session.completedStepIds, request.expectedCompletedStepIds) &&
+    sameStepIds(checkpoint.session.receiptStepIds, request.expectedReceiptStepIds);
   const reason = !sessionMatches
     ? 'session_identity_mismatch'
     : !stepMatches
