@@ -1005,6 +1005,15 @@ adapter、Plan 与可选 instance 路由到同一证据包。详细决策见
 ## Human Eval 证据边界
 
 Human Eval 是原始 Eval export 之上的独立、离线数据集层，不是 Orchestrator 的实时评分服务。
+当 composition root 显式提供 `humanEvalReleaseAuthority.trustSource` 时，
+Bearer-authenticated `POST /api/v1/eval/releases` 会对完整 release candidate 与
+`DatasetReleaseAuthorization` 做 live 签名、角色、时效、撤销、目标和 release binding 校验，并将最终
+manifest、validation receipt、authorization consumption 与 release completion 在同一 SQLite 事务中
+登记。相同 operation 的精确重试返回已登记 manifest；授权或 release scope 的复用冲突会被拒绝。
+这个 endpoint 只是本地 durable release registry，不执行网络上传、公开分发或收件人交付，也不授权
+训练；manifest 保持 `trainingUse: not_authorized`，训练导出必须经过独立的
+`TrainingUseAuthorization`。
+
 `HumanEvalSuite` 固定 rubric、案例、精确 ActionCatalog 内容哈希、需求、reference artifact、采集状态和
 数据政策；
 `ProviderEvalRun` 捕获初始规划或局部重规划的精确公开 request/packet/result、Provider treatment、宿主

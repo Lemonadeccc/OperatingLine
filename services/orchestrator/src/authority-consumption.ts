@@ -682,6 +682,7 @@ export class AuthorityConsumptionCoordinator {
       blender_decision_consumed: 'blender_execution_completed',
       blender_history_transition_consumed: 'blender_history_transition_completed',
       training_decision_consumed: 'training_run_completed',
+      dataset_release_authorization_consumed: 'dataset_release_completed',
     } as const;
     const eventInput: Omit<DecisionCompletionEvent, 'sequence'> = {
       formatVersion: '1.0.0',
@@ -929,6 +930,8 @@ function completionKindMatches(
     (consumption === 'blender_decision_consumed' && completion === 'blender_execution_completed') ||
     (consumption === 'blender_history_transition_consumed' &&
       completion === 'blender_history_transition_completed') ||
-    (consumption === 'training_decision_consumed' && completion === 'training_run_completed')
+    (consumption === 'training_decision_consumed' && completion === 'training_run_completed') ||
+    (consumption === 'dataset_release_authorization_consumed' &&
+      completion === 'dataset_release_completed')
   );
 }

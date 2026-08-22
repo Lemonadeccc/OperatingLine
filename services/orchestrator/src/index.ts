@@ -17,6 +17,10 @@ import {
 } from '@operatingline/persistence';
 import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
 import {
+  HumanEvalDatasetError,
+  validateHumanEvalReleaseCandidateManifest,
+} from '@operatingline/eval-kit';
+import {
   actionCatalogRequestSchema,
   adapterStatusSchema,
   companionActionExecutionCreateRequestSchema,
@@ -79,6 +83,7 @@ import {
   companionSessionHelloRequestSchema,
   companionStateReportSchema,
   evalExportRequestSchema,
+  humanEvalReleaseRequestSchema,
   guideGoalPromptRequestSchema,
   guideGoalRequestAcknowledgementSchema,
   guideGoalRequestListSchema,
@@ -268,7 +273,11 @@ import {
   type CompanionReplanRunProviderAuthority,
 } from './companion-replan-run.js';
 import { AuthorityConsumptionCoordinator } from './authority-consumption.js';
-import { AuthorityVerifier, type AuthorityTrustSource } from './authority-verifier.js';
+import {
+  AuthorityVerificationError,
+  AuthorityVerifier,
+  type AuthorityTrustSource,
+} from './authority-verifier.js';
 import {
   CompanionLeaseError,
   createCompanionLeaseManager,
@@ -282,6 +291,7 @@ import {
   readExecutionEventLedger,
 } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
+import { HumanEvalReleaseCoordinator, HumanEvalReleaseError } from './human-eval-release.js';
 import { createGuideRevisionRequestService } from './guide-revision-requests.js';
 import { localReplanCoverageStepIds } from './local-replan-scope.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
@@ -470,6 +480,9 @@ export interface StartRuntimeOptions {
   companionReplanProviderAuthority?: {
     readonly trustSource: AuthorityTrustSource;
     readonly resolveEstimatedCost?: CompanionReplanRunProviderAuthority['resolveEstimatedCost'];
+  };
+  humanEvalReleaseAuthority?: {
+    readonly trustSource: AuthorityTrustSource;
   };
   youtubeCaptionSource?: ProcedureTutorialYoutubeCaptionSource;
   tutorialMediaRuntime?: ProcedureTutorialMediaRuntime;
@@ -815,6 +828,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let procedureTutorialMediaCoordinator: ProcedureTutorialMediaCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
   let companionReplanAuthorityStore: SqliteAuthorityConsumptionStore | undefined;
+  let humanEvalReleaseCoordinator: HumanEvalReleaseCoordinator | undefined;
+  let humanEvalReleaseAuthorityStore: SqliteAuthorityConsumptionStore | undefined;
   const cleanupSteps: CleanupStep[] = [
     () => companionReplanRunCoordinator?.beginClose(),
     () => {
@@ -845,6 +860,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     () => procedureRefinementCoordinator?.close(),
     () => plannerProviderRegistry.close(),
     () => app?.close(),
+    () => humanEvalReleaseAuthorityStore?.close(),
     () => mcpHandler?.close(),
     () => database.close(),
   ];
@@ -5372,6 +5388,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               resolveEstimatedCost: options.companionReplanProviderAuthority.resolveEstimatedCost,
             }),
       });
+    }
+    if (options.humanEvalReleaseAuthority !== undefined) {
+      humanEvalReleaseAuthorityStore = new SqliteAuthorityConsumptionStore(options.databasePath);
+      humanEvalReleaseCoordinator = new HumanEvalReleaseCoordinator(
+        humanEvalReleaseAuthorityStore,
+        new AuthorityVerifier(options.humanEvalReleaseAuthority.trustSource),
+      );
     }
     const runtimeMcpHandler = createMcpHandler(() => {
       const server = new McpServer(
@@ -10098,6 +10121,57 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           error: 'eval_export_unavailable',
           message: error instanceof Error ? error.message : 'Unknown eval export error',
         });
+      }
+    });
+    runtimeApp.post('/api/v1/eval/releases', async (request, reply) => {
+      if (humanEvalReleaseCoordinator === undefined) {
+        return reply.code(503).send({
+          error: 'human_eval_release_authority_unavailable',
+          message: 'Human Eval release requires a configured dataset release authority registry',
+        });
+      }
+      const parsedRequest = humanEvalReleaseRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_human_eval_release_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        validateHumanEvalReleaseCandidateManifest(parsedRequest.data.releaseCandidate);
+        return humanEvalReleaseCoordinator.finalize(parsedRequest.data);
+      } catch (error) {
+        if (error instanceof HumanEvalDatasetError) {
+          return reply.code(400).send({
+            error: 'invalid_human_eval_release_candidate',
+            message: error.message,
+            issues: error.issues,
+          });
+        }
+        if (error instanceof HumanEvalReleaseError) {
+          const conflict =
+            error.code === 'operation_conflict' ||
+            error.code === 'authority_conflict' ||
+            error.code === 'semantic_release_conflict' ||
+            error.code === 'manifest_conflict';
+          return reply.code(conflict ? 409 : 500).send({
+            error: conflict ? 'human_eval_release_conflict' : 'human_eval_release_internal_error',
+            code: error.code,
+            message: error.message,
+          });
+        }
+        if (error instanceof AuthorityVerificationError) {
+          const internal =
+            error.code === 'invalid_clock' || error.code === 'invalid_revocation_log';
+          return reply.code(internal ? 500 : 409).send({
+            error: internal
+              ? 'human_eval_release_authority_internal_error'
+              : 'human_eval_release_authority_rejected',
+            code: error.code,
+            message: error.message,
+          });
+        }
+        throw error;
       }
     });
     runtimeApp.get('/api/v1/replan/thread', async (request, reply) => {

@@ -230,6 +230,11 @@
         `released` 的完整目录，绑定全部 Run、annotation 历史、adjudication、blind sign-off、artifact 与
         runtime attestation 摘要，不含运行时时间或路径。candidate 只作为后续
         `DatasetReleaseAuthorization` 的精确目标，不执行发布，也不改变 `trainingUse: not_authorized`。
+  - [x] 授权 Human Eval 最终发布登记：Bearer-authenticated Orchestrator 对 candidate 与
+        `DatasetReleaseAuthorization` 做 live 签名、角色、时效、撤销和完整 binding 校验，再把授权消费、
+        自包含 released manifest 与完成事件原子写入 SQLite；精确重试返回首次 manifest，scope/credential
+        复用冲突 fail closed。该登记不上传或分发数据，训练仍需绑定最终 manifest hash 的独立授权。见
+        [ADR 0105](adr/0105-atomic-authorized-human-eval-release.md)。
 - [x] 本地 Human Eval 采集与 provider-blind 评审面：实现冻结 snapshot、`provider_only` /
       `host_execution_with_manual_artifacts` capture、每 Run 必需的独立 preparer sign-off sidecar，以及只监听回环地址的
       headless review service。普通浏览器只接收 opaque Run ID 和签署后的盲审投影，不接收 Provider
@@ -708,6 +713,8 @@
         artifact 输入。两种路径都要求显式 case/request/run，且不读取 Provider credential。
   - [x] 实现只读、确定性的 `eval:release-check`：只对已通过 released readiness 与 artifact 字节验证的
         数据集生成发布候选 identity；不消费发布/训练授权，不上传数据，也不把测试 fixture 声称为真实采集。
+  - [x] 实现授权发布 registry：服务端实时验证 `DatasetReleaseAuthorization`，原子登记最终 manifest 与
+        consumption/completion evidence；它不替代真实数据采集、人工审核、远端分发或训练授权。
   - [ ] 按明确的数据披露与可能费用确认，为 7 个案例采集真实 Provider Run；当前 `runCount` 为 0。
   - [ ] 为每个 Run 取得至少两名校准 reviewer 的 provider-blind annotation，保留并按需 adjudicate
         分歧；当前 `blindSignoffCount`、`annotationCount` 与 `adjudicationCount` 均为 0。

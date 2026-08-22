@@ -930,6 +930,13 @@ pnpm package:claude-desktop
    `afterSequence`；这样翻页期间追加的事件不会进入同一快照。导出未自动脱敏，分享或用于训练前必须
    检查目标文本、修订消息、动作参数、观察和错误详情。
 
+   配置 `humanEvalReleaseAuthority.trustSource` 后，operator 可向 Bearer-authenticated
+   `POST /api/v1/eval/releases` 提交严格的 release candidate 与匹配的
+   `DatasetReleaseAuthorization`。成功只表示授权记录、live validation receipt、最终 manifest 和消费/
+   完成事件已经在本地 durable registry 原子登记；它不会上传数据、公开发布或向收件人分发。
+   最终 manifest 的 `trainingUse` 仍固定为 `not_authorized`，任何训练导出仍须另行取得绑定该最终
+   manifest hash 的 `TrainingUseAuthorization`。
+
 初始 Goal-to-Guidance 的权限边界：
 
 | 操作                                | 调用 provider/可能计费 | 创建 Proposal | 安装或执行计划 |

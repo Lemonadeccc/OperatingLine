@@ -257,6 +257,9 @@ importers:
       '@operatingline/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@operatingline/eval-kit':
+        specifier: workspace:*
+        version: link:../../packages/eval-kit
       '@operatingline/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
