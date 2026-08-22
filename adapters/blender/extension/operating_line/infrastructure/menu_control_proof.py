@@ -239,6 +239,7 @@ class UVSphereMenuControlProof:
         self,
         *,
         preflight_hook: Callable[[], bool],
+        pre_mutation_hook: Callable[[], bool],
         on_complete: Callable[[dict[str, object]], None],
         on_failure: Callable[[dict[str, object]], None],
         continuation_guard: Callable[[], bool] | None = None,
@@ -252,6 +253,7 @@ class UVSphereMenuControlProof:
             callable(item)
             for item in (
                 preflight_hook,
+                pre_mutation_hook,
                 on_complete,
                 on_failure,
                 continuation_guard,
@@ -270,8 +272,13 @@ class UVSphereMenuControlProof:
         except Exception as error:
             self._fail(error)
             return
-        bpy.app.timers.register(self._timer_callback, first_interval=1.0)
-        self._timer_registered = True
+        try:
+            bpy.app.timers.register(self._timer_callback, first_interval=1.0)
+            self._timer_registered = True
+            pre_mutation_hook()
+        except Exception as error:
+            self._unregister_timer()
+            self._fail(error)
 
     def cancel(self, reason: str = "Menu-control proof driver cancelled") -> bool:
         if self._terminal:

@@ -320,11 +320,12 @@ class ShortcutProofContractTests(unittest.TestCase):
 
         driver.start(
             preflight_hook=lambda: calls.append("authorization") or True,
+            pre_mutation_hook=lambda: calls.append("supersede") or True,
             on_complete=completed.append,
             on_failure=failed.append,
         )
 
-        self.assertEqual(calls, ["authorization", "blender", "steps"])
+        self.assertEqual(calls, ["authorization", "blender", "steps", "supersede"])
         self.assertEqual(completed, [])
         self.assertEqual(failed, [])
         self.assertEqual(len(fake_bpy.app.timers.callbacks), 1)
@@ -348,6 +349,7 @@ class ShortcutProofContractTests(unittest.TestCase):
 
         driver.start(
             preflight_hook=lambda: False,
+            pre_mutation_hook=lambda: self.fail("pre-mutation hook must not run"),
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )
@@ -367,6 +369,78 @@ class ShortcutProofContractTests(unittest.TestCase):
         self.assertIs(failures[0]["operationReceiptChainVerified"], False)
         self.assertEqual(fake_bpy.app.timers.callbacks, [])
 
+    def test_keymap_or_timer_preflight_failure_never_supersedes_marker(self) -> None:
+        for failure in ("keymap", "timer"):
+            with self.subTest(failure=failure):
+                calls = []
+                failures = []
+                fake_bpy.app.timers.callbacks.clear()
+                proof_driver = driver(1)
+                proof_driver._run_blender_preflight = (
+                    (lambda: (_ for _ in ()).throw(RuntimeError("keymap preflight failed")))
+                    if failure == "keymap"
+                    else lambda: calls.append("blender")
+                )
+                proof_driver._build_fixed_steps = lambda: calls.append("steps")
+                original_register = fake_bpy.app.timers.register
+                if failure == "timer":
+                    fake_bpy.app.timers.register = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        RuntimeError("timer registration failed")
+                    )
+                try:
+                    proof_driver.start(
+                        preflight_hook=lambda: calls.append("authority") or True,
+                        pre_mutation_hook=lambda: calls.append("supersede") or True,
+                        on_complete=lambda _payload: self.fail("unexpected completion"),
+                        on_failure=failures.append,
+                    )
+                finally:
+                    fake_bpy.app.timers.register = original_register
+                self.assertNotIn("supersede", calls)
+                self.assertEqual(fake_bpy.app.timers.callbacks, [])
+                self.assertFalse(failures[0]["mutationStarted"])
+
+    def test_pre_mutation_hook_exception_unregisters_timer_without_mutation(self) -> None:
+        failures = []
+        fake_bpy.app.timers.callbacks.clear()
+        proof_driver = driver(1)
+        proof_driver._run_blender_preflight = lambda: None
+        proof_driver._build_fixed_steps = lambda: proof_driver._steps.append(
+            module._Step("would mutate", 0.1, lambda: self.fail("input emitted"))
+        )
+
+        proof_driver.start(
+            preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: (_ for _ in ()).throw(
+                RuntimeError("supersession failed")
+            ),
+            on_complete=lambda _payload: self.fail("unexpected completion"),
+            on_failure=failures.append,
+        )
+
+        self.assertEqual(fake_bpy.app.timers.callbacks, [])
+        self.assertFalse(failures[0]["mutationStarted"])
+
+    def test_pre_mutation_hook_false_means_no_history_and_allows_execution(self) -> None:
+        failures = []
+        fake_bpy.app.timers.callbacks.clear()
+        proof_driver = driver(1)
+        proof_driver._run_blender_preflight = lambda: None
+        proof_driver._build_fixed_steps = lambda: None
+
+        proof_driver.start(
+            preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: False,
+            on_complete=lambda _payload: None,
+            on_failure=failures.append,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(len(fake_bpy.app.timers.callbacks), 1)
+        self.assertEqual(
+            fake_bpy.app.timers.callbacks[0][0], proof_driver._timer_callback
+        )
+
     def test_cancel_before_first_step_unregisters_timer_and_emits_no_input(self) -> None:
         failures = []
         simulated_events = []
@@ -378,6 +452,7 @@ class ShortcutProofContractTests(unittest.TestCase):
         )
         proof_driver.start(
             preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: True,
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )
@@ -427,6 +502,7 @@ class ShortcutProofContractTests(unittest.TestCase):
         proof_driver._build_fixed_steps = build_steps
         proof_driver.start(
             preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: True,
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )
@@ -460,6 +536,7 @@ class ShortcutProofContractTests(unittest.TestCase):
         )
         proof_driver.start(
             preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: True,
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )
@@ -508,6 +585,7 @@ class ShortcutProofContractTests(unittest.TestCase):
         proof_driver._build_fixed_steps = build_steps
         proof_driver.start(
             preflight_hook=lambda: authorized,
+            pre_mutation_hook=lambda: True,
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )
@@ -554,6 +632,7 @@ class ShortcutProofContractTests(unittest.TestCase):
         )
         proof_driver.start(
             preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: True,
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )
@@ -595,6 +674,7 @@ class ShortcutProofContractTests(unittest.TestCase):
         )
         proof_driver.start(
             preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: True,
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )

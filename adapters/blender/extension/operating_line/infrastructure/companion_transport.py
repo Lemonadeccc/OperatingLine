@@ -15,6 +15,7 @@ import struct
 import threading
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPConnection, HTTPException, HTTPResponse
@@ -214,6 +215,7 @@ class CompanionTransport:
         self.shortcut_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
         self.menu_control_proof_progress: Queue[dict[str, Any]] = Queue()
         self.menu_control_proof_results: Queue[dict[str, Any]] = Queue()
+        self.menu_control_proof_history_transitions: Queue[dict[str, Any]] = Queue()
         self.menu_control_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
@@ -230,6 +232,11 @@ class CompanionTransport:
         self._seen_menu_control_proof_recovery_ids: set[str] = set()
         self._menu_control_proof_reconciliations: dict[str, dict[str, Any]] = {}
         self._menu_control_proof_inflight_request_id: str | None = None
+        self._menu_control_recovery_discovery_lease_id: str | None = None
+        self._menu_control_recovery_barrier_lease_id: str | None = None
+        self._menu_control_history_transition_hashes: set[str] = set()
+        self._menu_control_history_reconciled_hashes: set[str] = set()
+        self._menu_control_history_transition_hashes_lock = threading.Lock()
         known_plan_fields = (
             known_plan_id,
             known_revision,
@@ -278,6 +285,19 @@ class CompanionTransport:
     @property
     def session_snapshot(self) -> CompanionSessionSnapshot | None:
         return self._session_snapshot
+
+    @property
+    def current_document_lease(self) -> dict[str, Any] | None:
+        session = self._session_snapshot
+        if session is None:
+            return None
+        return {
+            "leaseId": session.lease_id,
+            "sessionId": session.session_id,
+            "target": {"adapterId": "blender", "instanceId": self._instance_id},
+            "documentIncarnationId": session.document_incarnation_id,
+            "expiresAt": session.expires_at,
+        }
 
     def start(self) -> None:
         if self.running:
@@ -340,6 +360,60 @@ class CompanionTransport:
         """Queue one strictly validated terminal fixed-executor result."""
         validated = self._validate_menu_control_proof_result(result)
         self.menu_control_proof_results.put(dict(validated))
+
+    def submit_menu_control_history_transition(self, report: dict[str, Any]) -> None:
+        """Queue one durable native-history transition on its independent FIFO."""
+        validated = self._validate_menu_control_history_transition_report(report)
+        transition_hash = validated["transitionContentSha256"]
+        with self._menu_control_history_transition_hashes_lock:
+            if (
+                transition_hash in self._menu_control_history_transition_hashes
+                or transition_hash in self._menu_control_history_reconciled_hashes
+            ):
+                return
+            self._menu_control_history_transition_hashes.add(transition_hash)
+        self.menu_control_proof_history_transitions.put(dict(validated))
+
+    def _release_menu_control_history_transition(
+        self, report: dict[str, Any]
+    ) -> None:
+        transition_hash = report.get("transitionContentSha256")
+        if not isinstance(transition_hash, str):
+            return
+        with self._menu_control_history_transition_hashes_lock:
+            self._menu_control_history_transition_hashes.discard(transition_hash)
+
+    def _acknowledge_reconciled_menu_control_history_transitions(
+        self, transition_hashes: list[str]
+    ) -> None:
+        with self._menu_control_history_transition_hashes_lock:
+            self._menu_control_history_reconciled_hashes.update(transition_hashes)
+            self._menu_control_history_transition_hashes.difference_update(
+                transition_hashes
+            )
+
+    def _menu_control_history_transition_was_reconciled(
+        self, report: dict[str, Any]
+    ) -> bool:
+        transition_hash = report.get("transitionContentSha256")
+        if not isinstance(transition_hash, str):
+            return False
+        with self._menu_control_history_transition_hashes_lock:
+            return transition_hash in self._menu_control_history_reconciled_hashes
+
+    @staticmethod
+    def _runtime_error_code(payload: Any) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        code = payload.get("code")
+        if isinstance(code, str):
+            return code
+        error = payload.get("error")
+        if isinstance(error, str):
+            return error
+        if isinstance(error, dict) and isinstance(error.get("code"), str):
+            return error["code"]
+        return None
 
     def submit_menu_control_proof_recovery_ack(self, ack: dict[str, Any]) -> None:
         """Queue proof that a persisted terminal marker matches a recovery challenge."""
@@ -550,6 +624,7 @@ class CompanionTransport:
             or path.startswith("/api/v1/companion/menu-control-proof?")
             or path == "/api/v1/companion/menu-control-proof-progress"
             or path == "/api/v1/companion/menu-control-proof-result"
+            or path == "/api/v1/companion/menu-control-proof-history-transition"
             or path == "/api/v1/companion/menu-control-proof-recovery"
         ):
             session = self._session_snapshot
@@ -716,6 +791,7 @@ class CompanionTransport:
             next_heartbeat_at=time.monotonic() + heartbeat_interval_seconds,
             heartbeat_sequence=0,
         )
+        self._menu_control_recovery_barrier_lease_id = lease_id
         self.incoming.put(
             {
                 "kind": "session_established",
@@ -781,6 +857,10 @@ class CompanionTransport:
 
     def _clear_session(self) -> None:
         self._session_snapshot = None
+
+    def _release_menu_control_recovery_barrier(self, lease_id: str) -> None:
+        if self._menu_control_recovery_barrier_lease_id == lease_id:
+            self._menu_control_recovery_barrier_lease_id = None
 
     def _read_response_body(
         self,
@@ -1823,11 +1903,463 @@ class CompanionTransport:
             )
         return validated
 
+    def _validate_menu_control_history_identity(
+        self, history: Any, label: str
+    ) -> dict[str, Any]:
+        if not isinstance(history, dict):
+            raise ValueError(f"{label} must be an object")
+        self._validate_exact_keys(
+            history,
+            {
+                "checkpointId", "undoLockId", "checkpointKind",
+                "stageFingerprints", "terminalResultContentSha256",
+                "terminalMarkerContentSha256",
+            },
+            label,
+        )
+        self._validated_required_uuid(history["checkpointId"], f"{label} checkpoint id")
+        self._validated_required_uuid(history["undoLockId"], f"{label} Undo lock id")
+        if history["checkpointKind"] not in {"success", "failure"}:
+            raise ValueError(f"{label} checkpoint kind is invalid")
+        fingerprints = history["stageFingerprints"]
+        if (
+            not isinstance(fingerprints, list)
+            or len(fingerprints) != 9
+            or any(
+                not isinstance(value, str)
+                or CONTENT_SHA256_PATTERN.fullmatch(value) is None
+                for value in fingerprints
+            )
+        ):
+            raise ValueError(f"{label} stage fingerprints are invalid")
+        if history["checkpointKind"] == "success":
+            if len(set(fingerprints)) != 9:
+                raise ValueError(f"{label} success stages must be distinct")
+        elif fingerprints[0] == fingerprints[1] or any(
+            value != fingerprints[1] for value in fingerprints[1:]
+        ):
+            raise ValueError(f"{label} failure stages are invalid")
+        for field in (
+            "terminalResultContentSha256", "terminalMarkerContentSha256"
+        ):
+            if (
+                not isinstance(history[field], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(history[field]) is None
+            ):
+                raise ValueError(f"{label} {field} is invalid")
+        return history
+
+    @staticmethod
+    def _menu_control_history_status(
+        history: dict[str, Any], cursor: Any
+    ) -> str:
+        if cursor is not None and (
+            isinstance(cursor, bool)
+            or not isinstance(cursor, int)
+            or cursor not in range(9)
+        ):
+            raise ValueError("Menu-control history cursor is invalid")
+        if history["checkpointKind"] == "success" and cursor is None:
+            raise ValueError("Menu-control success history cursor is invalid")
+        if history["checkpointKind"] == "failure" and cursor not in {None, 0}:
+            raise ValueError("Menu-control failure history cursor is invalid")
+        return "restored" if cursor == 0 else "history_locked"
+
+    def _validate_menu_control_history_transition(
+        self,
+        transition: Any,
+        history: dict[str, Any],
+        from_cursor: Any,
+        from_status: Any,
+    ) -> dict[str, Any]:
+        if not isinstance(transition, dict):
+            raise ValueError("Menu-control history transition must be an object")
+        self._validate_exact_keys(
+            transition,
+            {
+                "transitionId", "checkpointId", "undoLockId", "direction",
+                "fromCursor", "toCursor", "stage", "status",
+                "sceneFingerprintSha256", "occurredAt",
+            },
+            "Menu-control history transition",
+        )
+        for field in ("transitionId", "checkpointId", "undoLockId"):
+            self._validated_required_uuid(
+                transition[field], f"Menu-control history transition {field}"
+            )
+        expected_from_status = self._menu_control_history_status(history, from_cursor)
+        expected_to_status = self._menu_control_history_status(
+            history, transition["toCursor"]
+        )
+        if (
+            transition["checkpointId"] != history["checkpointId"]
+            or transition["undoLockId"] != history["undoLockId"]
+            or transition["fromCursor"] != from_cursor
+            or from_status != expected_from_status
+            or transition["status"] != expected_to_status
+            or transition["direction"] not in {"undo", "redo"}
+        ):
+            raise ValueError("Menu-control history transition boundary is invalid")
+        to_cursor = transition["toCursor"]
+        if history["checkpointKind"] == "failure":
+            valid_boundary = (
+                transition["direction"] == "undo"
+                and from_cursor is None
+                and to_cursor == 0
+                and transition["stage"] == "baseline"
+            ) or (
+                transition["direction"] == "redo"
+                and from_cursor == 0
+                and to_cursor is None
+                and transition["stage"] == "failure_checkpoint"
+            )
+            fingerprint_index = 0 if to_cursor == 0 else 1
+        else:
+            assert isinstance(from_cursor, int) and isinstance(to_cursor, int)
+            delta = -1 if transition["direction"] == "undo" else 1
+            valid_boundary = (
+                to_cursor - from_cursor == delta
+                and transition["stage"]
+                == (
+                    "baseline", "sphere_created", "location_x", "location_y",
+                    "location_z", "scale_x", "scale_y", "scale_z", "renamed_final",
+                )[to_cursor]
+            )
+            fingerprint_index = to_cursor
+        if (
+            not valid_boundary
+            or transition["sceneFingerprintSha256"]
+            != history["stageFingerprints"][fingerprint_index]
+        ):
+            raise ValueError("Menu-control history transition is not adjacent")
+        self._menu_control_proof_timestamp(
+            transition["occurredAt"], "Menu-control history transition time"
+        )
+        return transition
+
+    def _validate_current_menu_control_lease(
+        self, lease: Any, target: Any, *, label: str
+    ) -> dict[str, Any]:
+        if not isinstance(lease, dict):
+            raise ValueError(f"{label} must be an object")
+        self._validate_exact_keys(
+            lease,
+            {"leaseId", "sessionId", "target", "documentIncarnationId", "expiresAt"},
+            label,
+        )
+        for field in ("leaseId", "sessionId", "documentIncarnationId"):
+            self._validated_required_uuid(lease[field], f"{label} {field}")
+        session = self._session_snapshot
+        if (
+            session is None
+            or lease["leaseId"] != session.lease_id
+            or lease["sessionId"] != session.session_id
+            or lease["documentIncarnationId"] != session.document_incarnation_id
+            or lease["target"] != target
+        ):
+            raise ValueError(f"{label} is not the current document lease")
+        self._menu_control_proof_timestamp(lease["expiresAt"], f"{label} expiry")
+        return lease
+
+    def _validate_menu_control_history_transition_report(
+        self, report: Any
+    ) -> dict[str, Any]:
+        validated = self._validate_menu_control_proof_identity(
+            report, "Menu-control history transition report"
+        )
+        self._validate_exact_keys(
+            validated,
+            set(self._validate_menu_control_proof_delivery_keys())
+            | {
+                "kind", "currentLease", "history", "serverAcceptedCursor",
+                "serverAcceptedStatus", "transition", "transitionContentSha256",
+                "reportedAt",
+            },
+            "Menu-control history transition report",
+        )
+        if validated["kind"] != "native_history_transition":
+            raise ValueError("Menu-control history transition kind is invalid")
+        current_lease = self._validate_current_menu_control_lease(
+            validated["currentLease"],
+            validated["target"],
+            label="Menu-control history transition current lease",
+        )
+        original_lease = validated["lease"]
+        if any(
+            current_lease[field] != original_lease[field]
+            for field in ("sessionId", "target", "documentIncarnationId")
+        ):
+            raise ValueError("Menu-control history transition document identity changed")
+        history = self._validate_menu_control_history_identity(
+            validated["history"], "Menu-control history transition identity"
+        )
+        transition = self._validate_menu_control_history_transition(
+            validated["transition"], history,
+            validated["serverAcceptedCursor"], validated["serverAcceptedStatus"],
+        )
+        if (
+            validated["transitionContentSha256"]
+            != self._canonical_sha256(transition)
+        ):
+            raise ValueError("Menu-control history transition commitment is invalid")
+        dispatched = self._menu_control_proof_timestamp(
+            validated["dispatchedAt"], "Menu-control history original dispatch time"
+        )
+        occurred = self._menu_control_proof_timestamp(
+            transition["occurredAt"], "Menu-control history transition time"
+        )
+        reported = self._menu_control_proof_timestamp(
+            validated["reportedAt"], "Menu-control history report time"
+        )
+        expires = self._menu_control_proof_timestamp(
+            current_lease["expiresAt"], "Menu-control history current lease expiry"
+        )
+        if not dispatched <= occurred <= reported < expires:
+            raise ValueError("Menu-control history transition chronology is invalid")
+        return validated
+
+    def _refresh_menu_control_history_transition_lease(
+        self, report: dict[str, Any]
+    ) -> dict[str, Any]:
+        current_lease = self.current_document_lease
+        if current_lease is None:
+            raise ValueError("Menu-control history transition requires a live lease")
+        previous = report.get("currentLease")
+        if not isinstance(previous, dict) or any(
+            previous.get(field) != current_lease[field]
+            for field in ("sessionId", "target", "documentIncarnationId")
+        ):
+            raise ValueError("Menu-control history transition document identity changed")
+        if previous.get("leaseId") == current_lease["leaseId"]:
+            return report
+        refreshed = deepcopy(report)
+        refreshed["currentLease"] = current_lease
+        occurred_at = self._menu_control_proof_timestamp(
+            refreshed["transition"]["occurredAt"],
+            "Menu-control history transition time",
+        )
+        refreshed["reportedAt"] = max(
+            datetime.now(timezone.utc), occurred_at
+        ).isoformat().replace("+00:00", "Z")
+        return self._validate_menu_control_history_transition_report(refreshed)
+
+    def _validate_menu_control_history_reconciliation_delivery(
+        self, delivery: Any
+    ) -> dict[str, Any]:
+        validated = self._validate_menu_control_proof_identity(
+            delivery, "Menu-control history reconciliation"
+        )
+        self._validate_exact_keys(
+            validated,
+            set(self._validate_menu_control_proof_delivery_keys())
+            | {
+                "kind", "recoveryId", "replacementLease", "history",
+                "serverAcceptedCursor", "serverAcceptedStatus",
+                "acknowledgedTransitionContentSha256s",
+                "expectedMarkerContentSha256", "recoveryRequestedAt",
+            },
+            "Menu-control history reconciliation",
+        )
+        if validated["kind"] != "native_history_transition_reconcile":
+            raise ValueError("Menu-control history reconciliation kind is invalid")
+        self._validated_required_uuid(
+            validated["recoveryId"], "Menu-control history reconciliation recovery id"
+        )
+        replacement = self._validate_current_menu_control_lease(
+            validated["replacementLease"],
+            validated["target"],
+            label="Menu-control history reconciliation replacement lease",
+        )
+        original = validated["lease"]
+        if (
+            replacement["leaseId"] == original["leaseId"]
+            or any(
+                replacement[field] != original[field]
+                for field in ("sessionId", "target", "documentIncarnationId")
+            )
+        ):
+            raise ValueError("Menu-control history reconciliation lease rotation is invalid")
+        terminal_history = validated["history"]
+        if not isinstance(terminal_history, dict):
+            raise ValueError("Menu-control history reconciliation identity is invalid")
+        self._validate_exact_keys(
+            terminal_history,
+            {
+                "checkpointId", "undoLockId", "checkpointKind",
+                "baselineSceneFingerprintSha256", "lockedSceneFingerprintSha256",
+                "terminalResultContentSha256", "terminalMarkerContentSha256",
+            },
+            "Menu-control terminal history identity",
+        )
+        for field in ("checkpointId", "undoLockId"):
+            self._validated_required_uuid(
+                terminal_history[field], f"Menu-control terminal history {field}"
+            )
+        if terminal_history["checkpointKind"] not in {"success", "failure"}:
+            raise ValueError("Menu-control terminal history checkpoint kind is invalid")
+        for field in (
+            "baselineSceneFingerprintSha256", "lockedSceneFingerprintSha256",
+            "terminalResultContentSha256", "terminalMarkerContentSha256",
+        ):
+            if (
+                not isinstance(terminal_history[field], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(terminal_history[field]) is None
+            ):
+                raise ValueError(f"Menu-control terminal history {field} is invalid")
+        cursor = validated["serverAcceptedCursor"]
+        synthetic_history = {
+            "checkpointKind": terminal_history["checkpointKind"]
+        }
+        expected_status = self._menu_control_history_status(synthetic_history, cursor)
+        hashes = validated["acknowledgedTransitionContentSha256s"]
+        if (
+            validated["serverAcceptedStatus"] != expected_status
+            or not isinstance(hashes, list)
+            or len(hashes) > 32
+            or len(set(hashes)) != len(hashes)
+            or any(
+                not isinstance(value, str)
+                or CONTENT_SHA256_PATTERN.fullmatch(value) is None
+                for value in hashes
+            )
+            or validated["expectedMarkerContentSha256"]
+            != terminal_history["terminalMarkerContentSha256"]
+        ):
+            raise ValueError("Menu-control history reconciliation boundary is invalid")
+        requested = self._menu_control_proof_timestamp(
+            validated["recoveryRequestedAt"],
+            "Menu-control history reconciliation request time",
+        )
+        dispatched = self._menu_control_proof_timestamp(
+            validated["dispatchedAt"], "Menu-control history original dispatch time"
+        )
+        expires = self._menu_control_proof_timestamp(
+            replacement["expiresAt"],
+            "Menu-control history replacement lease expiry",
+        )
+        if not dispatched <= requested < expires:
+            raise ValueError("Menu-control history reconciliation chronology is invalid")
+        return validated
+
+    def _validate_menu_control_history_reconciliation_ack(
+        self, ack: Any
+    ) -> dict[str, Any]:
+        validated = self._validate_menu_control_proof_identity(
+            ack, "Menu-control history reconciliation acknowledgement"
+        )
+        self._validate_exact_keys(
+            validated,
+            set(self._validate_menu_control_proof_delivery_keys())
+            | {
+                "kind", "recoveryId", "history", "serverAcceptedCursor",
+                "serverAcceptedStatus", "transitions", "transitionContentSha256s",
+                "terminalResultContentSha256", "expectedMarkerContentSha256",
+                "currentCursor", "currentStatus",
+                "currentSceneFingerprintSha256", "occurredAt",
+            },
+            "Menu-control history reconciliation acknowledgement",
+        )
+        if validated["kind"] != "native_history_transition_reconcile":
+            raise ValueError("Menu-control history reconciliation acknowledgement kind is invalid")
+        recovery_id = self._validated_required_uuid(
+            validated["recoveryId"],
+            "Menu-control history reconciliation acknowledgement recovery id",
+        )
+        challenge = self._menu_control_proof_reconciliations.get(recovery_id)
+        if challenge is None or challenge.get("kind") != "native_history_transition_reconcile":
+            raise ValueError("Menu-control history reconciliation challenge is not active")
+        if any(
+            validated[key] != challenge[key]
+            for key in self._validate_menu_control_proof_delivery_keys()
+        ):
+            raise ValueError("Menu-control history reconciliation delivery identity changed")
+        history = self._validate_menu_control_history_identity(
+            validated["history"], "Menu-control history reconciliation identity"
+        )
+        terminal_history = challenge["history"]
+        locked_index = 8 if history["checkpointKind"] == "success" else 1
+        if (
+            history["checkpointId"] != terminal_history["checkpointId"]
+            or history["undoLockId"] != terminal_history["undoLockId"]
+            or history["checkpointKind"] != terminal_history["checkpointKind"]
+            or history["stageFingerprints"][0]
+            != terminal_history["baselineSceneFingerprintSha256"]
+            or history["stageFingerprints"][locked_index]
+            != terminal_history["lockedSceneFingerprintSha256"]
+            or history["terminalResultContentSha256"]
+            != terminal_history["terminalResultContentSha256"]
+            or history["terminalMarkerContentSha256"]
+            != terminal_history["terminalMarkerContentSha256"]
+        ):
+            raise ValueError("Menu-control history reconciliation checkpoint changed")
+        transitions = validated["transitions"]
+        hashes = validated["transitionContentSha256s"]
+        if (
+            not isinstance(transitions, list)
+            or len(transitions) > 32
+            or not isinstance(hashes, list)
+            or len(hashes) != len(transitions)
+        ):
+            raise ValueError("Menu-control history reconciliation batch is invalid")
+        cursor = validated["serverAcceptedCursor"]
+        status = validated["serverAcceptedStatus"]
+        previous_time: datetime | None = None
+        for transition, content_sha256 in zip(transitions, hashes):
+            self._validate_menu_control_history_transition(
+                transition, history, cursor, status
+            )
+            if content_sha256 != self._canonical_sha256(transition):
+                raise ValueError("Menu-control history reconciliation transition hash changed")
+            occurred = self._menu_control_proof_timestamp(
+                transition["occurredAt"], "Menu-control history transition time"
+            )
+            if previous_time is not None and occurred <= previous_time:
+                raise ValueError("Menu-control history reconciliation chronology is invalid")
+            previous_time = occurred
+            cursor = transition["toCursor"]
+            status = transition["status"]
+        fingerprint_index = 1 if cursor is None else cursor
+        for field in (
+            "terminalResultContentSha256", "expectedMarkerContentSha256",
+            "currentSceneFingerprintSha256",
+        ):
+            if (
+                not isinstance(validated[field], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(validated[field]) is None
+            ):
+                raise ValueError(f"Menu-control history reconciliation {field} is invalid")
+        occurred_at = self._menu_control_proof_timestamp(
+            validated["occurredAt"],
+            "Menu-control history reconciliation acknowledgement time",
+        )
+        if (
+            validated["serverAcceptedCursor"] != challenge["serverAcceptedCursor"]
+            or validated["serverAcceptedStatus"] != challenge["serverAcceptedStatus"]
+            or validated["terminalResultContentSha256"]
+            != history["terminalResultContentSha256"]
+            or validated["expectedMarkerContentSha256"]
+            != challenge["expectedMarkerContentSha256"]
+            or validated["currentCursor"] != cursor
+            or validated["currentStatus"] != status
+            or validated["currentSceneFingerprintSha256"]
+            != history["stageFingerprints"][fingerprint_index]
+            or occurred_at
+            < self._menu_control_proof_timestamp(
+                challenge["recoveryRequestedAt"],
+                "Menu-control history reconciliation request time",
+            )
+            or previous_time is not None and occurred_at < previous_time
+        ):
+            raise ValueError("Menu-control history reconciliation evidence is invalid")
+        return validated
+
     def _validate_menu_control_terminal_reconciliation_ack(
         self, ack: Any
     ) -> dict[str, Any]:
         if not isinstance(ack, dict):
             raise ValueError("Menu-control reconciliation acknowledgement must be an object")
+        if ack.get("kind") == "native_history_transition_reconcile":
+            return self._validate_menu_control_history_reconciliation_ack(ack)
         self._validate_exact_keys(
             ack,
             {
@@ -1920,12 +2452,56 @@ class CompanionTransport:
         )
         self._validate_exact_keys(response, {"request"}, "Menu-control proof poll")
         delivery = response["request"]
+        session = self._session_snapshot
+        if session is None:
+            raise ValueError("Menu-control proof poll requires a live lease")
+        first_discovery_for_lease = (
+            self._menu_control_recovery_discovery_lease_id != session.lease_id
+        )
         if delivery is None:
+            if first_discovery_for_lease:
+                self._menu_control_recovery_discovery_lease_id = session.lease_id
+                self._release_menu_control_recovery_barrier(session.lease_id)
+                self.incoming.put(
+                    {
+                        "kind": "menu_control_proof_recovery_absent",
+                        "leaseId": session.lease_id,
+                    }
+                )
+            return
+        if (
+            isinstance(delivery, dict)
+            and delivery.get("kind") == "native_history_transition_reconcile"
+        ):
+            validated_recovery = (
+                self._validate_menu_control_history_reconciliation_delivery(delivery)
+            )
+            self._menu_control_recovery_discovery_lease_id = session.lease_id
+            self._acknowledge_reconciled_menu_control_history_transitions(
+                validated_recovery["acknowledgedTransitionContentSha256s"]
+            )
+            recovery_id = validated_recovery["recoveryId"]
+            if recovery_id in self._seen_menu_control_proof_recovery_ids:
+                return
+            if len(self._seen_menu_control_proof_recovery_ids) >= 256:
+                expired = self._seen_menu_control_proof_recovery_ids.pop()
+                self._menu_control_proof_reconciliations.pop(expired, None)
+            self._seen_menu_control_proof_recovery_ids.add(recovery_id)
+            self._menu_control_proof_reconciliations[recovery_id] = dict(
+                validated_recovery
+            )
+            self.incoming.put(
+                {
+                    "kind": "menu_control_proof_history_reconcile_request",
+                    "request": dict(validated_recovery),
+                }
+            )
             return
         if isinstance(delivery, dict) and delivery.get("kind") == "native_terminal_reconcile":
             validated_recovery = self._validate_menu_control_terminal_reconciliation_delivery(
                 delivery
             )
+            self._menu_control_recovery_discovery_lease_id = session.lease_id
             recovery_id = validated_recovery["recoveryId"]
             if recovery_id in self._seen_menu_control_proof_recovery_ids:
                 return
@@ -1944,6 +2520,15 @@ class CompanionTransport:
             )
             return
         validated = self._validate_menu_control_proof_delivery(delivery)
+        if first_discovery_for_lease:
+            self._menu_control_recovery_discovery_lease_id = session.lease_id
+            self._release_menu_control_recovery_barrier(session.lease_id)
+            self.incoming.put(
+                {
+                    "kind": "menu_control_proof_recovery_absent",
+                    "leaseId": session.lease_id,
+                }
+            )
         request_id = validated["requestId"]
         if request_id in self._seen_menu_control_proof_request_ids:
             return
@@ -3194,6 +3779,7 @@ class CompanionTransport:
         pending_shortcut_recovery_ack: dict[str, Any] | None = None
         pending_menu_control_progress: dict[str, Any] | None = None
         pending_menu_control_result: dict[str, Any] | None = None
+        pending_menu_control_history_transition: dict[str, Any] | None = None
         pending_menu_control_recovery_ack: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
         pending_revision_request: dict[str, Any] | None = None
@@ -3226,6 +3812,7 @@ class CompanionTransport:
             or pending_shortcut_recovery_ack is not None
             or pending_menu_control_progress is not None
             or pending_menu_control_result is not None
+            or pending_menu_control_history_transition is not None
             or pending_menu_control_recovery_ack is not None
             or pending_decision is not None
             or pending_revision_request is not None
@@ -3238,6 +3825,7 @@ class CompanionTransport:
             or not self.shortcut_proof_recovery_acks.empty()
             or not self.menu_control_proof_progress.empty()
             or not self.menu_control_proof_results.empty()
+            or not self.menu_control_proof_history_transitions.empty()
             or not self.menu_control_proof_recovery_acks.empty()
             or not self.decisions.empty()
             or not self.revision_requests.empty()
@@ -3891,16 +4479,36 @@ class CompanionTransport:
                         pending_menu_control_result = None
                         self._menu_control_proof_inflight_request_id = None
                         request_succeeded = True
-                if pending_menu_control_recovery_ack is None:
+                session = self._session_snapshot
+                menu_control_recovery_ack_delivery_allowed = (
+                    session is not None
+                    and (
+                        self._menu_control_recovery_barrier_lease_id
+                        != session.lease_id
+                        or self._menu_control_recovery_discovery_lease_id
+                        == session.lease_id
+                    )
+                )
+                if (
+                    pending_menu_control_recovery_ack is None
+                    and menu_control_recovery_ack_delivery_allowed
+                ):
                     try:
                         pending_menu_control_recovery_ack = (
                             self.menu_control_proof_recovery_acks.get_nowait()
                         )
                     except Empty:
                         pass
-                if pending_menu_control_recovery_ack is not None:
+                if (
+                    pending_menu_control_recovery_ack is not None
+                    and menu_control_recovery_ack_delivery_allowed
+                ):
                     result = pending_menu_control_recovery_ack.get("result")
-                    request_id = result.get("requestId") if isinstance(result, dict) else None
+                    request_id = (
+                        result.get("requestId")
+                        if isinstance(result, dict)
+                        else pending_menu_control_recovery_ack.get("requestId")
+                    )
                     recovery_id = pending_menu_control_recovery_ack.get("recoveryId")
                     try:
                         response = self._request_json(
@@ -3918,15 +4526,50 @@ class CompanionTransport:
                                 "Runtime did not acknowledge menu-control proof recovery"
                             )
                     except HTTPError as error:
-                        if not 400 <= error.code < 500:
+                        error_payload = getattr(error, "runtime_payload", {})
+                        runtime_code = self._runtime_error_code(error_payload)
+                        stale_codes = {
+                            "menu_control_proof_history_reconciliation_challenge_stale",
+                            "menu_control_proof_terminal_reconciliation_challenge_stale",
+                        }
+                        if error.code == 409 and runtime_code in stale_codes:
+                            if isinstance(recovery_id, str):
+                                self._menu_control_proof_reconciliations.pop(
+                                    recovery_id, None
+                                )
+                                self._seen_menu_control_proof_recovery_ids.discard(
+                                    recovery_id
+                                )
+                            pending_menu_control_recovery_ack = None
+                            session = self._session_snapshot
+                            if session is not None:
+                                self._menu_control_recovery_discovery_lease_id = None
+                                self._menu_control_recovery_barrier_lease_id = (
+                                    session.lease_id
+                                )
+                            request_succeeded = True
+                            continue
+                        transient_codes = {"lease_not_current"}
+                        if (
+                            not 400 <= error.code < 500
+                            or (
+                                error.code == 409
+                                and runtime_code in transient_codes
+                            )
+                        ):
                             raise
                         self.incoming.put(
                             {
                                 "kind": "menu_control_proof_recovery_rejected",
                                 "requestId": request_id,
                                 "recoveryId": recovery_id,
+                                "runtimeCode": runtime_code,
+                                "runtimePayload": deepcopy(error_payload),
                                 "message": (
-                                    "Runtime permanently rejected menu-control proof recovery "
+                                    error_payload.get("message")
+                                    if isinstance(error_payload, dict)
+                                    and isinstance(error_payload.get("message"), str)
+                                    else "Runtime permanently rejected menu-control proof recovery "
                                     f"(HTTP {error.code})"
                                 ),
                             }
@@ -3934,14 +4577,56 @@ class CompanionTransport:
                         pending_menu_control_recovery_ack = None
                         request_succeeded = True
                     else:
+                        transition_hashes = list(
+                            pending_menu_control_recovery_ack.get(
+                                "transitionContentSha256s", []
+                            )
+                        )
+                        challenge = self._menu_control_proof_reconciliations.get(
+                            recovery_id
+                        )
+                        challenge_replacement_lease = (
+                            challenge.get("replacementLease")
+                            if isinstance(challenge, dict)
+                            else None
+                        )
+                        accepted_prefix = (
+                            list(
+                                challenge.get(
+                                    "acknowledgedTransitionContentSha256s", []
+                                )
+                            )
+                            if isinstance(challenge, dict)
+                            else []
+                        )
+                        self._acknowledge_reconciled_menu_control_history_transitions(
+                            list(dict.fromkeys(accepted_prefix + transition_hashes))
+                        )
+                        session = self._session_snapshot
+                        if (
+                            session is not None
+                            and isinstance(challenge_replacement_lease, dict)
+                            and challenge_replacement_lease.get("leaseId")
+                            == session.lease_id
+                        ):
+                            self._menu_control_recovery_discovery_lease_id = (
+                                session.lease_id
+                            )
+                            self._release_menu_control_recovery_barrier(
+                                session.lease_id
+                            )
                         self.incoming.put(
                             {
                                 "kind": "menu_control_proof_recovery_acknowledged",
                                 "requestId": request_id,
                                 "recoveryId": recovery_id,
+                                "recoveryKind": pending_menu_control_recovery_ack.get(
+                                    "kind"
+                                ),
                                 "resultContentSha256": pending_menu_control_recovery_ack.get(
                                     "terminalResultContentSha256"
                                 ),
+                                "transitionContentSha256s": transition_hashes,
                             }
                         )
                         if isinstance(recovery_id, str):
@@ -3949,6 +4634,154 @@ class CompanionTransport:
                                 recovery_id, None
                             )
                         pending_menu_control_recovery_ack = None
+                        request_succeeded = True
+                session = self._session_snapshot
+                menu_control_history_delivery_allowed = (
+                    session is not None
+                    and self._menu_control_recovery_barrier_lease_id
+                    != session.lease_id
+                )
+                if (
+                    pending_menu_control_history_transition is None
+                    and menu_control_history_delivery_allowed
+                ):
+                    try:
+                        pending_menu_control_history_transition = (
+                            self.menu_control_proof_history_transitions.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if (
+                    pending_menu_control_history_transition is not None
+                    and self._menu_control_history_transition_was_reconciled(
+                        pending_menu_control_history_transition
+                    )
+                ):
+                    pending_menu_control_history_transition = None
+                    request_succeeded = True
+                if (
+                    pending_menu_control_history_transition is not None
+                    and menu_control_history_delivery_allowed
+                ):
+                    request_id = pending_menu_control_history_transition.get("requestId")
+                    try:
+                        pending_menu_control_history_transition = (
+                            self._refresh_menu_control_history_transition_lease(
+                                pending_menu_control_history_transition
+                            )
+                        )
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/menu-control-proof-history-transition",
+                            pending_menu_control_history_transition,
+                        )
+                        self._validate_exact_keys(
+                            response,
+                            {"result"},
+                            "Menu-control history transition acknowledgement",
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime did not acknowledge menu-control history transition"
+                            )
+                    except HTTPError as error:
+                        error_payload = getattr(error, "runtime_payload", {})
+                        runtime_code = self._runtime_error_code(error_payload)
+                        if (
+                            error.code == 409
+                            and runtime_code
+                            == "menu_control_proof_history_relock_conflict"
+                            and pending_menu_control_history_transition.get(
+                                "transition", {}
+                            ).get("direction")
+                            == "redo"
+                        ):
+                            self.incoming.put(
+                                {
+                                    "kind": "menu_control_history_relock_conflict",
+                                    "requestId": request_id,
+                                    "transitionContentSha256": (
+                                        pending_menu_control_history_transition.get(
+                                            "transitionContentSha256"
+                                        )
+                                    ),
+                                    "transition": deepcopy(
+                                        pending_menu_control_history_transition.get(
+                                            "transition"
+                                        )
+                                    ),
+                                    "runtimeCode": runtime_code,
+                                    "runtimePayload": deepcopy(error_payload),
+                                    "message": (
+                                        error_payload.get("message")
+                                        if isinstance(error_payload, dict)
+                                        and isinstance(
+                                            error_payload.get("message"), str
+                                        )
+                                        else "Runtime rejected stale native Redo relock evidence"
+                                    ),
+                                }
+                            )
+                            self._release_menu_control_history_transition(
+                                pending_menu_control_history_transition
+                            )
+                            pending_menu_control_history_transition = None
+                            request_succeeded = True
+                            continue
+                        transient_authority_codes = {
+                            "lease_not_current",
+                            "menu_control_proof_delivery_lease_not_current",
+                            "menu_control_proof_history_transition_lease_not_current",
+                        }
+                        if (
+                            not 400 <= error.code < 500
+                            or (
+                                error.code == 409
+                                and runtime_code in transient_authority_codes
+                            )
+                        ):
+                            raise
+                        self.incoming.put(
+                            {
+                                "kind": "menu_control_history_transition_rejected",
+                                "requestId": request_id,
+                                "transitionContentSha256": (
+                                    pending_menu_control_history_transition.get(
+                                        "transitionContentSha256"
+                                    )
+                                ),
+                                "runtimeCode": runtime_code,
+                                "runtimePayload": deepcopy(error_payload),
+                                "message": (
+                                    error_payload.get("message")
+                                    if isinstance(error_payload, dict)
+                                    and isinstance(error_payload.get("message"), str)
+                                    else "Runtime permanently rejected menu-control history "
+                                    f"transition (HTTP {error.code})"
+                                ),
+                            }
+                        )
+                        self._release_menu_control_history_transition(
+                            pending_menu_control_history_transition
+                        )
+                        pending_menu_control_history_transition = None
+                        request_succeeded = True
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "menu_control_history_transition_acknowledged",
+                                "requestId": request_id,
+                                "transitionContentSha256": (
+                                    pending_menu_control_history_transition.get(
+                                        "transitionContentSha256"
+                                    )
+                                ),
+                            }
+                        )
+                        self._release_menu_control_history_transition(
+                            pending_menu_control_history_transition
+                        )
+                        pending_menu_control_history_transition = None
                         request_succeeded = True
                 if pending_shortcut_progress is None:
                     try:
@@ -4086,7 +4919,41 @@ class CompanionTransport:
                         pending_shortcut_result = None
                         request_succeeded = True
                 now = time.monotonic()
-                if not self._stop.is_set() and now >= next_poll:
+                session = self._session_snapshot
+                menu_control_recovery_barrier_active = (
+                    session is not None
+                    and self._menu_control_recovery_barrier_lease_id
+                    == session.lease_id
+                )
+                menu_control_recovery_discovery_complete = (
+                    session is not None
+                    and self._menu_control_recovery_discovery_lease_id
+                    == session.lease_id
+                )
+                menu_control_history_backlog = (
+                    pending_menu_control_history_transition is not None
+                    or not self.menu_control_proof_history_transitions.empty()
+                )
+                menu_control_recovery_ack_backlog = (
+                    pending_menu_control_recovery_ack is not None
+                    or not self.menu_control_proof_recovery_acks.empty()
+                ) and (
+                    not menu_control_recovery_barrier_active
+                    or menu_control_recovery_discovery_complete
+                )
+                menu_control_recovery_backlog = (
+                    menu_control_recovery_ack_backlog
+                    or (
+                        not menu_control_recovery_barrier_active
+                        and menu_control_history_backlog
+                    )
+                )
+                if (
+                    not self._stop.is_set()
+                    and session is not None
+                    and now >= next_poll
+                    and not menu_control_recovery_backlog
+                ):
                     self._poll()
                     if active_replan_run_id is not None:
                         run = self._poll_replan_run(active_replan_run_id)

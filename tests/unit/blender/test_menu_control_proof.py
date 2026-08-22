@@ -110,11 +110,12 @@ class MenuControlProofContractTests(unittest.TestCase):
 
         proof.start(
             preflight_hook=lambda: calls.append("authorization") or True,
+            pre_mutation_hook=lambda: calls.append("supersede") or True,
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=lambda payload: self.fail(str(payload)),
         )
 
-        self.assertEqual(calls, ["authorization", "blender", "steps"])
+        self.assertEqual(calls, ["authorization", "blender", "steps", "supersede"])
         self.assertEqual(len(fake_bpy.app.timers.callbacks), 1)
 
     def test_rejected_preflight_schedules_no_timer_and_emits_no_input(self) -> None:
@@ -124,6 +125,7 @@ class MenuControlProofContractTests(unittest.TestCase):
 
         proof.start(
             preflight_hook=lambda: False,
+            pre_mutation_hook=lambda: self.fail("pre-mutation hook must not run"),
             on_complete=lambda _payload: self.fail("unexpected completion"),
             on_failure=failures.append,
         )
@@ -134,6 +136,76 @@ class MenuControlProofContractTests(unittest.TestCase):
         self.assertFalse(failures[0]["requiresUndoRecovery"])
         self.assertEqual(failures[0]["failureStatus"], "preflight_rejected")
 
+    def test_blender_or_timer_preflight_failure_never_supersedes_marker(self) -> None:
+        for failure in ("blender", "timer"):
+            with self.subTest(failure=failure):
+                calls = []
+                failures = []
+                proof = module.UVSphereMenuControlProof()
+                proof._run_blender_preflight = (
+                    (lambda: (_ for _ in ()).throw(RuntimeError("UI preflight failed")))
+                    if failure == "blender"
+                    else lambda: calls.append("blender")
+                )
+                proof._build_fixed_steps = lambda: calls.append("steps")
+                original_register = fake_bpy.app.timers.register
+                if failure == "timer":
+                    fake_bpy.app.timers.register = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        RuntimeError("timer registration failed")
+                    )
+                try:
+                    proof.start(
+                        preflight_hook=lambda: calls.append("authority") or True,
+                        pre_mutation_hook=lambda: calls.append("supersede") or True,
+                        on_complete=lambda _payload: self.fail("unexpected completion"),
+                        on_failure=failures.append,
+                    )
+                finally:
+                    fake_bpy.app.timers.register = original_register
+                self.assertNotIn("supersede", calls)
+                self.assertEqual(fake_bpy.app.timers.callbacks, [])
+                self.assertFalse(failures[0]["mutationStarted"])
+
+    def test_pre_mutation_hook_exception_unregisters_timer_without_mutation(self) -> None:
+        failures = []
+        proof = module.UVSphereMenuControlProof()
+        proof._run_blender_preflight = lambda: None
+        proof._build_fixed_steps = lambda: proof._steps.append(
+            module._Step("would mutate", 0.1, lambda: self.fail("input emitted"))
+        )
+
+        proof.start(
+            preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: (_ for _ in ()).throw(
+                RuntimeError("supersession failed")
+            ),
+            on_complete=lambda _payload: self.fail("unexpected completion"),
+            on_failure=failures.append,
+        )
+
+        self.assertEqual(fake_bpy.app.timers.callbacks, [])
+        self.assertFalse(failures[0]["mutationStarted"])
+        self.assertEqual(failures[0]["failureStatus"], "failed_no_mutation")
+
+    def test_pre_mutation_hook_false_means_no_history_and_allows_execution(self) -> None:
+        failures = []
+        proof = module.UVSphereMenuControlProof()
+        proof._run_blender_preflight = lambda: None
+        proof._build_fixed_steps = lambda: None
+
+        proof.start(
+            preflight_hook=lambda: True,
+            pre_mutation_hook=lambda: False,
+            on_complete=lambda _payload: None,
+            on_failure=failures.append,
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(len(fake_bpy.app.timers.callbacks), 1)
+        self.assertEqual(
+            fake_bpy.app.timers.callbacks[0][0], proof._timer_callback
+        )
+
     def test_cancel_before_first_turn_unregisters_and_emits_no_input(self) -> None:
         emitted: list[object] = []
         failures: list[dict[str, object]] = []
@@ -142,7 +214,7 @@ class MenuControlProofContractTests(unittest.TestCase):
         proof._build_fixed_steps = lambda: proof._steps.append(
             module._Step("would emit", 0.1, lambda: emitted.append("input"))
         )
-        proof.start(preflight_hook=lambda: True, on_complete=lambda _payload: None, on_failure=failures.append)
+        proof.start(preflight_hook=lambda: True, pre_mutation_hook=lambda: True, on_complete=lambda _payload: None, on_failure=failures.append)
         callback = proof._timer_callback
 
         self.assertTrue(proof.cancel("controller cancelled"))
@@ -164,7 +236,7 @@ class MenuControlProofContractTests(unittest.TestCase):
                 module._Step("second", 0.1, lambda: emitted.append("second")),
             ]
         )
-        proof.start(preflight_hook=lambda: authorized, on_complete=lambda _payload: None, on_failure=failures.append)
+        proof.start(preflight_hook=lambda: authorized, pre_mutation_hook=lambda: True, on_complete=lambda _payload: None, on_failure=failures.append)
 
         self.assertEqual(proof._timer_callback(), 0.1)
         authorized = False
@@ -183,14 +255,15 @@ class MenuControlProofContractTests(unittest.TestCase):
 
         proof.start(
             preflight_hook=lambda: calls.append("preflight") or True,
+            pre_mutation_hook=lambda: calls.append("supersede") or True,
             continuation_guard=lambda: calls.append("continuation") or True,
             on_complete=lambda _payload: None,
             on_failure=lambda payload: self.fail(str(payload)),
         )
 
-        self.assertEqual(calls, ["preflight"])
+        self.assertEqual(calls, ["preflight", "supersede"])
         self.assertEqual(proof._timer_callback(), 0.1)
-        self.assertEqual(calls, ["preflight", "continuation", "input"])
+        self.assertEqual(calls, ["preflight", "supersede", "continuation", "input"])
 
     def test_cancellation_after_possible_mutation_reports_checkpoint_recovery(self) -> None:
         failures: list[dict[str, object]] = []

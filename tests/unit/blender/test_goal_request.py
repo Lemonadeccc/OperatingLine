@@ -441,6 +441,13 @@ class GoalRequestTransportTests(unittest.TestCase):
             transport.incoming.get_nowait(),
             {"kind": "procedure_replay_current_state_request", "request": request},
         )
+        self.assertEqual(
+            transport.incoming.get_nowait(),
+            {
+                "kind": "menu_control_proof_recovery_absent",
+                "leaseId": transport.session_snapshot.lease_id,
+            },
+        )
         with self.assertRaises(Empty):
             transport.incoming.get_nowait()
 

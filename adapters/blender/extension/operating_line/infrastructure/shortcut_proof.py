@@ -729,6 +729,7 @@ class SubdivisionSurfaceF9ShortcutProof:
         self,
         *,
         preflight_hook: Callable[[], bool],
+        pre_mutation_hook: Callable[[], bool],
         on_complete: Callable[[dict[str, object]], None],
         on_failure: Callable[[dict[str, object]], None],
     ) -> None:
@@ -738,6 +739,7 @@ class SubdivisionSurfaceF9ShortcutProof:
             raise RuntimeError("Shortcut proof driver instances are single-use")
         if (
             not callable(preflight_hook)
+            or not callable(pre_mutation_hook)
             or not callable(on_complete)
             or not callable(on_failure)
         ):
@@ -754,8 +756,13 @@ class SubdivisionSurfaceF9ShortcutProof:
         except Exception as error:
             self._fail(error)
             return
-        bpy.app.timers.register(self._timer_callback, first_interval=1.0)
-        self._timer_registered = True
+        try:
+            bpy.app.timers.register(self._timer_callback, first_interval=1.0)
+            self._timer_registered = True
+            pre_mutation_hook()
+        except Exception as error:
+            self._unregister_timer()
+            self._fail(error)
 
     def cancel(self, reason: str = "Shortcut proof driver cancelled") -> bool:
         """Stop future native input and report one conservative terminal failure.

@@ -9,6 +9,7 @@ from importlib import import_module
 from pathlib import Path
 from queue import Empty
 from types import ModuleType
+from unittest.mock import patch
 from urllib.error import HTTPError
 
 PACKAGE_NAME = "operating_line_menu_companion_transport_test"
@@ -234,6 +235,107 @@ class MenuCompanionTransportTests(unittest.TestCase):
             "dispatchedAt": "2026-08-22T10:00:02Z",
         }
 
+    def _history(self) -> dict:
+        return {
+            "checkpointId": str(uuid.uuid4()),
+            "undoLockId": str(uuid.uuid4()),
+            "checkpointKind": "success",
+            "stageFingerprints": [f"{index:064x}" for index in range(1, 10)],
+            "terminalResultContentSha256": "b" * 64,
+            "terminalMarkerContentSha256": "c" * 64,
+        }
+
+    def _history_transition_report(
+        self, delivery: dict, *, history: dict | None = None
+    ) -> dict:
+        history = self._history() if history is None else history
+        transition = {
+            "transitionId": str(uuid.uuid4()),
+            "checkpointId": history["checkpointId"],
+            "undoLockId": history["undoLockId"],
+            "direction": "undo",
+            "fromCursor": 8,
+            "toCursor": 7,
+            "stage": "scale_z",
+            "status": "history_locked",
+            "sceneFingerprintSha256": history["stageFingerprints"][7],
+            "occurredAt": "2026-08-22T10:00:03Z",
+        }
+        current_lease = self.transport.current_document_lease
+        assert current_lease is not None
+        return {
+            **deepcopy(delivery),
+            "kind": "native_history_transition",
+            "currentLease": current_lease,
+            "history": history,
+            "serverAcceptedCursor": 8,
+            "serverAcceptedStatus": "history_locked",
+            "transition": transition,
+            "transitionContentSha256": CompanionTransport._canonical_sha256(
+                transition
+            ),
+            "reportedAt": "2026-08-22T10:00:04Z",
+        }
+
+    def _history_reconciliation(
+        self, delivery: dict, history: dict
+    ) -> dict:
+        current_lease = self.transport.current_document_lease
+        assert current_lease is not None
+        return {
+            **deepcopy(delivery),
+            "kind": "native_history_transition_reconcile",
+            "recoveryId": str(uuid.uuid4()),
+            "replacementLease": current_lease,
+            "history": {
+                "checkpointId": history["checkpointId"],
+                "undoLockId": history["undoLockId"],
+                "checkpointKind": history["checkpointKind"],
+                "baselineSceneFingerprintSha256": history["stageFingerprints"][0],
+                "lockedSceneFingerprintSha256": history["stageFingerprints"][8],
+                "terminalResultContentSha256": history["terminalResultContentSha256"],
+                "terminalMarkerContentSha256": history["terminalMarkerContentSha256"],
+            },
+            "serverAcceptedCursor": 8,
+            "serverAcceptedStatus": "history_locked",
+            "acknowledgedTransitionContentSha256s": [],
+            "expectedMarkerContentSha256": history["terminalMarkerContentSha256"],
+            "recoveryRequestedAt": "2026-08-22T10:00:05Z",
+        }
+
+    def _queued_empty_history_recovery_ack(self) -> tuple[dict, dict]:
+        delivery = self._delivery()
+        history = self._history()
+        recovery = self._history_reconciliation(delivery, history)
+        self.transport._menu_control_proof_reconciliations[
+            recovery["recoveryId"]
+        ] = recovery
+        self.transport._seen_menu_control_proof_recovery_ids.add(
+            recovery["recoveryId"]
+        )
+        ack = {
+            **deepcopy(delivery),
+            "kind": "native_history_transition_reconcile",
+            "recoveryId": recovery["recoveryId"],
+            "history": history,
+            "serverAcceptedCursor": 8,
+            "serverAcceptedStatus": "history_locked",
+            "transitions": [],
+            "transitionContentSha256s": [],
+            "terminalResultContentSha256": history[
+                "terminalResultContentSha256"
+            ],
+            "expectedMarkerContentSha256": history[
+                "terminalMarkerContentSha256"
+            ],
+            "currentCursor": 8,
+            "currentStatus": "history_locked",
+            "currentSceneFingerprintSha256": history["stageFingerprints"][8],
+            "occurredAt": "2026-08-22T10:00:06Z",
+        }
+        self.transport.submit_menu_control_proof_recovery_ack(ack)
+        return recovery, ack
+
     def _receipt(self, delivery: dict) -> dict:
         content = {
             "receiptId": str(uuid.uuid4()),
@@ -440,10 +542,47 @@ class MenuCompanionTransportTests(unittest.TestCase):
 
         self.assertEqual(
             self.transport.incoming.get_nowait(),
+            {
+                "kind": "menu_control_proof_recovery_absent",
+                "leaseId": self.transport.session_snapshot.lease_id,
+            },
+        )
+        self.assertEqual(
+            self.transport.incoming.get_nowait(),
             {"kind": "menu_control_proof_execute_request", "request": delivery},
         )
         with self.assertRaises(Empty):
             self.transport.incoming.get_nowait()
+
+    def test_first_empty_menu_poll_emits_recovery_absent_once_per_lease(self) -> None:
+        self.transport._request_json = lambda *_args, **_kwargs: {"request": None}
+        first_lease = self.transport.session_snapshot.lease_id
+
+        self.transport._poll_menu_control_proof_request()
+        self.transport._poll_menu_control_proof_request()
+
+        self.assertEqual(
+            self.transport.incoming.get_nowait(),
+            {
+                "kind": "menu_control_proof_recovery_absent",
+                "leaseId": first_lease,
+            },
+        )
+        with self.assertRaises(Empty):
+            self.transport.incoming.get_nowait()
+
+        self.transport._session_snapshot = replace(
+            self.transport.session_snapshot,
+            lease_id=str(uuid.uuid4()),
+        )
+        self.transport._poll_menu_control_proof_request()
+        self.assertEqual(
+            self.transport.incoming.get_nowait(),
+            {
+                "kind": "menu_control_proof_recovery_absent",
+                "leaseId": self.transport.session_snapshot.lease_id,
+            },
+        )
 
     def test_poll_strictly_rejects_malformed_or_tampered_delivery(self) -> None:
         for mutate, message in (
@@ -496,6 +635,906 @@ class MenuCompanionTransportTests(unittest.TestCase):
         invalid_result["managedReceiptCreated"] = True
         with self.assertRaisesRegex(ValueError, "status claims"):
             self.transport.submit_menu_control_proof_result(invalid_result)
+
+    def test_history_transition_submission_is_strict_and_fifo(self) -> None:
+        delivery = self._delivery()
+        first = self._history_transition_report(delivery)
+        second = deepcopy(first)
+        second["transition"]["transitionId"] = str(uuid.uuid4())
+        second["transitionContentSha256"] = CompanionTransport._canonical_sha256(
+            second["transition"]
+        )
+
+        self.transport.submit_menu_control_history_transition(first)
+        self.transport.submit_menu_control_history_transition(second)
+
+        self.assertEqual(
+            self.transport.menu_control_proof_history_transitions.get_nowait(), first
+        )
+        self.assertEqual(
+            self.transport.menu_control_proof_history_transitions.get_nowait(), second
+        )
+        tampered = deepcopy(first)
+        tampered["transition"]["sceneFingerprintSha256"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "not adjacent"):
+            self.transport.submit_menu_control_history_transition(tampered)
+        rotated = deepcopy(first)
+        rotated["currentLease"]["leaseId"] = str(uuid.uuid4())
+        with self.assertRaisesRegex(ValueError, "current document lease"):
+            self.transport.submit_menu_control_history_transition(rotated)
+
+    def test_history_transition_real_request_carries_current_lease_header(self) -> None:
+        captured = {}
+
+        class Response:
+            status = 200
+            reason = "OK"
+            headers = {}
+
+            def __init__(self):
+                self._body = b'{"result":"accepted"}'
+
+            def read1(self, _size):
+                body, self._body = self._body, b""
+                return body
+
+        class Connection:
+            sock = None
+
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def request(self, method, path, body=None, headers=None):
+                captured.update(
+                    {"method": method, "path": path, "body": body, "headers": headers}
+                )
+
+            def getresponse(self):
+                return Response()
+
+            def close(self):
+                pass
+
+        with patch.object(transport_module, "HTTPConnection", Connection):
+            response = self.transport._request_json(
+                "POST",
+                "/api/v1/companion/menu-control-proof-history-transition",
+                {"proof": "transition"},
+            )
+
+        session = self.transport.session_snapshot
+        assert session is not None
+        self.assertEqual(response, {"result": "accepted"})
+        self.assertEqual(
+            captured["headers"]["x-operatingline-companion-lease"],
+            session.lease_id,
+        )
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(
+            captured["path"],
+            "/api/v1/companion/menu-control-proof-history-transition",
+        )
+
+    def test_pending_history_transition_rebinds_only_the_current_lease(self) -> None:
+        delivery = self._delivery()
+        report = self._history_transition_report(delivery)
+        original_identity = {
+            key: deepcopy(value)
+            for key, value in report.items()
+            if key not in {"currentLease", "reportedAt"}
+        }
+        session = self.transport.session_snapshot
+        assert session is not None
+        self.transport._session_snapshot = replace(
+            session, lease_id=str(uuid.uuid4()), expires_at="2099-01-01T00:00:00Z"
+        )
+
+        refreshed = self.transport._refresh_menu_control_history_transition_lease(
+            report
+        )
+
+        self.assertEqual(
+            {key: value for key, value in refreshed.items() if key not in {"currentLease", "reportedAt"}},
+            original_identity,
+        )
+        self.assertEqual(
+            refreshed["currentLease"], self.transport.current_document_lease
+        )
+        self.assertNotEqual(
+            refreshed["currentLease"]["leaseId"], report["currentLease"]["leaseId"]
+        )
+
+    def test_transition_hash_dedupes_exact_resubmission(self) -> None:
+        delivery = self._delivery()
+        report = self._history_transition_report(delivery)
+
+        self.transport.submit_menu_control_history_transition(report)
+        self.transport.submit_menu_control_history_transition(report)
+
+        self.assertEqual(
+            self.transport.menu_control_proof_history_transitions.qsize(), 1
+        )
+        self.assertEqual(
+            self.transport.menu_control_proof_history_transitions.get_nowait(), report
+        )
+
+    def test_failure_history_accepts_only_null_zero_native_boundaries(self) -> None:
+        delivery = self._delivery()
+        history = self._history()
+        history["checkpointKind"] = "failure"
+        history["stageFingerprints"] = [
+            history["stageFingerprints"][0],
+            *([history["stageFingerprints"][1]] * 8),
+        ]
+        undo = self._history_transition_report(delivery, history=history)
+        undo["serverAcceptedCursor"] = None
+        undo["transition"].update(
+            {
+                "fromCursor": None,
+                "toCursor": 0,
+                "stage": "baseline",
+                "status": "restored",
+                "sceneFingerprintSha256": history["stageFingerprints"][0],
+            }
+        )
+        undo["transitionContentSha256"] = CompanionTransport._canonical_sha256(
+            undo["transition"]
+        )
+        redo = deepcopy(undo)
+        redo["serverAcceptedCursor"] = 0
+        redo["serverAcceptedStatus"] = "restored"
+        redo["transition"].update(
+            {
+                "transitionId": str(uuid.uuid4()),
+                "direction": "redo",
+                "fromCursor": 0,
+                "toCursor": None,
+                "stage": "failure_checkpoint",
+                "status": "history_locked",
+                "sceneFingerprintSha256": history["stageFingerprints"][1],
+            }
+        )
+        redo["transitionContentSha256"] = CompanionTransport._canonical_sha256(
+            redo["transition"]
+        )
+
+        self.transport.submit_menu_control_history_transition(undo)
+        self.transport.submit_menu_control_history_transition(redo)
+        self.assertEqual(
+            self.transport.menu_control_proof_history_transitions.get_nowait(), undo
+        )
+        self.assertEqual(
+            self.transport.menu_control_proof_history_transitions.get_nowait(), redo
+        )
+
+    def test_history_reconciliation_routes_after_same_document_lease_rotation(self) -> None:
+        delivery = self._delivery()
+        history = self._history()
+        session = self.transport.session_snapshot
+        assert session is not None
+        self.transport._session_snapshot = replace(
+            session, lease_id=str(uuid.uuid4()), expires_at="2026-08-22T11:30:00Z"
+        )
+        recovery = self._history_reconciliation(delivery, history)
+        accepted_prefix_sha256 = "e" * 64
+        recovery["acknowledgedTransitionContentSha256s"] = [
+            accepted_prefix_sha256
+        ]
+        self.transport._request_json = lambda *_args, **_kwargs: {"request": recovery}
+
+        self.transport._poll_menu_control_proof_request()
+
+        self.assertEqual(
+            self.transport.incoming.get_nowait(),
+            {
+                "kind": "menu_control_proof_history_reconcile_request",
+                "request": recovery,
+            },
+        )
+        with self.assertRaises(Empty):
+            self.transport.incoming.get_nowait()
+        self.assertIn(
+            accepted_prefix_sha256,
+            self.transport._menu_control_history_reconciled_hashes,
+        )
+
+    def test_empty_history_reconciliation_ack_is_strictly_validated(self) -> None:
+        delivery = self._delivery()
+        history = self._history()
+        session = self.transport.session_snapshot
+        assert session is not None
+        self.transport._session_snapshot = replace(
+            session, lease_id=str(uuid.uuid4()), expires_at="2026-08-22T11:30:00Z"
+        )
+        recovery = self._history_reconciliation(delivery, history)
+        self.transport._menu_control_proof_reconciliations[
+            recovery["recoveryId"]
+        ] = recovery
+        ack = {
+            **deepcopy(delivery),
+            "kind": "native_history_transition_reconcile",
+            "recoveryId": recovery["recoveryId"],
+            "history": history,
+            "serverAcceptedCursor": 8,
+            "serverAcceptedStatus": "history_locked",
+            "transitions": [],
+            "transitionContentSha256s": [],
+            "terminalResultContentSha256": history[
+                "terminalResultContentSha256"
+            ],
+            "expectedMarkerContentSha256": history[
+                "terminalMarkerContentSha256"
+            ],
+            "currentCursor": 8,
+            "currentStatus": "history_locked",
+            "currentSceneFingerprintSha256": history["stageFingerprints"][8],
+            "occurredAt": "2026-08-22T10:00:06Z",
+        }
+
+        self.transport.submit_menu_control_proof_recovery_ack(ack)
+        self.assertEqual(
+            self.transport.menu_control_proof_recovery_acks.get_nowait(), ack
+        )
+        tampered = deepcopy(ack)
+        tampered["currentSceneFingerprintSha256"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "evidence is invalid"):
+            self.transport.submit_menu_control_proof_recovery_ack(tampered)
+
+    def test_post_commit_recovery_ack_loss_retries_exact_ack_on_rotated_lease(self) -> None:
+        delivery = self._delivery()
+        history = self._history()
+        original_session = self.transport.session_snapshot
+        assert original_session is not None
+        recovery_session = replace(
+            original_session,
+            lease_id=str(uuid.uuid4()),
+            expires_at="2026-08-22T11:30:00Z",
+        )
+        self.transport._session_snapshot = recovery_session
+        recovery = self._history_reconciliation(delivery, history)
+        recovery["serverAcceptedCursor"] = 1
+        recovery["serverAcceptedStatus"] = "history_locked"
+        accepted_prefix_sha256 = "e" * 64
+        recovery["acknowledgedTransitionContentSha256s"] = [
+            accepted_prefix_sha256
+        ]
+        self.transport._menu_control_proof_reconciliations[
+            recovery["recoveryId"]
+        ] = recovery
+        transition = {
+            "transitionId": str(uuid.uuid4()),
+            "checkpointId": history["checkpointId"],
+            "undoLockId": history["undoLockId"],
+            "direction": "undo",
+            "fromCursor": 1,
+            "toCursor": 0,
+            "stage": "baseline",
+            "status": "restored",
+            "sceneFingerprintSha256": history["stageFingerprints"][0],
+            "occurredAt": "2026-08-22T10:00:05.500Z",
+        }
+        transition_sha256 = CompanionTransport._canonical_sha256(transition)
+        ack = {
+            **deepcopy(delivery),
+            "kind": "native_history_transition_reconcile",
+            "recoveryId": recovery["recoveryId"],
+            "history": history,
+            "serverAcceptedCursor": 1,
+            "serverAcceptedStatus": "history_locked",
+            "transitions": [transition],
+            "transitionContentSha256s": [transition_sha256],
+            "terminalResultContentSha256": history[
+                "terminalResultContentSha256"
+            ],
+            "expectedMarkerContentSha256": history[
+                "terminalMarkerContentSha256"
+            ],
+            "currentCursor": 0,
+            "currentStatus": "restored",
+            "currentSceneFingerprintSha256": history["stageFingerprints"][0],
+            "occurredAt": "2026-08-22T10:00:06Z",
+        }
+        stale_direct_report = {
+            **deepcopy(delivery),
+            "kind": "native_history_transition",
+            "currentLease": self.transport.current_document_lease,
+            "history": history,
+            "serverAcceptedCursor": 1,
+            "serverAcceptedStatus": "history_locked",
+            "transition": transition,
+            "transitionContentSha256": transition_sha256,
+            "reportedAt": "2026-08-22T10:00:05.750Z",
+        }
+        unacknowledged_direct_report = deepcopy(stale_direct_report)
+        unacknowledged_direct_report["serverAcceptedCursor"] = 0
+        unacknowledged_direct_report["serverAcceptedStatus"] = "restored"
+        unacknowledged_direct_report["transition"].update(
+            {
+                "transitionId": str(uuid.uuid4()),
+                "direction": "redo",
+                "fromCursor": 0,
+                "toCursor": 1,
+                "stage": "sphere_created",
+                "status": "history_locked",
+                "sceneFingerprintSha256": history["stageFingerprints"][1],
+                "occurredAt": "2026-08-22T10:00:06.250Z",
+            }
+        )
+        unacknowledged_direct_report["transitionContentSha256"] = (
+            CompanionTransport._canonical_sha256(
+                unacknowledged_direct_report["transition"]
+            )
+        )
+        unacknowledged_direct_report["reportedAt"] = "2026-08-22T10:00:06.500Z"
+        order = []
+
+        recovery_posts = []
+        transition_posts = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-recovery":
+                order.append("recovery_ack")
+                recovery_posts.append(body)
+                if len(recovery_posts) == 1:
+                    raise OSError("response lost after Runtime commit")
+                return {
+                    "result": "duplicate" if len(recovery_posts) == 2 else "accepted"
+                }
+            if path == "/api/v1/companion/menu-control-proof-history-transition":
+                order.append("history_transition")
+                transition_posts.append(body)
+                return {"result": "accepted"}
+            raise AssertionError(path)
+
+        renewed_session = replace(
+            recovery_session,
+            lease_id=str(uuid.uuid4()),
+            expires_at="2026-08-22T12:00:00Z",
+        )
+
+        def establish_session():
+            self.transport._session_snapshot = renewed_session
+            self.transport._menu_control_recovery_barrier_lease_id = (
+                renewed_session.lease_id
+            )
+            self.transport.incoming.put(
+                {
+                    "kind": "session_established",
+                    "leaseId": renewed_session.lease_id,
+                }
+            )
+
+        renewed_recovery_ids = []
+
+        def poll():
+            order.append("poll")
+            self.transport._menu_control_recovery_discovery_lease_id = (
+                renewed_session.lease_id
+            )
+            renewed_recovery = deepcopy(recovery)
+            renewed_recovery["recoveryId"] = str(uuid.uuid4())
+            renewed_recovery_ids.append(renewed_recovery["recoveryId"])
+            renewed_recovery["replacementLease"] = (
+                self.transport.current_document_lease
+            )
+            self.transport._menu_control_proof_reconciliations[
+                renewed_recovery["recoveryId"]
+            ] = renewed_recovery
+            self.transport._seen_menu_control_proof_recovery_ids.add(
+                renewed_recovery["recoveryId"]
+            )
+            renewed_ack = deepcopy(ack)
+            renewed_ack["recoveryId"] = renewed_recovery["recoveryId"]
+            self.transport.submit_menu_control_proof_recovery_ack(renewed_ack)
+
+        self.transport._request_json = request_json
+        self.transport._establish_session = establish_session
+        self.transport._poll = poll
+        self.transport.submit_menu_control_history_transition(
+            unacknowledged_direct_report
+        )
+        self.transport.submit_menu_control_history_transition(stale_direct_report)
+        self.transport.submit_menu_control_proof_recovery_ack(ack)
+        self.transport.start()
+        deadline = __import__("time").monotonic() + 2
+        while not transition_posts and __import__("time").monotonic() < deadline:
+            __import__("time").sleep(0.01)
+        self.transport.stop(flush_timeout=0.5)
+        self.assertTrue(self.transport.wait_stopped(1))
+
+        self.assertEqual(
+            order,
+            [
+                "recovery_ack",
+                "poll",
+                "recovery_ack",
+                "recovery_ack",
+                "history_transition",
+            ],
+        )
+        self.assertEqual(recovery_posts[:2], [ack, ack])
+        self.assertEqual(
+            recovery_posts[2]["recoveryId"],
+            renewed_recovery_ids[0],
+        )
+        self.assertEqual(
+            [body["transitionContentSha256"] for body in transition_posts],
+            [unacknowledged_direct_report["transitionContentSha256"]],
+        )
+        self.assertTrue(self.transport.menu_control_proof_history_transitions.empty())
+        self.assertNotIn(
+            transition_sha256,
+            self.transport._menu_control_history_transition_hashes,
+        )
+        self.assertIn(
+            transition_sha256,
+            self.transport._menu_control_history_reconciled_hashes,
+        )
+        self.assertIn(
+            accepted_prefix_sha256,
+            self.transport._menu_control_history_reconciled_hashes,
+        )
+        self.assertNotIn(
+            recovery["recoveryId"],
+            self.transport._menu_control_proof_reconciliations,
+        )
+        messages = []
+        while not self.transport.incoming.empty():
+            messages.append(self.transport.incoming.get_nowait())
+        acknowledged = next(
+            message
+            for message in messages
+            if message["kind"] == "menu_control_proof_recovery_acknowledged"
+        )
+        self.assertEqual(
+            acknowledged["transitionContentSha256s"],
+            ack["transitionContentSha256s"],
+        )
+        self.assertIn("session_established", {message["kind"] for message in messages})
+
+    def _assert_permanent_recovery_conflict(self, runtime_code: str) -> None:
+        recovery, _ack = self._queued_empty_history_recovery_ack()
+        recovery_posts = []
+        polls = []
+
+        def request_json(_method, path, _body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-recovery":
+                recovery_posts.append(path)
+                error = HTTPError(path, 409, "Conflict", {}, None)
+                error.runtime_payload = {
+                    "error": runtime_code,
+                    "message": "deterministic recovery conflict",
+                }
+                raise error
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+
+        def poll():
+            polls.append("poll")
+            self.transport._stop.set()
+
+        self.transport._poll = poll
+        self.transport.start()
+        self.assertTrue(self.transport.wait_stopped(2))
+
+        self.assertEqual(recovery_posts, [
+            "/api/v1/companion/menu-control-proof-recovery"
+        ])
+        self.assertEqual(polls, ["poll"])
+        self.assertTrue(self.transport.menu_control_proof_recovery_acks.empty())
+        self.assertIn(
+            recovery["recoveryId"],
+            self.transport._menu_control_proof_reconciliations,
+        )
+        rejection = next(
+            message
+            for message in list(self.transport.incoming.queue)
+            if message["kind"] == "menu_control_proof_recovery_rejected"
+        )
+        self.assertEqual(rejection["runtimeCode"], runtime_code)
+        self.assertEqual(
+            rejection["runtimePayload"]["message"],
+            "deterministic recovery conflict",
+        )
+
+    def test_recovery_relock_conflict_is_permanent_and_unblocks_poll(self) -> None:
+        self._assert_permanent_recovery_conflict(
+            "menu_control_proof_history_relock_conflict"
+        )
+
+    def test_unknown_recovery_conflict_is_permanent_and_unblocks_poll(self) -> None:
+        self._assert_permanent_recovery_conflict("unknown_recovery_conflict")
+
+    def test_history_identity_conflict_is_permanent_and_unblocks_poll(self) -> None:
+        self._assert_permanent_recovery_conflict(
+            "menu_control_proof_history_reconciliation_identity_mismatch"
+        )
+
+    def test_recovery_lease_not_current_retries_exact_ack(self) -> None:
+        _recovery, ack = self._queued_empty_history_recovery_ack()
+        recovery_bodies = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-recovery":
+                recovery_bodies.append(body)
+                if len(recovery_bodies) == 1:
+                    error = HTTPError(path, 409, "Conflict", {}, None)
+                    error.runtime_payload = {"error": "lease_not_current"}
+                    raise error
+                self.transport._stop.set()
+                return {"result": "duplicate"}
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+        self.transport._clear_session = lambda: None
+        self.transport._poll = lambda: None
+        self.transport.start()
+        self.assertTrue(self.transport.wait_stopped(2))
+
+        self.assertEqual(recovery_bodies, [ack, ack])
+        kinds = [message["kind"] for message in list(self.transport.incoming.queue)]
+        self.assertIn("menu_control_proof_recovery_acknowledged", kinds)
+        self.assertNotIn("menu_control_proof_recovery_rejected", kinds)
+
+    def test_stale_recovery_challenge_drops_challenge_and_repolls(self) -> None:
+        recovery, _ack = self._queued_empty_history_recovery_ack()
+        recovery_posts = []
+        polls = []
+
+        def request_json(_method, path, _body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-recovery":
+                recovery_posts.append(path)
+                error = HTTPError(path, 409, "Conflict", {}, None)
+                error.runtime_payload = {
+                    "error": "menu_control_proof_history_reconciliation_challenge_stale"
+                }
+                raise error
+            raise AssertionError(path)
+
+        def poll():
+            polls.append("poll")
+            self.transport._stop.set()
+
+        self.transport._request_json = request_json
+        self.transport._poll = poll
+        self.transport.start()
+        self.assertTrue(self.transport.wait_stopped(2))
+
+        self.assertEqual(len(recovery_posts), 1)
+        self.assertEqual(polls, ["poll"])
+        self.assertNotIn(
+            recovery["recoveryId"],
+            self.transport._menu_control_proof_reconciliations,
+        )
+        self.assertNotIn(
+            recovery["recoveryId"],
+            self.transport._seen_menu_control_proof_recovery_ids,
+        )
+        kinds = [message["kind"] for message in list(self.transport.incoming.queue)]
+        self.assertNotIn("menu_control_proof_recovery_rejected", kinds)
+
+    def test_recovery_identity_mismatch_is_permanent_and_fails_closed(self) -> None:
+        self._assert_permanent_recovery_conflict(
+            "menu_control_proof_history_reconciliation_identity_mismatch"
+        )
+
+    def test_history_transition_worker_retries_conflict_without_losing_fifo(self) -> None:
+        delivery = self._delivery()
+        report = self._history_transition_report(delivery)
+        calls = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-history-transition":
+                calls.append((path, body))
+                if len(calls) == 1:
+                    error = HTTPError(path, 409, "Conflict", {}, None)
+                    error.runtime_payload = {
+                        "error": (
+                            "menu_control_proof_history_transition_lease_not_current"
+                        )
+                    }
+                    raise error
+                return {"result": "duplicate"}
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+        self.transport._poll = lambda: None
+        self.transport._clear_session = lambda: None
+        self.transport.submit_menu_control_history_transition(report)
+        self.transport.start()
+        deadline = __import__("time").monotonic() + 1
+        while len(calls) < 2 and __import__("time").monotonic() < deadline:
+            __import__("time").sleep(0.01)
+        self.transport.stop(flush_timeout=0.5)
+        self.assertTrue(self.transport.wait_stopped(1))
+        self.assertEqual([body for _path, body in calls], [report, report])
+        messages = []
+        while not self.transport.incoming.empty():
+            messages.append(self.transport.incoming.get_nowait())
+        acknowledged = next(
+            message
+            for message in messages
+            if message["kind"] == "menu_control_history_transition_acknowledged"
+        )
+        self.assertEqual(
+            acknowledged["transitionContentSha256"],
+            report["transitionContentSha256"],
+        )
+
+    def test_redo_relock_conflict_is_not_retried_as_stale_evidence(self) -> None:
+        delivery = self._delivery()
+        report = self._history_transition_report(delivery)
+        report["serverAcceptedCursor"] = 7
+        report["transition"].update(
+            {
+                "direction": "redo",
+                "fromCursor": 7,
+                "toCursor": 8,
+                "stage": "renamed_final",
+                "sceneFingerprintSha256": report["history"]["stageFingerprints"][8],
+            }
+        )
+        report["transitionContentSha256"] = CompanionTransport._canonical_sha256(
+            report["transition"]
+        )
+        calls = []
+
+        def request_json(_method, path, _body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-history-transition":
+                calls.append(path)
+                error = HTTPError(path, 409, "Conflict", {}, None)
+                error.runtime_payload = {
+                    "error": "menu_control_proof_history_relock_conflict",
+                    "message": "another execution acquired the restored target",
+                }
+                raise error
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+        self.transport._poll = lambda: None
+        self.transport.submit_menu_control_history_transition(report)
+        self.transport.start()
+        deadline = __import__("time").monotonic() + 1
+        conflict = None
+        while conflict is None and __import__("time").monotonic() < deadline:
+            while not self.transport.incoming.empty():
+                candidate = self.transport.incoming.get_nowait()
+                if candidate["kind"] == "menu_control_history_relock_conflict":
+                    conflict = candidate
+                    break
+            __import__("time").sleep(0.01)
+        self.transport.stop(flush_timeout=0.5)
+        self.assertTrue(self.transport.wait_stopped(1))
+
+        self.assertEqual(len(calls), 1)
+        self.assertIsNotNone(conflict)
+        self.assertEqual(
+            conflict["runtimeCode"],
+            "menu_control_proof_history_relock_conflict",
+        )
+        self.assertEqual(conflict["runtimePayload"]["message"], "another execution acquired the restored target")
+        self.assertNotIn(
+            report["transitionContentSha256"],
+            self.transport._menu_control_history_transition_hashes,
+        )
+
+    def test_unknown_409_is_permanent_and_preserves_durable_recovery(self) -> None:
+        delivery = self._delivery()
+        report = self._history_transition_report(delivery)
+        calls = []
+
+        def request_json(_method, path, _body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-history-transition":
+                calls.append(path)
+                error = HTTPError(path, 409, "Conflict", {}, None)
+                error.runtime_payload = {
+                    "error": "unknown_transition_conflict",
+                    "message": "stored chronology differs",
+                }
+                raise error
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+        self.transport._poll = lambda: None
+        self.transport.submit_menu_control_history_transition(report)
+        self.transport.start()
+        deadline = __import__("time").monotonic() + 1
+        rejection = None
+        while rejection is None and __import__("time").monotonic() < deadline:
+            while not self.transport.incoming.empty():
+                candidate = self.transport.incoming.get_nowait()
+                if candidate["kind"] == "menu_control_history_transition_rejected":
+                    rejection = candidate
+                    break
+            __import__("time").sleep(0.01)
+        self.transport.stop(flush_timeout=0.5)
+        self.assertTrue(self.transport.wait_stopped(1))
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(rejection["runtimeCode"], "unknown_transition_conflict")
+        self.assertEqual(rejection["runtimePayload"]["message"], "stored chronology differs")
+        self.assertNotIn(
+            report["transitionContentSha256"],
+            self.transport._menu_control_history_transition_hashes,
+        )
+
+    def test_history_transition_worker_retries_after_post_ack_loss(self) -> None:
+        delivery = self._delivery()
+        report = self._history_transition_report(delivery)
+        calls = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-history-transition":
+                calls.append(body)
+                if len(calls) == 1:
+                    raise OSError("response lost after Runtime commit")
+                return {"result": "duplicate"}
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+        self.transport._poll = lambda: None
+        self.transport._clear_session = lambda: None
+        self.transport.submit_menu_control_history_transition(report)
+        self.transport.start()
+        deadline = __import__("time").monotonic() + 1
+        while len(calls) < 2 and __import__("time").monotonic() < deadline:
+            __import__("time").sleep(0.01)
+        self.transport.stop(flush_timeout=0.5)
+        self.assertTrue(self.transport.wait_stopped(1))
+        self.assertEqual(calls, [report, report])
+
+    def test_two_transition_ack_loss_rotation_dedupes_durable_resubmit(self) -> None:
+        delivery = self._delivery()
+        first = self._history_transition_report(delivery)
+        history = first["history"]
+        second = deepcopy(first)
+        second["serverAcceptedCursor"] = 7
+        second["transition"].update(
+            {
+                "transitionId": str(uuid.uuid4()),
+                "fromCursor": 7,
+                "toCursor": 6,
+                "stage": "scale_y",
+                "sceneFingerprintSha256": history["stageFingerprints"][6],
+                "occurredAt": "2026-08-22T10:00:04Z",
+            }
+        )
+        second["transitionContentSha256"] = CompanionTransport._canonical_sha256(
+            second["transition"]
+        )
+        second["reportedAt"] = "2026-08-22T10:00:05Z"
+        original_session = self.transport.session_snapshot
+        assert original_session is not None
+        renewed_session = replace(
+            original_session,
+            lease_id=str(uuid.uuid4()),
+            expires_at="2099-01-01T00:00:00Z",
+        )
+        calls = []
+
+        def establish_session():
+            self.transport._session_snapshot = renewed_session
+            self.transport._menu_control_recovery_barrier_lease_id = (
+                renewed_session.lease_id
+            )
+            for report in (first, second):
+                refreshed = self.transport._refresh_menu_control_history_transition_lease(
+                    report
+                )
+                self.transport.submit_menu_control_history_transition(refreshed)
+
+        order = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-history-transition":
+                calls.append(body["transitionContentSha256"])
+                order.append(
+                    (
+                        "transition",
+                        body["transitionContentSha256"],
+                        body["currentLease"]["leaseId"],
+                    )
+                )
+                if len(calls) == 1:
+                    raise OSError("first transition response lost after commit")
+                if len(calls) == 3:
+                    self.transport._stop.set()
+                return {"result": "duplicate" if len(calls) == 2 else "accepted"}
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+        self.transport._establish_session = establish_session
+
+        def poll():
+            order.append(("poll", renewed_session.lease_id))
+            self.transport._menu_control_recovery_discovery_lease_id = (
+                renewed_session.lease_id
+            )
+            self.transport._release_menu_control_recovery_barrier(
+                renewed_session.lease_id
+            )
+
+        self.transport._poll = poll
+        self.transport.submit_menu_control_history_transition(first)
+        self.transport.submit_menu_control_history_transition(second)
+        self.transport.start()
+        self.assertTrue(self.transport.wait_stopped(2))
+
+        self.assertEqual(
+            order,
+            [
+                (
+                    "transition",
+                    first["transitionContentSha256"],
+                    original_session.lease_id,
+                ),
+                ("poll", renewed_session.lease_id),
+                (
+                    "transition",
+                    first["transitionContentSha256"],
+                    renewed_session.lease_id,
+                ),
+                (
+                    "transition",
+                    second["transitionContentSha256"],
+                    renewed_session.lease_id,
+                ),
+            ],
+        )
+        self.assertTrue(self.transport.menu_control_proof_history_transitions.empty())
+        self.assertEqual(self.transport._menu_control_history_transition_hashes, set())
+
+    def test_recovery_absence_releases_history_transition_after_poll(self) -> None:
+        delivery = self._delivery()
+        report = self._history_transition_report(delivery)
+        order = []
+        session = self.transport.session_snapshot
+        assert session is not None
+        self.transport._menu_control_recovery_barrier_lease_id = session.lease_id
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/menu-control-proof-history-transition":
+                order.append(("transition", body["currentLease"]["leaseId"]))
+                self.transport._stop.set()
+                return {"result": "accepted"}
+            raise AssertionError(path)
+
+        self.transport._request_json = request_json
+
+        def poll():
+            order.append(("poll", session.lease_id))
+            self.transport._menu_control_recovery_discovery_lease_id = session.lease_id
+            self.transport._release_menu_control_recovery_barrier(session.lease_id)
+
+        self.transport._poll = poll
+        self.transport.submit_menu_control_history_transition(report)
+        self.transport.start()
+        self.assertTrue(self.transport.wait_stopped(2))
+        self.assertEqual(
+            order,
+            [("poll", session.lease_id), ("transition", session.lease_id)],
+        )
 
     def test_probe_recovery_accepts_completed_history_with_each_current_cursor(
         self,
@@ -665,7 +1704,17 @@ class MenuCompanionTransportTests(unittest.TestCase):
         self.transport._poll_menu_control_proof_request()
         old_session = self.transport.session_snapshot
         assert old_session is not None
-
+        self.assertEqual(
+            self.transport.incoming.get_nowait(),
+            {
+                "kind": "menu_control_proof_recovery_absent",
+                "leaseId": old_session.lease_id,
+            },
+        )
+        self.assertEqual(
+            self.transport.incoming.get_nowait()["request"]["requestId"],
+            delivery["requestId"],
+        )
         self.transport._clear_session()
         self.assertEqual(
             self.transport._menu_control_proof_inflight_request_id,
@@ -677,8 +1726,11 @@ class MenuCompanionTransportTests(unittest.TestCase):
         self.transport.submit_menu_control_proof_progress(self._progress(delivery))
         self.transport._poll_menu_control_proof_request()
         self.assertEqual(
-            self.transport.incoming.get_nowait()["request"]["requestId"],
-            delivery["requestId"],
+            self.transport.incoming.get_nowait(),
+            {
+                "kind": "menu_control_proof_recovery_absent",
+                "leaseId": self.transport.session_snapshot.lease_id,
+            },
         )
         with self.assertRaises(Empty):
             self.transport.incoming.get_nowait()

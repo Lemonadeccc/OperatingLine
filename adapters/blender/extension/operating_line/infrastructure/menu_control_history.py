@@ -430,12 +430,23 @@ _REGISTERED_CONTROLLERS: set["MenuControlHistoryController"] = set()
 class MenuControlHistoryController:
     """Track adjacent native history stages without mutating Blender data."""
 
-    def __init__(self, authority_gate: HmacRebindAuthorityGate | None = None) -> None:
+    def __init__(
+        self,
+        authority_gate: HmacRebindAuthorityGate | None = None,
+        *,
+        transition_result_callback: Callable[[dict[str, object]], None]
+        | None = None,
+    ) -> None:
         if authority_gate is not None and not isinstance(
             authority_gate, HmacRebindAuthorityGate
         ):
             raise TypeError("Menu-control history authority gate is invalid")
+        if transition_result_callback is not None and not callable(
+            transition_result_callback
+        ):
+            raise TypeError("Menu-control transition result callback is invalid")
         self._authority_gate = authority_gate
+        self._transition_result_callback = transition_result_callback
         self._entries: list[MenuControlHistoryEntry] = []
         self._transitions: list[dict[str, object]] = []
         self._current: MenuControlHistoryEntry | None = None
@@ -570,6 +581,8 @@ class MenuControlHistoryController:
             raise RuntimeError("Menu-control history success stages are not distinct")
         if cursor is not None and (not isinstance(cursor, int) or isinstance(cursor, bool) or cursor not in range(9)):
             raise RuntimeError("Menu-control history cursor is invalid")
+        if marker.get("checkpointKind") == "failure" and cursor not in {None, 0}:
+            raise RuntimeError("Menu-control failure history cursor is invalid")
         terminal = marker.get("terminalResult")
         terminal_hash = _require_sha256(marker.get("terminalResultContentSha256"), "terminal result")
         if not isinstance(terminal, dict) or _canonical_sha256(terminal) != terminal_hash:
@@ -653,22 +666,42 @@ class MenuControlHistoryController:
             from_cursor = result.get("fromCursor")
             to_cursor = result.get("toCursor")
             direction = result.get("direction")
+            failure_boundary = marker["checkpointKind"] == "failure" and (
+                direction == "undo"
+                and from_cursor is None
+                and to_cursor == 0
+                or direction == "redo"
+                and from_cursor == 0
+                and to_cursor is None
+            )
+            ordinary_boundary = (
+                marker["checkpointKind"] == "success"
+                and isinstance(from_cursor, int)
+                and not isinstance(from_cursor, bool)
+                and isinstance(to_cursor, int)
+                and not isinstance(to_cursor, bool)
+                and from_cursor in range(9)
+                and to_cursor in range(9)
+                and direction in {"undo", "redo"}
+                and to_cursor - from_cursor
+                == (-1 if direction == "undo" else 1)
+            )
+            fingerprint_cursor = 1 if to_cursor is None else to_cursor
+            expected_stage = (
+                "failure_checkpoint"
+                if to_cursor is None
+                else STAGE_LABELS[to_cursor]
+            )
             if (
-                not isinstance(from_cursor, int)
-                or isinstance(from_cursor, bool)
-                or not isinstance(to_cursor, int)
-                or isinstance(to_cursor, bool)
-                or from_cursor not in range(9)
-                or to_cursor not in range(9)
+                not (failure_boundary or ordinary_boundary)
                 or to_cursor != expected_to_cursor
-                or to_cursor - from_cursor != (-1 if direction == "undo" else 1)
-                or direction not in {"undo", "redo"}
                 or result.get("checkpointId") != marker["checkpointId"]
                 or result.get("undoLockId") != marker["undoLockId"]
-                or result.get("stage") != STAGE_LABELS[to_cursor]
+                or result.get("stage") != expected_stage
                 or result.get("status")
                 != ("restored" if to_cursor == 0 else "history_locked")
-                or result.get("sceneFingerprintSha256") != fingerprints[to_cursor]
+                or result.get("sceneFingerprintSha256")
+                != fingerprints[fingerprint_cursor]
             ):
                 raise RuntimeError("Menu-control history transition order is invalid")
             expected_to_cursor = from_cursor
@@ -702,7 +735,15 @@ class MenuControlHistoryController:
         ):
             raise ValueError("Menu-control history requires the current registered Scene")
 
-    def register(self) -> None:
+    def register(
+        self,
+        transition_result_callback: Callable[[dict[str, object]], None]
+        | None = None,
+    ) -> None:
+        if transition_result_callback is not None:
+            if not callable(transition_result_callback):
+                raise TypeError("Menu-control transition result callback is invalid")
+            self._transition_result_callback = transition_result_callback
         if self._registered:
             return
         if self._status == "retired":
@@ -950,13 +991,26 @@ class MenuControlHistoryController:
         entry = self._current
         if entry is None and self._orphan_marker is None:
             return
-        if entry is None or entry.cursor is None:
+        if entry is None:
             self._lock_recovery("native history has no rebound exact cursor")
             return
         self._handling = True
         try:
-            expected_cursor = entry.cursor + (-1 if direction == "undo" else 1)
-            if expected_cursor not in range(9):
+            if entry.checkpoint_kind == "failure" and entry.cursor is None:
+                expected_cursor = 0 if direction == "undo" else -1
+            elif (
+                entry.checkpoint_kind == "failure"
+                and entry.cursor == 0
+                and direction == "redo"
+            ):
+                expected_cursor = None
+            else:
+                expected_cursor = entry.cursor + (
+                    -1 if direction == "undo" else 1
+                )
+            if expected_cursor == -1 or (
+                expected_cursor is not None and expected_cursor not in range(9)
+            ):
                 self._lock_recovery(f"native {direction} crossed the proven history boundary")
                 return
             owner = self._owner_scene(entry)
@@ -964,7 +1018,8 @@ class MenuControlHistoryController:
                 self._lock_recovery("history owner is not the current Scene")
                 return
             live = _live_scene_fingerprint(owner)
-            if live != entry.stage_fingerprints[expected_cursor]:
+            fingerprint_cursor = 1 if expected_cursor is None else expected_cursor
+            if live != entry.stage_fingerprints[fingerprint_cursor]:
                 self._lock_recovery(f"native {direction} did not move exactly one stage")
                 return
             transition = {
@@ -974,7 +1029,11 @@ class MenuControlHistoryController:
                 "direction": direction,
                 "fromCursor": entry.cursor,
                 "toCursor": expected_cursor,
-                "stage": STAGE_LABELS[expected_cursor],
+                "stage": (
+                    "failure_checkpoint"
+                    if expected_cursor is None
+                    else STAGE_LABELS[expected_cursor]
+                ),
                 "status": "restored" if expected_cursor == 0 else "history_locked",
                 "sceneFingerprintSha256": live,
                 "occurredAt": _utc_now(),
@@ -996,6 +1055,8 @@ class MenuControlHistoryController:
             self._locked = expected_cursor != 0
             self._status = "restored" if expected_cursor == 0 else "history_locked"
             self.error = ""
+            if self._transition_result_callback is not None:
+                self._transition_result_callback(deepcopy(transition))
         except Exception as error:
             self._lock_recovery(str(error))
         finally:
@@ -1035,11 +1096,13 @@ class MenuControlHistoryController:
         cursor = marker.get("cursor")
         live = _live_scene_fingerprint(scene)
         if marker["checkpointKind"] == "failure" and cursor is None:
-            if live == marker["stageFingerprints"][0]:
-                cursor = 0
-            elif live != marker["stageFingerprints"][1]:
-                self._lock_recovery("failure marker matches neither baseline nor checkpoint")
-                raise ValueError("Menu-control orphan failure marker live stage is invalid")
+            if live != marker["stageFingerprints"][1]:
+                self._lock_recovery(
+                    "failure marker has no durable native transition to the live stage"
+                )
+                raise ValueError(
+                    "Menu-control orphan failure marker lacks a durable transition"
+                )
         elif not isinstance(cursor, int) or live != marker["stageFingerprints"][cursor]:
             self._lock_recovery("orphan marker does not match the live Scene")
             raise ValueError("Menu-control orphan marker live stage is invalid")
@@ -1090,6 +1153,158 @@ class MenuControlHistoryController:
             return
         self._current = updated
         self._entries[-1] = updated
+
+    def pending_transition_results(self) -> list[dict[str, object]]:
+        """Return the exact durable, unacknowledged transition outbox."""
+
+        if self._current is not None:
+            return deepcopy(list(self._current.transition_results))
+        if self._orphan_marker is not None:
+            results = self._orphan_marker.get("transitionResults")
+            if isinstance(results, list):
+                return deepcopy(results)
+        return []
+
+    def current_marker_commitments(
+        self, scene: Any
+    ) -> dict[str, object]:
+        """Bind the active checkpoint marker to the exact current Scene."""
+
+        self._require_context_scene(scene)
+        entry = self._current
+        if entry is None or self._owner_scene(entry) is not scene:
+            raise RuntimeError("Menu-control transition checkpoint is not active")
+        marker = self._read_marker(scene)
+        if marker is None or marker != self._marker_payload(entry):
+            raise RuntimeError("Menu-control transition marker changed")
+        fingerprint_cursor = (
+            1
+            if entry.checkpoint_kind == "failure" and entry.cursor is None
+            else entry.cursor
+        )
+        if fingerprint_cursor is None:
+            raise RuntimeError("Menu-control transition cursor is unavailable")
+        live = _live_scene_fingerprint(scene)
+        if live != entry.stage_fingerprints[fingerprint_cursor]:
+            raise RuntimeError("Menu-control transition live Scene changed")
+        return {
+            "checkpointId": entry.checkpoint_id,
+            "undoLockId": entry.undo_lock_id,
+            "proofId": entry.proof_id,
+            "replayId": entry.replay_id,
+            "targetId": entry.target_id,
+            "checkpointKind": entry.checkpoint_kind,
+            "stageFingerprints": list(entry.stage_fingerprints),
+            "cursor": entry.cursor,
+            "terminalResultContentSha256": (
+                entry.terminal_result_content_sha256
+            ),
+            "markerContentSha256": marker["markerContentSha256"],
+            "terminalMarkerContentSha256": marker[
+                "terminalMarkerContentSha256"
+            ],
+            "currentSceneFingerprintSha256": live,
+        }
+
+    def reconcile_transition_outbox(
+        self,
+        scene: Any,
+        delivery: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Build a read-only ACK for an exact persisted transition suffix."""
+
+        if delivery.get("kind") != "native_history_transition_reconcile":
+            raise ValueError("Menu-control transition reconciliation is unsupported")
+        recovery_id = _require_uuid(
+            delivery.get("recoveryId"), "transition recoveryId"
+        )
+        commitments = self.current_marker_commitments(scene)
+        boundary = delivery.get("history")
+        if not isinstance(boundary, Mapping):
+            raise ValueError(
+                "Menu-control transition reconciliation history is unavailable"
+            )
+        locked_index = 8 if commitments["checkpointKind"] == "success" else 1
+        for field in (
+            "checkpointId",
+            "undoLockId",
+            "terminalResultContentSha256",
+        ):
+            if boundary.get(field) != commitments[field]:
+                raise ValueError(
+                    "Menu-control transition reconciliation identity changed"
+                )
+        if (
+            boundary.get("checkpointKind") != commitments["checkpointKind"]
+            or boundary.get("baselineSceneFingerprintSha256")
+            != commitments["stageFingerprints"][0]
+            or boundary.get("lockedSceneFingerprintSha256")
+            != commitments["stageFingerprints"][locked_index]
+            or boundary.get("terminalMarkerContentSha256")
+            != commitments["terminalMarkerContentSha256"]
+            or delivery.get("expectedMarkerContentSha256")
+            != commitments["terminalMarkerContentSha256"]
+        ):
+            raise ValueError(
+                "Menu-control transition reconciliation marker changed"
+            )
+        entry = self._current
+        if entry is None:
+            raise ValueError(
+                "Menu-control transition reconciliation outbox is unavailable"
+            )
+        cursor = entry.cursor
+        status = "restored" if cursor == 0 else "history_locked"
+        delivery_identity = {
+            key: deepcopy(value)
+            for key, value in entry.terminal_result.items()
+            if key
+            not in {
+                "status",
+                "managedActionResult",
+                "managedIdentityVerified",
+                "managedReceiptCreated",
+                "requiresUndoToUnlock",
+                "terminalEvidence",
+                "error",
+                "occurredAt",
+            }
+        }
+        return {
+            **delivery_identity,
+            "kind": "native_history_transition_reconcile",
+            "recoveryId": recovery_id,
+            "history": {
+                "checkpointId": commitments["checkpointId"],
+                "undoLockId": commitments["undoLockId"],
+                "checkpointKind": commitments["checkpointKind"],
+                "stageFingerprints": commitments["stageFingerprints"],
+                "terminalResultContentSha256": commitments[
+                    "terminalResultContentSha256"
+                ],
+                "terminalMarkerContentSha256": commitments[
+                    "terminalMarkerContentSha256"
+                ],
+            },
+            "serverAcceptedCursor": delivery.get("serverAcceptedCursor"),
+            "serverAcceptedStatus": delivery.get("serverAcceptedStatus"),
+            "transitions": deepcopy(list(entry.transition_results)),
+            "transitionContentSha256s": list(
+                entry.transition_result_content_sha256s
+            ),
+            "terminalResultContentSha256": commitments[
+                "terminalResultContentSha256"
+            ],
+            "expectedMarkerContentSha256": commitments[
+                "terminalMarkerContentSha256"
+            ],
+            "currentCursor": cursor,
+            "currentStatus": status,
+            "currentSceneFingerprintSha256": commitments[
+                "currentSceneFingerprintSha256"
+            ],
+            "occurredAt": _utc_now(),
+        }
 
     @staticmethod
     def _terminal_receipt_chain_heads(result: Mapping[str, object]) -> list[str]:
@@ -1241,16 +1456,90 @@ class MenuControlHistoryController:
             entry is None
             or owner is None
             or getattr(bpy.context, "scene", None) is not owner
+            or entry.cursor != 0
             or _live_scene_fingerprint(owner) != entry.stage_fingerprints[0]
         ):
             self._lock_recovery("explicit restore did not prove the baseline")
             return False
-        updated = replace(entry, cursor=0)
-        self._write_marker(owner, updated)
-        self._current = updated
-        self._entries[-1] = updated
         self._locked = False
         self._status = "restored"
+        self.error = ""
+        return True
+
+    def supersede_restored(
+        self,
+        scene: Any,
+        *,
+        invalidate_redo: Callable[[], bool],
+    ) -> bool:
+        """Retire an acknowledged baseline marker behind a native Redo barrier."""
+
+        if not self._registered:
+            raise RuntimeError("Menu-control history is not registered")
+        if not callable(invalidate_redo):
+            raise TypeError("Menu-control native Redo invalidator must be callable")
+        self._require_context_scene(scene)
+        entry = self._current
+        if entry is None:
+            if self._read_marker(scene) is None:
+                return False
+            raise RuntimeError("Menu-control history marker requires explicit recovery")
+        owner = self._owner_scene(entry)
+        if (
+            owner is not scene
+            or entry.cursor != 0
+            or self._locked
+            or entry.transition_results
+            or entry.acknowledged_terminal_result_content_sha256
+            != entry.terminal_result_content_sha256
+            or _live_scene_fingerprint(scene) != entry.stage_fingerprints[0]
+        ):
+            raise RuntimeError(
+                "Menu-control history is not an acknowledged restored baseline"
+            )
+        marker = self._read_marker(scene)
+        if marker is None or marker != self._marker_payload(entry):
+            raise RuntimeError("Menu-control restored marker changed before supersession")
+        serialized = scene.get(MENU_CONTROL_HISTORY_MARKER_KEY)
+        invalidation_error: Exception | None = None
+        try:
+            scene.pop(MENU_CONTROL_HISTORY_MARKER_KEY, None)
+            if self._read_marker(scene) is not None:
+                raise RuntimeError("Menu-control restored marker was not removed")
+            if invalidate_redo() is not True:
+                raise RuntimeError("Menu-control native Redo was not invalidated")
+            if self._read_marker(scene) is not None:
+                raise RuntimeError(
+                    "Menu-control restored marker changed during Redo invalidation"
+                )
+            if _live_scene_fingerprint(scene) != entry.stage_fingerprints[0]:
+                raise RuntimeError(
+                    "Menu-control baseline changed during Redo invalidation"
+                )
+        except Exception as error:
+            invalidation_error = error
+        if invalidation_error is not None:
+            try:
+                if serialized is not None:
+                    scene[MENU_CONTROL_HISTORY_MARKER_KEY] = serialized
+                if self._read_marker(scene) != marker:
+                    raise RuntimeError(
+                        "Menu-control restored marker rollback did not round-trip"
+                    )
+            except Exception as rollback_error:
+                self._lock_recovery(
+                    "native Redo invalidation failed and marker rollback failed"
+                )
+                raise RuntimeError(
+                    "Menu-control restored marker rollback failed"
+                ) from rollback_error
+            raise RuntimeError(
+                "Menu-control native Redo invalidation failed"
+            ) from invalidation_error
+        self._current = None
+        self._orphan_marker = None
+        self._locked = False
+        self._status = "superseded"
         self.error = ""
         return True
 

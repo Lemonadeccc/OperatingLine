@@ -449,6 +449,187 @@ class MenuControlHistoryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "transition order"):
             history.MenuControlHistoryController._read_marker(self.scene)
 
+    def test_transition_outbox_persists_before_publish_and_callback_failure_fails_closed(self) -> None:
+        published = []
+
+        def publish(result):
+            marker = json.loads(
+                self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY]
+            )
+            self.assertEqual(marker["transitionResults"][-1], result)
+            published.append(deepcopy(result))
+            raise RuntimeError("injected menu transition publish failure")
+
+        self.controller = history.MenuControlHistoryController(
+            self.gate, transition_result_callback=publish
+        )
+        self._arm()
+        self.live = _fingerprint(7)
+
+        self.controller.sync("undo")
+
+        marker = history.MenuControlHistoryController._read_marker(self.scene)
+        self.assertEqual(marker["transitionResults"], published)
+        self.assertEqual(marker["cursor"], 7)
+        self.assertTrue(self.controller.has_transition_outbox())
+        self.assertTrue(self.controller.mutation_locked)
+        self.assertEqual(self.controller.status, "recovery_required")
+        self.assertIn("publish failure", self.controller.error)
+
+    def test_pending_transition_commitments_and_reconciliation_are_read_only(self) -> None:
+        self._arm()
+        self.live = _fingerprint(7)
+        self.controller.sync("undo")
+        self.live = _fingerprint(6)
+        self.controller.sync("undo")
+        pending = self.controller.pending_transition_results()
+        marker_before = self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY]
+        first_hash, second_hash = self.controller.current_checkpoint()[
+            "transitionResultContentSha256s"
+        ]
+        commitments = self.controller.current_marker_commitments(self.scene)
+        challenge = {
+            "kind": "native_history_transition_reconcile",
+            "recoveryId": str(uuid.uuid4()),
+            "history": {
+                "checkpointId": commitments["checkpointId"],
+                "undoLockId": commitments["undoLockId"],
+                "checkpointKind": commitments["checkpointKind"],
+                "baselineSceneFingerprintSha256": commitments[
+                    "stageFingerprints"
+                ][0],
+                "lockedSceneFingerprintSha256": commitments[
+                    "stageFingerprints"
+                ][8],
+                "terminalResultContentSha256": commitments[
+                    "terminalResultContentSha256"
+                ],
+                "terminalMarkerContentSha256": commitments[
+                    "terminalMarkerContentSha256"
+                ],
+            },
+            "serverAcceptedCursor": 7,
+            "serverAcceptedStatus": "history_locked",
+            "acknowledgedTransitionContentSha256s": [first_hash],
+            "expectedMarkerContentSha256": commitments[
+                "terminalMarkerContentSha256"
+            ],
+        }
+        self.controller.acknowledge_transition_results([first_hash])
+
+        ack = self.controller.reconcile_transition_outbox(self.scene, challenge)
+
+        self.assertEqual(
+            ack["kind"], "native_history_transition_reconcile"
+        )
+        self.assertEqual(ack["transitions"], pending[1:])
+        self.assertEqual(ack["transitionContentSha256s"], [second_hash])
+        self.assertEqual(ack["currentCursor"], 6)
+        self.assertEqual(ack["currentStatus"], "history_locked")
+        self.assertNotEqual(
+            self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY], marker_before
+        )
+        pending[0]["status"] = "forged"
+        self.assertNotEqual(
+            pending, self.controller.pending_transition_results()
+        )
+
+        self.controller.acknowledge_transition_results([second_hash])
+        self.assertEqual(
+            self.controller.current_checkpoint()[
+                "transitionResultContentSha256s"
+            ],
+            [],
+        )
+        self.assertEqual(self.controller.pending_transition_results(), [])
+
+    def test_failure_checkpoint_native_undo_and_redo_use_null_cursor_boundary(self) -> None:
+        published = []
+        self.controller = history.MenuControlHistoryController(
+            self.gate, transition_result_callback=published.append
+        )
+        self.controller.register()
+        failed_snapshot = {"failure": "current"}
+        failed_fingerprint = proof.compute_scene_fingerprint_sha256(
+            failed_snapshot
+        )
+        self.live = failed_fingerprint
+        evidence = {
+            "ok": False,
+            "executorId": proof.EXECUTOR_ID,
+            "mutationStarted": True,
+            "requiresUndoRecovery": True,
+            "failureStatus": "failed_checkpointed",
+            "baselineSceneFingerprintSha256": _fingerprint(0),
+            "currentSceneFingerprintSha256": failed_fingerprint,
+            "baselineSceneSnapshot": deepcopy(_BASELINE_SCENE),
+            "currentSceneSnapshot": failed_snapshot,
+        }
+        self.controller.arm_failed(
+            self.scene,
+            evidence,
+            proof_id=PROOF_ID,
+            replay_id=REPLAY_ID,
+            target_id="proof.uv_sphere.eye",
+            terminal_result_builder=_terminal("failed_checkpointed"),
+        )
+
+        self.live = _fingerprint(0)
+        self.controller.sync("undo")
+        self.assertEqual(self.controller.cursor, 0)
+        self.assertFalse(self.controller.mutation_locked)
+        self.assertEqual(
+            (published[-1]["fromCursor"], published[-1]["toCursor"]),
+            (None, 0),
+        )
+
+        self.live = failed_fingerprint
+        self.controller.sync("redo")
+        self.assertIsNone(self.controller.cursor)
+        self.assertTrue(self.controller.mutation_locked)
+        self.assertEqual(
+            (published[-1]["fromCursor"], published[-1]["toCursor"]),
+            (0, None),
+        )
+        marker = history.MenuControlHistoryController._read_marker(self.scene)
+        self.assertEqual(marker["cursor"], None)
+        self.assertEqual(len(marker["transitionResults"]), 2)
+
+    def test_failure_checkpoint_wrong_null_cursor_jump_requires_recovery(self) -> None:
+        self.controller.register()
+        failed_snapshot = {"failure": "current"}
+        failed_fingerprint = proof.compute_scene_fingerprint_sha256(
+            failed_snapshot
+        )
+        self.live = failed_fingerprint
+        self.controller.arm_failed(
+            self.scene,
+            {
+                "ok": False,
+                "executorId": proof.EXECUTOR_ID,
+                "mutationStarted": True,
+                "requiresUndoRecovery": True,
+                "failureStatus": "failed_checkpointed",
+                "baselineSceneFingerprintSha256": _fingerprint(0),
+                "currentSceneFingerprintSha256": failed_fingerprint,
+                "baselineSceneSnapshot": deepcopy(_BASELINE_SCENE),
+                "currentSceneSnapshot": failed_snapshot,
+            },
+            proof_id=PROOF_ID,
+            replay_id=REPLAY_ID,
+            target_id="proof.uv_sphere.eye",
+            terminal_result_builder=_terminal("failed_checkpointed"),
+        )
+        marker_before = self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY]
+        self.live = _fingerprint(2)
+
+        self.controller.sync("undo")
+
+        self.assertEqual(self.controller.status, "recovery_required")
+        self.assertEqual(
+            self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY], marker_before
+        )
+
     def test_restart_load_requires_rebind_and_does_not_restore_instance_or_lease(self) -> None:
         self._arm()
         marker = json.loads(self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY])
@@ -695,7 +876,7 @@ class MenuControlHistoryTests(unittest.TestCase):
             self.controller._write_marker(corrupting, entry)
         self.assertEqual(corrupting[history.MENU_CONTROL_HISTORY_MARKER_KEY], previous)
 
-    def test_failure_marker_restart_rebind_can_prove_exact_restore(self) -> None:
+    def test_failure_marker_restart_rebind_rejects_unrecorded_restore(self) -> None:
         self.controller.register()
         self.live = "e" * 64
         evidence = {
@@ -722,11 +903,137 @@ class MenuControlHistoryTests(unittest.TestCase):
         restarted = history.MenuControlHistoryController(self.gate)
         restarted.register()
         self.live = _fingerprint(0)
-        rebound = restarted.rebind_orphan(
-            self.scene, _authority(marker, self.scene, self.gate)
+        with self.assertRaisesRegex(ValueError, "lacks a durable transition"):
+            restarted.rebind_orphan(
+                self.scene, _authority(marker, self.scene, self.gate)
+            )
+        self.assertTrue(restarted.mutation_locked)
+        self.assertEqual(restarted.status, "recovery_required")
+        self.assertIsNone(restarted.current_checkpoint())
+
+    def test_acknowledged_restored_history_can_be_superseded_before_new_work(
+        self,
+    ) -> None:
+        self._arm()
+        terminal_hash = self.controller.current_checkpoint()[
+            "terminalResultContentSha256"
+        ]
+        self.assertTrue(self.controller.acknowledge_terminal_result(terminal_hash))
+        for cursor in range(7, -1, -1):
+            self.live = _fingerprint(cursor)
+            self.controller.sync("undo")
+        transition_hashes = self.controller.current_checkpoint()[
+            "transitionResultContentSha256s"
+        ]
+        self.controller.acknowledge_transition_results(transition_hashes)
+
+        invalidation_observations = []
+
+        def invalidate_redo() -> bool:
+            invalidation_observations.append(
+                history.MENU_CONTROL_HISTORY_MARKER_KEY not in self.scene
+            )
+            return True
+
+        self.assertTrue(
+            self.controller.supersede_restored(
+                self.scene,
+                invalidate_redo=invalidate_redo,
+            )
         )
-        self.assertEqual(rebound["cursor"], 0)
-        self.assertFalse(restarted.mutation_locked)
+
+        self.assertEqual(invalidation_observations, [True])
+        self.assertNotIn(history.MENU_CONTROL_HISTORY_MARKER_KEY, self.scene)
+        self.assertIsNone(self.controller.current_checkpoint())
+        self.assertFalse(self.controller.mutation_locked)
+        self.assertEqual(self.controller.status, "superseded")
+        self.assertFalse(
+            self.controller.supersede_restored(
+                self.scene,
+                invalidate_redo=lambda: self.fail(
+                    "an absent restored history must not invalidate Redo again"
+                ),
+            )
+        )
+
+    def test_redo_invalidation_failure_restores_exact_baseline_marker(self) -> None:
+        self._arm()
+        terminal_hash = self.controller.current_checkpoint()[
+            "terminalResultContentSha256"
+        ]
+        self.assertTrue(self.controller.acknowledge_terminal_result(terminal_hash))
+        for cursor in range(7, -1, -1):
+            self.live = _fingerprint(cursor)
+            self.controller.sync("undo")
+        transition_hashes = self.controller.current_checkpoint()[
+            "transitionResultContentSha256s"
+        ]
+        self.controller.acknowledge_transition_results(transition_hashes)
+        marker = self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY]
+
+        def reject_invalidation() -> bool:
+            self.assertNotIn(history.MENU_CONTROL_HISTORY_MARKER_KEY, self.scene)
+            return False
+
+        with self.assertRaisesRegex(RuntimeError, "Redo invalidation failed"):
+            self.controller.supersede_restored(
+                self.scene,
+                invalidate_redo=reject_invalidation,
+            )
+
+        self.assertEqual(
+            self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY], marker
+        )
+        self.assertEqual(self.controller.cursor, 0)
+        self.assertEqual(self.controller.status, "restored")
+        self.assertFalse(self.controller.mutation_locked)
+
+    def test_redo_invalidator_exception_restores_exact_baseline_marker(self) -> None:
+        self._arm()
+        terminal_hash = self.controller.current_checkpoint()[
+            "terminalResultContentSha256"
+        ]
+        self.assertTrue(self.controller.acknowledge_terminal_result(terminal_hash))
+        for cursor in range(7, -1, -1):
+            self.live = _fingerprint(cursor)
+            self.controller.sync("undo")
+        transition_hashes = self.controller.current_checkpoint()[
+            "transitionResultContentSha256s"
+        ]
+        self.controller.acknowledge_transition_results(transition_hashes)
+        marker = self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY]
+
+        def fail_invalidation() -> bool:
+            raise RuntimeError("undo push unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "Redo invalidation failed"):
+            self.controller.supersede_restored(
+                self.scene,
+                invalidate_redo=fail_invalidation,
+            )
+
+        self.assertEqual(
+            self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY], marker
+        )
+        self.assertEqual(self.controller.cursor, 0)
+        self.assertEqual(self.controller.status, "restored")
+
+    def test_unacknowledged_restored_history_cannot_be_superseded(self) -> None:
+        self._arm()
+        for cursor in range(7, -1, -1):
+            self.live = _fingerprint(cursor)
+            self.controller.sync("undo")
+        transition_hashes = self.controller.current_checkpoint()[
+            "transitionResultContentSha256s"
+        ]
+        self.controller.acknowledge_transition_results(transition_hashes)
+
+        with self.assertRaisesRegex(RuntimeError, "acknowledged restored baseline"):
+            self.controller.supersede_restored(
+                self.scene,
+                invalidate_redo=lambda: True,
+            )
+        self.assertIn(history.MENU_CONTROL_HISTORY_MARKER_KEY, self.scene)
 
 
 if __name__ == "__main__":

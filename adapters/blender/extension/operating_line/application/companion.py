@@ -124,6 +124,7 @@ class CompanionController:
         self._menu_control_proof_checkpoint: dict[str, Any] | None = None
         self._seen_menu_control_proof_request_ids: set[str] = set()
         self._menu_control_terminal_resubmitted_lease_id: str | None = None
+        self._menu_control_transition_resubmitted_lease_id: str | None = None
         self._pending_menu_control_terminal_reconciliation: dict[str, Any] | None = None
         self._menu_control_native_guidance_suspended = False
         self._menu_control_recovery_locked = False
@@ -205,7 +206,7 @@ class CompanionController:
             reapplied_result_builder=self._shortcut_history_reapplied,
             transition_result_callback=self._submit_shortcut_transition_result,
         )
-        self._menu_control_history.register()
+        self._menu_control_history.register(self._submit_menu_control_history_transition)
         if self._timer_registered:
             return
         bpy.app.timers.register(self._timer_callback, first_interval=0.1, persistent=True)
@@ -1267,16 +1268,8 @@ class CompanionController:
     ) -> bool:
         """Validate fully before replacing the active session."""
         from .. import get_session, replace_session
-        if self.shortcut_mutation_blocked:
-            raise ValueError(
-                "Native Undo must restore the shortcut proof before replacing the walkthrough"
-            )
 
         replacement = self._validated_session(plan, plan_content_sha256)
-        # Only an explicit accept_proposal() call may authorize remote action
-        # execution for a plan. Any other installation path revokes that proof.
-        self._last_accepted_proposal_id = None
-        self._last_accepted_proposal_decision = None
         plan_content_sha256 = replacement.plan_content_sha256
         plan_id = replacement.plan_id
         revision = replacement.revision
@@ -1302,9 +1295,16 @@ class CompanionController:
                     current.revision,
                     current.plan_content_sha256,
                 )
-            self.status = f"Plan {plan_id} r{current.revision}"
-            self.error = ""
             return True
+        if self.shortcut_mutation_blocked:
+            raise ValueError(
+                "Native Undo must restore the shortcut proof before replacing the walkthrough"
+            )
+        # Only an explicit accept_proposal() call may authorize remote action
+        # execution for a different plan. Idempotent or stale deliveries above
+        # must not revoke the accepted proof that Runtime is about to dispatch.
+        self._last_accepted_proposal_id = None
+        self._last_accepted_proposal_decision = None
         if current.receipts:
             pending = self.pending_plan
             if (
@@ -2615,11 +2615,13 @@ class CompanionController:
 
             driver.start(
                 preflight_hook=preflight_hook,
+                pre_mutation_hook=self._supersede_restored_menu_history,
                 on_complete=lambda evidence: self._handle_shortcut_proof_complete(delivery, evidence),
                 on_failure=lambda evidence: self._handle_shortcut_proof_failure(delivery, evidence),
             )
-            self.status = "Shortcut proof executing"
-            self.error = ""
+            if self._shortcut_proof_driver is driver:
+                self.status = "Shortcut proof executing"
+                self.error = ""
         except (IndexError, KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             self._shortcut_proof_driver = None
             self._handle_shortcut_proof_failure(delivery, {
@@ -2859,6 +2861,12 @@ class CompanionController:
             if not isinstance(action["arguments"], dict):
                 raise ValueError("Action execution arguments must be an object")
         except (IndexError, KeyError, TypeError, ValueError) as error:
+            self._reject_action_execution(delivery, str(error))
+            return
+
+        try:
+            self._supersede_restored_menu_history()
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
             self._reject_action_execution(delivery, str(error))
             return
 
@@ -3466,17 +3474,71 @@ class CompanionController:
 
             driver.start(
                 preflight_hook=preflight,
+                pre_mutation_hook=self._supersede_restored_menu_history,
                 on_complete=lambda evidence: self._handle_menu_control_proof_complete(delivery, evidence),
                 on_failure=lambda evidence: self._handle_menu_control_proof_failure(delivery, evidence),
                 continuation_guard=continuation,
             )
-            self.error = ""
-            self.status = "Menu-control proof executing"
+            if self._menu_control_proof_driver is driver:
+                self.error = ""
+                self.status = "Menu-control proof executing"
         except (IndexError, KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             self._handle_menu_control_proof_failure(delivery, {
                 "failureStatus": "preflight_rejected", "error": str(error),
                 "mutationStarted": False,
             })
+
+    def _supersede_restored_menu_history(self) -> bool:
+        try:
+            superseded = self._menu_control_history.supersede_restored(
+                bpy.context.scene,
+                invalidate_redo=self._invalidate_menu_control_redo,
+            )
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._menu_control_recovery_locked = True
+            raise RuntimeError(
+                f"Menu-control restored history supersession failed closed: {error}"
+            ) from error
+        if superseded:
+            if self._menu_control_proof_driver is None:
+                self._menu_control_proof_delivery = None
+            self._menu_control_proof_checkpoint = None
+            self._menu_control_terminal_resubmitted_lease_id = None
+            self._menu_control_transition_resubmitted_lease_id = None
+        return superseded
+
+    @staticmethod
+    def _invalidate_menu_control_redo() -> bool:
+        context = bpy.context
+        window = getattr(context, "window", None)
+        screen = None if window is None else getattr(window, "screen", None)
+        areas = () if screen is None else tuple(
+            area for area in screen.areas if area.type == "VIEW_3D"
+        )
+        if window is None or len(areas) != 1:
+            return False
+        area = areas[0]
+        regions = tuple(
+            region for region in area.regions if region.type == "WINDOW"
+        )
+        if len(regions) != 1:
+            return False
+        space = getattr(area.spaces, "active", None)
+        if space is None:
+            return False
+        try:
+            with context.temp_override(
+                window=window,
+                area=area,
+                region=regions[0],
+                space_data=space,
+            ):
+                result = bpy.ops.ed.undo_push(
+                    message="OperatingLine supersede restored menu proof"
+                )
+        except Exception:
+            return False
+        return isinstance(result, set) and "FINISHED" in result
 
     def _resubmit_menu_control_terminal_outbox(self, lease_id: Any) -> None:
         if not isinstance(lease_id, str) or lease_id == self._menu_control_terminal_resubmitted_lease_id:
@@ -3490,6 +3552,200 @@ class CompanionController:
         self._menu_control_terminal_resubmitted_lease_id = lease_id
         transport.submit_menu_control_proof_result(pending)
         self.status = "Menu-control terminal evidence queued for reconciliation"
+
+    @staticmethod
+    def _menu_control_history_identity(
+        commitments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "checkpointId": commitments["checkpointId"],
+            "undoLockId": commitments["undoLockId"],
+            "checkpointKind": commitments["checkpointKind"],
+            "stageFingerprints": deepcopy(commitments["stageFingerprints"]),
+            "terminalResultContentSha256": commitments[
+                "terminalResultContentSha256"
+            ],
+            "terminalMarkerContentSha256": commitments[
+                "terminalMarkerContentSha256"
+            ],
+        }
+
+    def _menu_control_transition_report(
+        self, transition: dict[str, Any]
+    ) -> dict[str, Any]:
+        transport = self._transport
+        delivery = self._menu_control_proof_delivery
+        if transport is None or delivery is None:
+            raise RuntimeError("Menu-control transition delivery identity is unavailable")
+        current_lease = transport.current_document_lease
+        if current_lease is None:
+            raise RuntimeError("Menu-control transition current lease is unavailable")
+        commitments = self._menu_control_history.current_marker_commitments(
+            bpy.context.scene
+        )
+        from_cursor = transition["fromCursor"]
+        reported_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return {
+            **deepcopy(delivery),
+            "kind": "native_history_transition",
+            "currentLease": current_lease,
+            "history": self._menu_control_history_identity(commitments),
+            "serverAcceptedCursor": from_cursor,
+            "serverAcceptedStatus": (
+                "restored" if from_cursor == 0 else "history_locked"
+            ),
+            "transition": deepcopy(transition),
+            "transitionContentSha256": self._shortcut_canonical_sha256(transition),
+            "reportedAt": reported_at,
+        }
+
+    def _submit_menu_control_history_transition(self, transition: Any) -> None:
+        if not isinstance(transition, dict):
+            raise TypeError("Menu-control history transition must be an object")
+        transport = self._transport
+        if (
+            transport is None
+            or transport.current_document_lease is None
+            or self._menu_control_proof_delivery is None
+        ):
+            return
+        report = self._menu_control_transition_report(transition)
+        transport.submit_menu_control_history_transition(report)
+        self.status = "Menu-control native history transition queued"
+        self.error = ""
+
+    def _resubmit_menu_control_transition_outbox(self, lease_id: Any) -> None:
+        if (
+            not isinstance(lease_id, str)
+            or lease_id == self._menu_control_transition_resubmitted_lease_id
+            or self._menu_control_recovery_locked
+        ):
+            return
+        transport = self._transport
+        if transport is None:
+            return
+        transitions = self._menu_control_history.pending_transition_results()
+        if not transitions:
+            return
+        self._menu_control_transition_resubmitted_lease_id = lease_id
+        for transition in transitions:
+            transport.submit_menu_control_history_transition(
+                self._menu_control_transition_report(transition)
+            )
+        self.status = "Menu-control native history outbox queued for reconciliation"
+
+    def _handle_menu_control_history_relock_conflict(self, message: Any) -> None:
+        if not isinstance(message, dict):
+            return
+        transition = message.get("transition")
+        transition_hash = message.get("transitionContentSha256")
+        marker_detail = "current marker could not be proven"
+        try:
+            if not isinstance(transition, dict) or not isinstance(
+                transition_hash, str
+            ):
+                raise ValueError("Runtime relock conflict omitted transition identity")
+            if transition_hash != self._shortcut_canonical_sha256(transition):
+                raise ValueError("Runtime relock conflict transition hash changed")
+            pending_hashes = {
+                self._shortcut_canonical_sha256(item)
+                for item in self._menu_control_history.pending_transition_results()
+            }
+            if transition_hash not in pending_hashes:
+                raise ValueError("Runtime relock conflict is not in the durable outbox")
+            commitments = self._menu_control_history.current_marker_commitments(
+                bpy.context.scene
+            )
+            exact_live_stage = (
+                commitments.get("cursor") == transition.get("toCursor")
+                and commitments.get("currentSceneFingerprintSha256")
+                == transition.get("sceneFingerprintSha256")
+            )
+            marker_detail = (
+                "current marker still proves the rejected relock stage"
+                if exact_live_stage
+                else "current marker or live Scene diverged after the rejected relock"
+            )
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            marker_detail = f"fresh marker/live Scene proof failed: {error}"
+        transport = self._transport
+        current_lease = (
+            None if transport is None else transport.current_document_lease
+        )
+        if isinstance(current_lease, dict):
+            self._menu_control_transition_resubmitted_lease_id = current_lease.get(
+                "leaseId"
+            )
+        self._menu_control_recovery_locked = True
+        runtime_message = message.get("message")
+        self.error = (
+            f"Menu-control native Redo relock conflict; {marker_detail}. "
+            f"{runtime_message}"
+            if isinstance(runtime_message, str) and runtime_message
+            else f"Menu-control native Redo relock conflict; {marker_detail}"
+        )
+        self.status = "Menu-control proof recovery required"
+
+    @staticmethod
+    def _menu_control_reconciliation_delivery_identity(
+        delivery: dict[str, Any]
+    ) -> dict[str, Any]:
+        reconciliation_fields = {
+            "kind", "recoveryId", "replacementLease", "history",
+            "serverAcceptedCursor", "serverAcceptedStatus",
+            "acknowledgedTransitionContentSha256s",
+            "expectedMarkerContentSha256", "recoveryRequestedAt",
+        }
+        return {
+            key: deepcopy(value)
+            for key, value in delivery.items()
+            if key not in reconciliation_fields
+        }
+
+    def _handle_menu_control_history_reconcile_request(self, delivery: Any) -> None:
+        transport = self._transport
+        if not isinstance(delivery, dict) or transport is None:
+            return
+        try:
+            pending = self._menu_control_history.pending_transition_results()
+            pending_hashes = [
+                self._shortcut_canonical_sha256(transition)
+                for transition in pending
+            ]
+            server_hashes = delivery[
+                "acknowledgedTransitionContentSha256s"
+            ]
+            overlap = 0
+            for length in range(
+                min(len(server_hashes), len(pending_hashes)), 0, -1
+            ):
+                if server_hashes[-length:] == pending_hashes[:length]:
+                    overlap = length
+                    break
+            if overlap:
+                self._menu_control_history.acknowledge_transition_results(
+                    pending_hashes[:overlap]
+                )
+            ack = self._menu_control_history.reconcile_transition_outbox(
+                bpy.context.scene,
+                delivery,
+            )
+            ack = {
+                **self._menu_control_reconciliation_delivery_identity(delivery),
+                **ack,
+            }
+            self._menu_control_proof_delivery = (
+                self._menu_control_reconciliation_delivery_identity(delivery)
+            )
+            transport.submit_menu_control_proof_recovery_ack(ack)
+            self.error = ""
+            self.status = "Menu-control native history reconciliation submitted"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self.error = (
+                "Menu-control native history reconciliation failed closed: "
+                f"{error}"
+            )
+            self.status = "Menu-control proof recovery required"
 
     def _handle_menu_control_terminal_reconcile_request(self, delivery: Any) -> None:
         transport = self._transport
@@ -3584,19 +3840,64 @@ class CompanionController:
                     self._handle_menu_control_terminal_reconcile_request(
                         message.get("request")
                     )
+                elif (
+                    message.get("kind")
+                    == "menu_control_proof_history_reconcile_request"
+                ):
+                    self._handle_menu_control_history_reconcile_request(
+                        message.get("request")
+                    )
+                elif (
+                    message.get("kind")
+                    == "menu_control_history_transition_acknowledged"
+                ):
+                    digest = message.get("transitionContentSha256")
+                    if isinstance(digest, str):
+                        self._menu_control_history.acknowledge_transition_results(
+                            [digest]
+                        )
+                        self._menu_control_transition_resubmitted_lease_id = None
+                    if not self.error:
+                        self.status = "Menu-control native history transition acknowledged"
+                elif message.get("kind") == "menu_control_history_relock_conflict":
+                    self._handle_menu_control_history_relock_conflict(message)
+                elif message.get("kind") == "menu_control_history_transition_rejected":
+                    self._menu_control_recovery_locked = True
+                    self.error = str(
+                        message.get("message")
+                        or "Runtime rejected menu-control native history evidence"
+                    )
+                    self.status = "Menu-control proof recovery required"
                 elif message.get("kind") == "menu_control_proof_recovery_acknowledged":
+                    transition_recovery = (
+                        message.get("recoveryKind")
+                        == "native_history_transition_reconcile"
+                    )
                     try:
-                        acknowledged = (
-                            self._menu_control_history.acknowledge_terminal_result(
-                                message.get("resultContentSha256")
+                        transition_hashes = message.get(
+                            "transitionContentSha256s", []
+                        )
+                        if transition_recovery and isinstance(
+                            transition_hashes, list
+                        ):
+                            self._menu_control_history.acknowledge_transition_results(
+                                transition_hashes
                             )
+                        acknowledged = self._menu_control_history.acknowledge_terminal_result(
+                            message.get("resultContentSha256")
                         )
                     except (TypeError, ValueError):
                         acknowledged = False
                     if acknowledged:
                         self._menu_control_terminal_resubmitted_lease_id = None
+                        if transition_recovery:
+                            self._menu_control_transition_resubmitted_lease_id = None
                         self.error = ""
-                        self.status = "Menu-control terminal evidence reconciled"
+                        self.status = (
+                            "Menu-control native history reconciled"
+                            if transition_recovery
+                            else "Menu-control terminal evidence reconciled"
+                        )
                     else:
                         self.error = (
                             "Menu-control reconciliation acknowledgement did not match "
@@ -3604,11 +3905,24 @@ class CompanionController:
                         )
                         self.status = "Menu-control proof recovery required"
                 elif message.get("kind") == "menu_control_proof_recovery_rejected":
+                    self._menu_control_recovery_locked = True
                     self.error = str(
                         message.get("message")
                         or "Runtime rejected menu-control terminal reconciliation"
                     )
                     self.status = "Menu-control proof recovery required"
+                elif message.get("kind") == "menu_control_proof_recovery_absent":
+                    try:
+                        self._resubmit_menu_control_transition_outbox(
+                            message.get("leaseId")
+                        )
+                    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+                        self._menu_control_recovery_locked = True
+                        self.error = (
+                            "Menu-control transition outbox resubmission failed closed: "
+                            f"{error}"
+                        )
+                        self.status = "Menu-control proof recovery required"
                 elif message.get("kind") == "shortcut_proof_execute_request":
                     self._handle_shortcut_proof_execute_request(message.get("request"))
                 elif message.get("kind") == "shortcut_proof_recovery_request":
