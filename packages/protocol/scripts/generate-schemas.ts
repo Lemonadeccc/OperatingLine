@@ -120,6 +120,7 @@ import {
   humanEvalAdjudicationSchema,
   humanEvalAnnotationSchema,
   humanEvalComparisonReportSchema,
+  humanEvalReleaseCandidateManifestSchema,
   humanEvalSuiteSchema,
   interactionCatalogSchema,
   interactionOperationSchema,
@@ -868,6 +869,11 @@ const schemas = [
     'human-eval-comparison-report.schema.json',
     'https://operatingline.dev/schema/v1/human-eval-comparison-report.json',
     humanEvalComparisonReportSchema,
+  ],
+  [
+    'human-eval-release-candidate-manifest.schema.json',
+    'https://operatingline.dev/schema/v1/human-eval-release-candidate-manifest.json',
+    humanEvalReleaseCandidateManifestSchema,
   ],
   [
     'companion-initial-plan-run-create-request.schema.json',

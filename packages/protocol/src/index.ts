@@ -19,6 +19,7 @@ export * from './eval.js';
 export * from './eval-annotation.js';
 export * from './eval-common.js';
 export * from './eval-comparison.js';
+export * from './eval-release.js';
 export * from './eval-run.js';
 export * from './eval-suite.js';
 export * from './guide.js';
