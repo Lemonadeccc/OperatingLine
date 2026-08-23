@@ -34,6 +34,13 @@ type CompanionExecutionTrackExecutionRecoveryRequest = z.infer<
 type CompanionExecutionTrackExecutionStatus = z.infer<
   typeof companionExecutionTrackExecutionStatusSchema
 >;
+export type BlenderExecutionTrackExecutionManagedRepairEvidence = Extract<
+  CompanionExecutionTrackExecutionRecoveryAck['evidence'],
+  { kind: 'managed_repair_terminal' }
+>;
+type BlenderExecutionTrackExecutionDeterministicEvent = Parameters<
+  BlenderExecutionTrackExecutionEventStore['appendEvent']
+>[0] & { readonly createdAt: string };
 
 const eventTypes = [
   'blender.execution-track-execution.queued',
@@ -105,7 +112,14 @@ export interface BlenderExecutionTrackExecutionRecoveryAckAuthorization {
 }
 
 export interface BlenderExecutionTrackExecutionRecoveryAckCommitOptions {
-  readonly appendEvent: BlenderExecutionTrackExecutionEventStore['appendEvent'];
+  /**
+   * Atomically persists the exact managed-repair evidence and its coordinator-built event.
+   * Returning proves both are durable; the coordinator only then applies the transition in memory.
+   */
+  readonly commitManagedRepair: (input: {
+    readonly evidence: BlenderExecutionTrackExecutionManagedRepairEvidence;
+    readonly reconciledEvent: BlenderExecutionTrackExecutionDeterministicEvent;
+  }) => ReturnType<BlenderExecutionTrackExecutionEventStore['appendEvent']>;
 }
 
 interface InternalRecoveryAckAuthorization extends BlenderExecutionTrackExecutionRecoveryAckAuthorization {
@@ -751,6 +765,38 @@ function assertReplayLiveChronology(eventType: string, stored: StoredExecution):
   }
 }
 
+function parseStoredExecutionPayload(candidate: unknown): StoredExecution {
+  const payload = candidate as StoredExecution;
+  return {
+    status: companionExecutionTrackExecutionStatusSchema.parse(payload.status),
+    documentAuthoritySha256: parseSha256(payload.documentAuthoritySha256),
+    progressChain: payload.progressChain.map((progress) =>
+      companionExecutionTrackExecutionProgressSchema.parse(progress),
+    ),
+    ...(payload.managedStartSubmission === undefined
+      ? {}
+      : {
+          managedStartSubmission:
+            companionExecutionTrackExecutionManagedStartSubmissionSchema.parse(
+              payload.managedStartSubmission,
+            ),
+        }),
+    ...(payload.recoveryRequest === undefined
+      ? {}
+      : {
+          recoveryRequest: companionExecutionTrackExecutionRecoveryRequestSchema.parse(
+            payload.recoveryRequest,
+          ),
+        }),
+    ...(payload.recoveryAck === undefined
+      ? {}
+      : {
+          recoveryAck: companionExecutionTrackExecutionRecoveryAckSchema.parse(payload.recoveryAck),
+        }),
+    revision: payload.revision,
+  };
+}
+
 export function createBlenderExecutionTrackExecutionCoordinator(
   options: BlenderExecutionTrackExecutionCoordinatorOptions,
 ) {
@@ -783,7 +829,9 @@ export function createBlenderExecutionTrackExecutionCoordinator(
     clearRecoveryAck = false,
     documentAuthoritySha256?: string,
     managedStartSubmission?: CompanionExecutionTrackExecutionManagedStartSubmission,
-    appendEventSink?: BlenderExecutionTrackExecutionEventStore['appendEvent'],
+    appendEventSink?: (
+      input: BlenderExecutionTrackExecutionDeterministicEvent,
+    ) => ReturnType<BlenderExecutionTrackExecutionEventStore['appendEvent']>,
   ): CompanionExecutionTrackExecutionStatus => {
     const parsedStatus = companionExecutionTrackExecutionStatusSchema.parse(status);
     const previous = executions.get(parsedStatus.binding.requestId);
@@ -844,38 +892,8 @@ export function createBlenderExecutionTrackExecutionCoordinator(
   };
 
   for (const event of options.eventStore.listExecutionEventsByTypes(eventTypes)) {
-    const candidate = event.payload as StoredExecution;
-    const status = companionExecutionTrackExecutionStatusSchema.parse(candidate.status);
-    const stored: StoredExecution = {
-      status,
-      documentAuthoritySha256: parseSha256(candidate.documentAuthoritySha256),
-      progressChain: candidate.progressChain.map((progress) =>
-        companionExecutionTrackExecutionProgressSchema.parse(progress),
-      ),
-      ...(candidate.managedStartSubmission === undefined
-        ? {}
-        : {
-            managedStartSubmission:
-              companionExecutionTrackExecutionManagedStartSubmissionSchema.parse(
-                candidate.managedStartSubmission,
-              ),
-          }),
-      ...(candidate.recoveryRequest === undefined
-        ? {}
-        : {
-            recoveryRequest: companionExecutionTrackExecutionRecoveryRequestSchema.parse(
-              candidate.recoveryRequest,
-            ),
-          }),
-      ...(candidate.recoveryAck === undefined
-        ? {}
-        : {
-            recoveryAck: companionExecutionTrackExecutionRecoveryAckSchema.parse(
-              candidate.recoveryAck,
-            ),
-          }),
-      revision: candidate.revision,
-    };
+    const stored = parseStoredExecutionPayload(event.payload);
+    const status = stored.status;
     const previous = executions.get(status.binding.requestId);
     assertEventTypeMatches(event.eventType, stored);
     assertStoredEvent(event, stored);
@@ -1066,6 +1084,67 @@ export function createBlenderExecutionTrackExecutionCoordinator(
   const isRecoveryAckDuplicate = (input: CompanionExecutionTrackExecutionRecoveryAck): boolean => {
     const ack = companionExecutionTrackExecutionRecoveryAckSchema.parse(input);
     return isDeepStrictEqual(executions.get(ack.requestId)?.recoveryAck, ack);
+  };
+
+  const adoptDurableManagedRepairAck = (
+    input: CompanionExecutionTrackExecutionRecoveryAck,
+  ): boolean => {
+    const ack = companionExecutionTrackExecutionRecoveryAckSchema.parse(input);
+    if (ack.evidence.kind !== 'managed_repair_terminal') {
+      throw new BlenderExecutionTrackExecutionError(
+        'execution_track_execution_managed_repair_adoption_invalid',
+        422,
+        'Only an exact managed-repair acknowledgement may adopt durable reconciliation',
+      );
+    }
+    const current = executions.get(ack.requestId);
+    if (
+      current?.status.status === 'failed_managed_repaired' &&
+      isDeepStrictEqual(current.recoveryAck, ack)
+    ) {
+      return true;
+    }
+    if (
+      current === undefined ||
+      current.status.status !== 'failed_managed' ||
+      current.status.result?.status !== 'failed_managed' ||
+      current.recoveryAck !== undefined ||
+      !isDeepStrictEqual(current.recoveryRequest, ack.request)
+    ) {
+      throw new BlenderExecutionTrackExecutionError(
+        'execution_track_execution_managed_repair_adoption_conflict',
+        409,
+        'Durable managed-repair acknowledgement conflicts with current coordinator authority',
+      );
+    }
+    const expectedEventId = `blender-execution-track-execution:${ack.requestId}:recovery:${ack.request.recoveryId}:ack`;
+    const durableEvents = options.eventStore
+      .listExecutionEventsByTypes(eventTypes)
+      .filter((event) => event.id === expectedEventId);
+    if (durableEvents.length === 0) return false;
+    if (durableEvents.length !== 1) {
+      throw new Error('Durable managed-repair reconciliation event is not unique');
+    }
+    const durableEvent = durableEvents[0]!;
+    const durableStored = parseStoredExecutionPayload(durableEvent.payload);
+    assertEventTypeMatches(durableEvent.eventType, durableStored);
+    assertStoredEvent(durableEvent, durableStored);
+    assertReplayOwnedSlots(durableEvent.eventType, current, durableStored);
+    assertReplayLiveChronology(durableEvent.eventType, durableStored);
+    assertStoredTransition(current, durableStored);
+    if (
+      durableStored.recoveryAck === undefined ||
+      !isDeepStrictEqual(durableStored.recoveryAck, ack)
+    ) {
+      throw new BlenderExecutionTrackExecutionError(
+        'execution_track_execution_managed_repair_adoption_conflict',
+        409,
+        'Durable managed-repair reconciliation does not contain the exact acknowledgement',
+      );
+    }
+    assertRecoveryAckTransition(current, durableStored, durableStored.recoveryAck);
+    apply(durableStored);
+    return true;
   };
 
   const queue = (
@@ -1564,7 +1643,9 @@ export function createBlenderExecutionTrackExecutionCoordinator(
     liveAuthority: BlenderExecutionTrackExecutionLiveAuthority,
     commit: boolean,
     authorizedAt?: string,
-    appendEventSink?: BlenderExecutionTrackExecutionEventStore['appendEvent'],
+    appendEventSink?: (
+      input: BlenderExecutionTrackExecutionDeterministicEvent,
+    ) => ReturnType<BlenderExecutionTrackExecutionEventStore['appendEvent']>,
   ): 'accepted' | 'duplicate' => {
     const ack = companionExecutionTrackExecutionRecoveryAckSchema.parse(input);
     const stored = executions.get(ack.requestId);
@@ -1698,7 +1779,10 @@ export function createBlenderExecutionTrackExecutionCoordinator(
           ...stored.status,
           status: 'failed_managed_repaired',
           serverRecoveryEvidence: undefined,
-          updatedAt: receivedAt,
+          // The event must be identical when an atomic store committed before the
+          // in-memory apply completed. The signed ACK time is stable across retry;
+          // the server receive time is only live-authority validation evidence.
+          updatedAt: ack.occurredAt,
         }),
         stored.recoveryRequest,
         'blender.execution-track-execution.reconciled',
@@ -1788,12 +1872,33 @@ export function createBlenderExecutionTrackExecutionCoordinator(
       );
     }
     recoveryAckAuthorizations.delete(authorization);
+    const managedRepairEvidence =
+      authorization.ack.evidence.kind === 'managed_repair_terminal'
+        ? authorization.ack.evidence
+        : undefined;
+    if (
+      authorization.result === 'accepted' &&
+      managedRepairEvidence !== undefined &&
+      commitOptions?.commitManagedRepair === undefined
+    ) {
+      throw new BlenderExecutionTrackExecutionError(
+        'execution_track_execution_managed_repair_atomic_commit_required',
+        409,
+        'Managed repair requires atomic evidence and reconciliation-event persistence',
+      );
+    }
     return processRecoveryAck(
       authorization.ack,
       authorization.liveAuthority,
       true,
       authorization.authorizedAt,
-      commitOptions?.appendEvent,
+      managedRepairEvidence === undefined || commitOptions?.commitManagedRepair === undefined
+        ? undefined
+        : (reconciledEvent) =>
+            commitOptions.commitManagedRepair({
+              evidence: managedRepairEvidence,
+              reconciledEvent,
+            }),
     );
   };
 
@@ -1806,6 +1911,7 @@ export function createBlenderExecutionTrackExecutionCoordinator(
   return {
     acceptProgress,
     acceptRecoveryAck,
+    adoptDurableManagedRepairAck,
     authorizeRecoveryAck,
     commitAuthorizedRecoveryAck,
     acceptResult,

@@ -29,6 +29,7 @@ import { openOperatingLineDatabase } from '@operatingline/persistence';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createActionCatalogRegistry } from '../../../services/orchestrator/src/action-catalogs.js';
+import { createBlenderExecutionTrackExecutionCoordinator } from '../../../services/orchestrator/src/blender-execution-track-execution.js';
 import { createInteractionCatalogRegistry } from '../../../services/orchestrator/src/interaction-catalogs.js';
 import { materializeProcedureAuthoringCandidate } from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
 import { createProcedureExecutionFailureReplanCoordinator } from '../../../services/orchestrator/src/procedure-execution-failure-replan.js';
@@ -2783,21 +2784,90 @@ describe('procedure execution failure replan runtime resolver', () => {
         recoveredReport,
         new Date(repairRequestedAt + 4).toISOString(),
       );
-      const repairAckResponse = await fetch(
+      let durableEventCountAfterCommit = 0;
+      const shadowDatabase = openOperatingLineDatabase(databasePath);
+      try {
+        const shadowCoordinator = createBlenderExecutionTrackExecutionCoordinator({
+          eventStore: shadowDatabase,
+          now: () => new Date(Date.parse(repairAck.occurredAt) + 1).toISOString(),
+          validateManagedResult: () => undefined,
+        });
+        const shadowAuthorization = shadowCoordinator.authorizeRecoveryAck(repairAck, {
+          target: repairRequest.target,
+          lease: repairRequest.replacementLease,
+          documentAuthoritySha256,
+        });
+        expect(() =>
+          shadowCoordinator.commitAuthorizedRecoveryAck(shadowAuthorization, {
+            commitManagedRepair: ({ evidence, reconciledEvent }) => {
+              const committed = shadowDatabase.commitCompanionStateWithExecutionEvent(
+                evidence.recoveredReport,
+                {
+                  sessionFingerprintSha256: createHash('sha256')
+                    .update(replacementSession.leaseId)
+                    .digest('hex'),
+                },
+                reconciledEvent,
+              );
+              expect(committed.reportResult).toBe('accepted');
+              expect(committed.event).not.toBeNull();
+              durableEventCountAfterCommit = shadowDatabase.countEvents();
+              throw new Error('injected failure after durable managed-repair transaction');
+            },
+          }),
+        ).toThrowError('injected failure after durable managed-repair transaction');
+        expect(shadowCoordinator.get(request.requestId)?.status).toBe('failed_managed');
+        expect(shadowCoordinator.ownsTarget('blender', binding.target.instanceId)).toBe(true);
+      } finally {
+        shadowDatabase.close();
+      }
+
+      const runtimeStillLocked = await callMcpTool(
+        runtime,
+        20_203,
+        'operatingline.blender.execution-track.status',
+        { requestId: request.requestId },
+      );
+      expect(runtimeStillLocked.result?.structuredContent).toMatchObject({
+        status: 'failed_managed',
+        result: failedResult,
+      });
+
+      const adoptionSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(hello),
+      });
+      expect(adoptionSessionResponse.status).toBe(200);
+      const adoptionSession = (await adoptionSessionResponse.json()) as { leaseId: string };
+      expect(adoptionSession.leaseId).not.toBe(replacementSession.leaseId);
+      const adoptionHeaders = {
+        authorization: 'Bearer failure-replan-strategy-token',
+        'content-type': 'application/json',
+        'x-operatingline-companion-lease': adoptionSession.leaseId,
+      };
+      const beforeAdoption = openOperatingLineDatabase(databasePath);
+      const durableEventCountBeforeAdoption = beforeAdoption.countEvents();
+      beforeAdoption.close();
+      expect(durableEventCountBeforeAdoption).toBeGreaterThanOrEqual(durableEventCountAfterCommit);
+      const adoptionResponse = await fetch(
         `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
         {
           method: 'POST',
-          headers: replacementHeaders,
+          headers: adoptionHeaders,
           body: JSON.stringify(repairAck),
         },
       );
-      expect(repairAckResponse.status, JSON.stringify(await repairAckResponse.clone().json())).toBe(
+      expect(adoptionResponse.status, JSON.stringify(await adoptionResponse.clone().json())).toBe(
         200,
       );
-      await expect(repairAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+      await expect(adoptionResponse.json()).resolves.toEqual({ result: 'duplicate' });
       const repaired = await callMcpTool(
         runtime,
-        20_203,
+        20_204,
         'operatingline.blender.execution-track.status',
         { requestId: request.requestId },
       );
@@ -2808,6 +2878,7 @@ describe('procedure execution failure replan runtime resolver', () => {
 
       const durable = openOperatingLineDatabase(databasePath);
       try {
+        expect(durable.countEvents()).toBe(durableEventCountBeforeAdoption);
         expect(durable.getCompanionStateReport(recoveredReport.reportId)).toEqual(recoveredReport);
         expect(
           durable.getManagedReplayReceipt('companion_state_report', recoveredReport.reportId),
@@ -2826,7 +2897,7 @@ describe('procedure execution failure replan runtime resolver', () => {
         `${runtime.baseUrl}/api/v1/companion/execution-track-execution/recovery`,
         {
           method: 'POST',
-          headers: replacementHeaders,
+          headers: adoptionHeaders,
           body: JSON.stringify(repairAck),
         },
       );

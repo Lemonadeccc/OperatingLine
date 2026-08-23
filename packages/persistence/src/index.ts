@@ -6064,6 +6064,13 @@ export function openOperatingLineDatabase(
               throw new Error('SQLite did not return the repaired recovery execution event');
             }
             const repairedEvent = parseExecutionEventRow(repairedEventRow);
+            if (
+              repairedEvent.eventType !== event.eventType ||
+              repairedEvent.createdAt !== event.createdAt ||
+              canonicalJson(repairedEvent.payload) !== eventPayload
+            ) {
+              throw new Error('SQLite returned a mismatched repaired recovery execution event');
+            }
             sqlite.exec('COMMIT;');
             return { reportResult: 'accepted', event: repairedEvent };
           }
@@ -6112,11 +6119,61 @@ export function openOperatingLineDatabase(
           receivedAt,
         );
         insertEvent.run(event.id, event.eventType, eventPayload, event.createdAt);
+        const storedReport = findStateReport.get(report.reportId) as
+          | { adapter_id: string; instance_id: string; sequence: number; payload: string }
+          | undefined;
+        const storedLatestState = findLatestStatePayload.get(
+          report.adapterId,
+          report.instanceId,
+        ) as { report_id: string; sequence: number; payload: string } | undefined;
+        const storedReceipt = findManagedReplayReceipt.get(
+          'companion_state_report',
+          report.reportId,
+        ) as
+          | {
+              subject_type: unknown;
+              report_id: unknown;
+              trust_source: unknown;
+              adapter_id: unknown;
+              instance_id: unknown;
+              session_fingerprint_sha256: unknown;
+              received_at: unknown;
+            }
+          | undefined;
+        const storedCompanionStateEventRow = findEvent.get(`companion-state:${report.reportId}`);
         const storedEventRow = findEvent.get(event.id);
-        if (storedEventRow === undefined) {
-          throw new Error('SQLite did not return the atomic recovery execution event');
+        if (
+          storedReport?.adapter_id !== report.adapterId ||
+          storedReport.instance_id !== report.instanceId ||
+          storedReport.sequence !== report.sequence ||
+          storedReport.payload !== reportPayload ||
+          storedLatestState?.report_id !== report.reportId ||
+          storedLatestState.sequence !== report.sequence ||
+          storedLatestState.payload !== reportPayload ||
+          storedReceipt?.subject_type !== 'companion_state_report' ||
+          storedReceipt.report_id !== report.reportId ||
+          storedReceipt.trust_source !== 'negotiated_companion_lease' ||
+          storedReceipt.adapter_id !== report.adapterId ||
+          storedReceipt.instance_id !== report.instanceId ||
+          storedReceipt.session_fingerprint_sha256 !== provenance.sessionFingerprintSha256 ||
+          storedReceipt.received_at !== receivedAt ||
+          storedCompanionStateEventRow === undefined ||
+          storedEventRow === undefined
+        ) {
+          throw new Error('SQLite did not return the complete atomic Companion recovery commit');
         }
+        const storedCompanionStateEvent = parseExecutionEventRow(storedCompanionStateEventRow);
         const storedEvent = parseExecutionEventRow(storedEventRow);
+        if (
+          storedCompanionStateEvent.eventType !== 'companion.state.reported' ||
+          storedCompanionStateEvent.createdAt !== receivedAt ||
+          canonicalJson(storedCompanionStateEvent.payload) !== reportPayload ||
+          storedEvent.eventType !== event.eventType ||
+          storedEvent.createdAt !== event.createdAt ||
+          canonicalJson(storedEvent.payload) !== eventPayload
+        ) {
+          throw new Error('SQLite returned a mismatched atomic Companion recovery commit');
+        }
         sqlite.exec('COMMIT;');
         return { reportResult: 'accepted', event: storedEvent };
       } catch (error) {

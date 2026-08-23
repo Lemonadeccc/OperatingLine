@@ -10941,7 +10941,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           const exactDurableDuplicate = executionTrackExecutionCoordinator.isRecoveryAckDuplicate(
             parsedAck.data,
           );
-          if (exactDurableDuplicate && parsedAck.data.evidence.kind === 'managed_repair_terminal') {
+          if (parsedAck.data.evidence.kind === 'managed_repair_terminal') {
             const recoveredReport = parsedAck.data.evidence.recoveredReport;
             const receipt = database.getManagedReplayReceipt(
               'companion_state_report',
@@ -10950,35 +10950,45 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             const expectedReceiptFingerprint = createHash('sha256')
               .update(parsedAck.data.request.replacementLease.leaseId)
               .digest('hex');
-            if (
+            const receiptMismatch =
               receipt === null ||
               receipt.subjectType !== 'companion_state_report' ||
               receipt.subjectId !== recoveredReport.reportId ||
               receipt.authentication !== 'negotiated_companion_lease' ||
               receipt.adapterId !== target.adapterId ||
               receipt.instanceId !== target.instanceId ||
-              receipt.sessionFingerprintSha256 !== expectedReceiptFingerprint
-            ) {
+              receipt.sessionFingerprintSha256 !== expectedReceiptFingerprint;
+            if (receiptMismatch && exactDurableDuplicate) {
               return executionTrackExecutionRejected(
                 'Managed repair duplicate lacks its exact replacement document-session receipt',
                 409,
                 'execution_track_execution_repair_receipt_not_current',
               );
             }
-            const receiptSession =
-              companionLeaseManager.authorizeDocumentSessionForReceiptFingerprint(
-                expectedReceiptFingerprint,
-                target.adapterId,
-                target.instanceId,
-              );
-            if (!isDeepStrictEqual(receiptSession.lease, session.lease)) {
-              return executionTrackExecutionRejected(
-                'Managed repair duplicate belongs to a different current document session',
-                409,
-                'execution_track_execution_repair_receipt_not_current',
-              );
+            if (!receiptMismatch) {
+              const receiptSession =
+                companionLeaseManager.authorizeDocumentSessionForReceiptFingerprint(
+                  expectedReceiptFingerprint,
+                  target.adapterId,
+                  target.instanceId,
+                );
+              if (!isDeepStrictEqual(receiptSession.lease, session.lease)) {
+                if (exactDurableDuplicate) {
+                  return executionTrackExecutionRejected(
+                    'Managed repair duplicate belongs to a different current document session',
+                    409,
+                    'execution_track_execution_repair_receipt_not_current',
+                  );
+                }
+              } else if (
+                exactDurableDuplicate ||
+                executionTrackExecutionCoordinator.adoptDurableManagedRepairAck(parsedAck.data)
+              ) {
+                return companionExecutionTrackExecutionResultAckSchema.parse({
+                  result: 'duplicate',
+                });
+              }
             }
-            return companionExecutionTrackExecutionResultAckSchema.parse({ result: 'duplicate' });
           }
           // The authenticated recovery POST is the live-state attestation. Baseline
           // evidence references the original report, while managed repair atomically
@@ -11014,11 +11024,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             const result = executionTrackExecutionCoordinator.commitAuthorizedRecoveryAck(
               recoveryAuthorization,
               {
-                appendEvent: (event) => {
+                commitManagedRepair: ({ evidence, reconciledEvent }) => {
                   const committed = database.commitCompanionStateWithExecutionEvent(
-                    recoveredReport,
+                    evidence.recoveredReport,
                     { sessionFingerprintSha256: replacementFingerprint },
-                    { ...event, createdAt: event.createdAt ?? recoveredReport.occurredAt },
+                    reconciledEvent,
                   );
                   if (
                     (committed.reportResult !== 'accepted' &&

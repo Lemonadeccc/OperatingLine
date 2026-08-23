@@ -911,9 +911,26 @@ describe('Blender execution-track v2 coordinator', () => {
     expect(harness.events.events).toHaveLength(eventsBeforeAuthorization);
     expect(replayed.get(repair.requestId)?.status).toBe('failed_managed');
     expect(replayed.ownsTarget('blender', target.instanceId)).toBe(true);
+    expect(() => replayed.commitAuthorizedRecoveryAck(authorization)).toThrowError(
+      expect.objectContaining<Partial<BlenderExecutionTrackExecutionError>>({
+        code: 'execution_track_execution_managed_repair_atomic_commit_required',
+      }),
+    );
+    expect(replayed.get(repair.requestId)?.status).toBe('failed_managed');
+    expect(replayed.ownsTarget('blender', target.instanceId)).toBe(true);
+    const failedCommitAuthorization = replayed.authorizeRecoveryAck(
+      repairedAck as never,
+      recoveryLiveAuthority(repair),
+    );
     expect(() =>
-      replayed.commitAuthorizedRecoveryAck(authorization, {
-        appendEvent: () => {
+      replayed.commitAuthorizedRecoveryAck(failedCommitAuthorization, {
+        commitManagedRepair: ({ evidence, reconciledEvent }) => {
+          expect(evidence).toEqual(repairedAck.evidence);
+          expect(reconciledEvent).toMatchObject({
+            id: `blender-execution-track-execution:${repair.requestId}:recovery:${repair.recoveryId}:ack`,
+            eventType: 'blender.execution-track-execution.reconciled',
+            createdAt: repair.requestedAt,
+          });
           throw new Error('injected atomic persistence failure');
         },
       }),
@@ -924,7 +941,72 @@ describe('Blender execution-track v2 coordinator', () => {
       repairedAck as never,
       recoveryLiveAuthority(repair),
     );
-    expect(replayed.commitAuthorizedRecoveryAck(retryAuthorization)).toBe('accepted');
+    const durableAdopter = createBlenderExecutionTrackExecutionCoordinator({
+      eventStore: harness.events,
+      now,
+      validateManagedResult: () => undefined,
+    });
+    const tamperRejector = createBlenderExecutionTrackExecutionCoordinator({
+      eventStore: harness.events,
+      now,
+      validateManagedResult: () => undefined,
+    });
+    expect(durableAdopter.adoptDurableManagedRepairAck(repairedAck as never)).toBe(false);
+    let durableReconciledEvent:
+      ReturnType<BlenderExecutionTrackExecutionEventStore['appendEvent']> | undefined;
+    expect(() =>
+      replayed.commitAuthorizedRecoveryAck(retryAuthorization, {
+        commitManagedRepair: ({ reconciledEvent }) => {
+          durableReconciledEvent = harness.events.appendEvent(reconciledEvent);
+          throw new Error('injected crash after durable atomic commit');
+        },
+      }),
+    ).toThrowError('injected crash after durable atomic commit');
+    expect(durableReconciledEvent).toBeDefined();
+    expect(replayed.get(repair.requestId)?.status).toBe('failed_managed');
+    expect(replayed.ownsTarget('blender', target.instanceId)).toBe(true);
+    expect(durableAdopter.adoptDurableManagedRepairAck(repairedAck as never)).toBe(true);
+    expect(durableAdopter.get(repair.requestId)?.status).toBe('failed_managed_repaired');
+    expect(durableAdopter.ownsTarget('blender', target.instanceId)).toBe(false);
+    expect(durableAdopter.adoptDurableManagedRepairAck(repairedAck as never)).toBe(true);
+
+    const durableEventIndex = harness.events.events.findIndex(
+      (event) => event.id === durableReconciledEvent?.id,
+    );
+    const exactDurableEvent = structuredClone(harness.events.events[durableEventIndex]!);
+    harness.events.events[durableEventIndex] = {
+      ...exactDurableEvent,
+      payload: {
+        ...(exactDurableEvent.payload as object),
+        revision: (exactDurableEvent.payload as { revision: number }).revision + 1,
+      },
+    };
+    expect(() => tamperRejector.adoptDurableManagedRepairAck(repairedAck as never)).toThrowError(
+      /revision fork/i,
+    );
+    expect(tamperRejector.get(repair.requestId)?.status).toBe('failed_managed');
+    expect(tamperRejector.ownsTarget('blender', target.instanceId)).toBe(true);
+    harness.events.events[durableEventIndex] = exactDurableEvent;
+
+    const applyRetryAuthorization = replayed.authorizeRecoveryAck(
+      repairedAck as never,
+      recoveryLiveAuthority(repair),
+    );
+    expect(
+      replayed.commitAuthorizedRecoveryAck(applyRetryAuthorization, {
+        commitManagedRepair: ({ reconciledEvent }) => {
+          expect(reconciledEvent).toEqual(
+            expect.objectContaining({
+              id: durableReconciledEvent?.id,
+              eventType: durableReconciledEvent?.eventType,
+              payload: durableReconciledEvent?.payload,
+              createdAt: durableReconciledEvent?.createdAt,
+            }),
+          );
+          return durableReconciledEvent!;
+        },
+      }),
+    ).toBe('accepted');
     expect(() => replayed.commitAuthorizedRecoveryAck(authorization)).toThrowError(/stale/i);
     expect(replayed.acceptRecoveryAck(repairedAck as never, recoveryLiveAuthority(repair))).toBe(
       'duplicate',

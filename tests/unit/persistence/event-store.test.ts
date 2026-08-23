@@ -4101,6 +4101,22 @@ describe('OperatingLine persistence', () => {
         restarted.commitCompanionStateWithExecutionEvent(report, provenance, event),
       ).toMatchObject({ reportResult: 'duplicate', event });
       expect(restarted.countEvents()).toBe(2);
+
+      const driftedEvent = {
+        ...event,
+        payload: {
+          ...event.payload,
+          recoveryAck: {
+            ...event.payload.recoveryAck,
+            unexpectedDrift: true,
+          },
+        },
+      };
+      expect(
+        restarted.commitCompanionStateWithExecutionEvent(report, provenance, driftedEvent),
+      ).toEqual({ reportResult: 'conflict', event: null });
+      expect(restarted.countEvents()).toBe(2);
+      expect(restarted.getExecutionEvent(event.id)).toMatchObject(event);
       restarted.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -4145,8 +4161,67 @@ describe('OperatingLine persistence', () => {
       database.commitCompanionStateWithExecutionEvent(staleReport, original, staleEvent),
     ).toEqual({ reportResult: 'stale', event: null });
     expect(database.getCompanionStateReport(staleReport.reportId)).toBeNull();
+    expect(
+      database.getManagedReplayReceipt('companion_state_report', staleReport.reportId),
+    ).toBeNull();
     expect(database.getExecutionEvent(staleEvent.id)).toBeNull();
+    expect(database.getExecutionEvent(`companion-state:${staleReport.reportId}`)).toBeNull();
+    expect(database.listLatestCompanionStates()).toEqual([reboundReport]);
     database.close();
+  });
+
+  it('rolls back an orphan reconciliation when an AFTER INSERT trigger tampers with it', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-atomic-orphan-tamper-'));
+    const databasePath = join(directory, 'state.db');
+    const report = {
+      reportId: randomUUID(),
+      adapterId: 'blender',
+      instanceId: randomUUID(),
+      sequence: 3,
+    };
+    const event = atomicRecoveryEvent(report);
+    const provenance = { sessionFingerprintSha256: 'e'.repeat(64) };
+    try {
+      const initial = openOperatingLineDatabase(databasePath);
+      expect(initial.recordCompanionState(report, provenance)).toBe('accepted');
+      const receiptBefore = initial.getManagedReplayReceipt(
+        'companion_state_report',
+        report.reportId,
+      );
+      initial.close();
+
+      const injected = new DatabaseSync(databasePath);
+      injected.exec(`
+        CREATE TRIGGER tamper_orphan_reconciled_event
+        AFTER INSERT ON execution_events
+        WHEN NEW.event_type = 'blender.execution-track-execution.reconciled'
+        BEGIN
+          UPDATE execution_events
+          SET payload = '{"tampered":true}'
+          WHERE id = NEW.id;
+        END;
+      `);
+      injected.close();
+
+      const database = openOperatingLineDatabase(databasePath);
+      expect(() =>
+        database.commitCompanionStateWithExecutionEvent(report, provenance, event),
+      ).toThrow('SQLite returned a mismatched repaired recovery execution event');
+      expect(database.getExecutionEvent(event.id)).toBeNull();
+      expect(database.getCompanionStateReport(report.reportId)).toEqual(report);
+      expect(database.getManagedReplayReceipt('companion_state_report', report.reportId)).toEqual(
+        receiptBefore,
+      );
+      expect(database.listLatestCompanionStates()).toEqual([report]);
+      expect(database.getExecutionEvent(`companion-state:${report.reportId}`)).toMatchObject({
+        eventType: 'companion.state.reported',
+        payload: report,
+      });
+      expect(database.countEvents()).toBe(1);
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('rolls back every recovered-state artifact when reconciliation insertion fails', () => {
