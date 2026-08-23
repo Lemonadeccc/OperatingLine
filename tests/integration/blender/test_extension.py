@@ -804,6 +804,23 @@ def assert_edit_modifier_geometry_nodes_round_trip() -> None:
         session.receipts,
     )
     assert topology[0]["satisfied"] is True
+    subdivide_replay = observation_module.evaluate_observations(
+        (
+            {
+                "kind": "mesh_topology_matches",
+                "parameters": {
+                    "targetId": "pipeline.cube",
+                    "resultMeshId": "pipeline.cube.subdivided_mesh",
+                    "resultMeshName": "OperatingLine.EditPipelineCube.SubdividedMesh",
+                    "cuts": 1,
+                    "smooth": 0.0,
+                },
+            },
+        ),
+        session.receipts,
+    )[0]
+    assert subdivide_replay["satisfied"] is True, subdivide_replay
+    assert subdivide_replay["details"]["attestationContentSha256"] is not None
 
     assert session.next() is not None
     bevel = cube.modifiers.get("OperatingLine.EditPipeline.Bevel")
@@ -996,6 +1013,7 @@ def assert_triangulate_round_trip_and_guards() -> None:
     observation_parameters = {
         "targetId": "triangulate.cube",
         "resultMeshId": "triangulate.cube.result_mesh",
+        "resultMeshName": result_mesh_name,
     }
     observations = observation_module.evaluate_observations(
         (
@@ -1016,6 +1034,11 @@ def assert_triangulate_round_trip_and_guards() -> None:
         False,
         False,
     )
+    assert observations[0]["details"]["attestationContentSha256"] is not None
+    assert observation_module.evaluate_observations(
+        (({"kind": "mesh_triangulated", "parameters": observation_parameters}),),
+        {**session.receipts, "duplicate.triangulate": receipt},
+    )[0]["satisfied"] is False
 
     original_vertex = result_mesh.vertices[0].co.copy()
     result_mesh.vertices[0].co.x += 0.25
@@ -2005,6 +2028,9 @@ def assert_extrude_region_round_trip_and_guards() -> None:
     parameters = {
         "targetId": "extrude.cube",
         "resultMeshId": "extrude.cube.result_mesh",
+        "resultMeshName": result_mesh_name,
+        "polygonIndices": [5],
+        "translation": [0.25, -0.5, 1.0],
     }
     observations = observation_module.evaluate_observations(
         (
@@ -2017,6 +2043,7 @@ def assert_extrude_region_round_trip_and_guards() -> None:
         session.receipts,
     )
     assert tuple(item["satisfied"] for item in observations) == (True, False)
+    assert observations[0]["details"]["attestationContentSha256"] is not None
 
     original_vertex = result_mesh.vertices[0].co.copy()
     result_mesh.vertices[0].co.x += 0.25
@@ -2477,6 +2504,10 @@ def assert_edit_bevel_edges_round_trip_and_guards() -> None:
     parameters = {
         "targetId": "edit_bevel.cube",
         "resultMeshId": "edit_bevel.cube.result_mesh",
+        "resultMeshName": result_mesh_name,
+        "width": 0.2,
+        "segments": 3,
+        "profile": 0.6,
     }
     observations = observation_module.evaluate_observations(
         (
@@ -2493,6 +2524,7 @@ def assert_edit_bevel_edges_round_trip_and_guards() -> None:
         session.receipts,
     )
     assert tuple(item["satisfied"] for item in observations) == (True, False, False)
+    assert observations[0]["details"]["attestationContentSha256"] is not None
 
     original_vertex = result_mesh.vertices[0].co.copy()
     result_mesh.vertices[0].co.x += 0.25
@@ -2810,6 +2842,9 @@ def assert_edit_inset_faces_round_trip_and_guards() -> None:
     parameters = {
         "targetId": "edit_inset.cube",
         "resultMeshId": "edit_inset.cube.result_mesh",
+        "resultMeshName": result_mesh_name,
+        "thickness": 0.2,
+        "depth": 0.1,
     }
     observations = observation_module.evaluate_observations(
         (
@@ -2828,6 +2863,7 @@ def assert_edit_inset_faces_round_trip_and_guards() -> None:
     assert tuple(item["satisfied"] for item in observations) == (True, False, False)
     assert observations[0]["details"]["sourceLoopCount"] == 24
     assert observations[0]["details"]["topologyMatches"] is True
+    assert observations[0]["details"]["attestationContentSha256"] is not None
 
     original_vertex = result_mesh.vertices[0].co.copy()
     result_mesh.vertices[0].co.x += 0.25
@@ -3254,6 +3290,8 @@ def assert_edit_poke_faces_round_trip_and_guards() -> None:
     parameters = {
         "targetId": "edit_poke.cube",
         "resultMeshId": "edit_poke.cube.result_mesh",
+        "resultMeshName": result_mesh_name,
+        "offset": 0.1,
     }
     observations = observation_module.evaluate_observations(
         (
@@ -3276,6 +3314,7 @@ def assert_edit_poke_faces_round_trip_and_guards() -> None:
     ), observations
     assert observations[0]["details"]["sourceLoopCount"] == 24
     assert observations[0]["details"]["allTriangles"] is True
+    assert observations[0]["details"]["attestationContentSha256"] is not None
 
     original_result_vertex = result_mesh.vertices[0].co.copy()
     result_mesh.vertices[0].co.x += 0.25

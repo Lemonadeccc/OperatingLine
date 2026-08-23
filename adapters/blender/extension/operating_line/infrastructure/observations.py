@@ -17,12 +17,26 @@ from .snowman_actions.common import (
     COLLECTION_LOGICAL_ID,
     COLLECTION_NAME,
     action_fcurves,
+    action_keyframe_signature,
     build_resource_registry,
     find_artifact,
     find_owned_modifier,
     find_owned_skin_weights,
     mesh_content_signature,
     resolve_resource,
+)
+from .snowman_actions.editing import (
+    validate_edit_bevel_edges,
+    validate_edit_inset_faces,
+    validate_edit_poke_faces,
+    validate_extrude_region,
+    validate_subdivide,
+    validate_triangulate,
+)
+from .snowman_actions.rigging import (
+    validate_armature,
+    validate_pose_animation,
+    validate_skin_weights,
 )
 
 ObservationResult = tuple[bool, dict[str, Any]]
@@ -76,6 +90,322 @@ def _mesh_signature_sha256(signature: tuple[Any, ...]) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _stable_content_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _identity_proof(identity: Any) -> dict[str, Any] | None:
+    if identity is None:
+        return None
+    return {
+        "resourceType": identity.resource_type,
+        "logicalId": identity.logical_id,
+        "displayName": identity.display_name,
+        "receiptToken": identity.receipt_token,
+        "stepId": identity.step_id,
+        "actionName": identity.action_name,
+    }
+
+
+def _replacement_mesh_proof(
+    parameters: Mapping[str, Any],
+    receipts: Mapping[str, ActionReceipt],
+    action_name: str,
+) -> dict[str, Any]:
+    target_id = parameters.get("targetId")
+    result_mesh_id = parameters.get("resultMeshId")
+    legacy_parameters_valid = bool(
+        set(parameters) == {"targetId", "resultMeshId"}
+        and isinstance(target_id, str)
+        and target_id
+        and isinstance(result_mesh_id, str)
+        and result_mesh_id
+    )
+    validator = {
+        "blender.mesh.edit_subdivide": validate_subdivide,
+        "blender.mesh.edit_triangulate": validate_triangulate,
+        "blender.mesh.edit_extrude_region": validate_extrude_region,
+        "blender.mesh.edit_bevel_edges": validate_edit_bevel_edges,
+        "blender.mesh.edit_inset_faces": validate_edit_inset_faces,
+        "blender.mesh.edit_poke_faces": validate_edit_poke_faces,
+    }[action_name]
+    try:
+        validator(parameters)
+        replay_parameters_valid = True
+    except (KeyError, TypeError, ValueError):
+        replay_parameters_valid = False
+    parameters_valid = legacy_parameters_valid or replay_parameters_valid
+    registry = build_resource_registry(receipts)
+    target_identity = registry.get(target_id) if parameters_valid else None
+    result_identity = registry.get(result_mesh_id) if parameters_valid else None
+    target = resolve_resource(target_identity) if target_identity is not None else None
+    result_mesh = (
+        resolve_resource(result_identity) if result_identity is not None else None
+    )
+    matching_receipts = tuple(
+        receipt
+        for receipt in receipts.values()
+        if receipt.action_name == action_name
+        and result_identity is not None
+        and result_identity in receipt.created
+    )
+    receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+    data_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.attribute == "data"
+            and mutation.resource == target_identity
+            and mutation.after == result_identity
+        )
+        if receipt is not None
+        else ()
+    )
+    result_content_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.attribute == "mesh_content"
+            and mutation.resource == result_identity
+            and mutation.after is not None
+        )
+        if receipt is not None
+        else ()
+    )
+    data_mutation = data_mutations[0] if len(data_mutations) == 1 else None
+    result_content_mutation = (
+        result_content_mutations[0]
+        if len(result_content_mutations) == 1
+        else None
+    )
+    source_identity = data_mutation.before if data_mutation is not None else None
+    source_mesh = resolve_resource(source_identity) if source_identity is not None else None
+    source_receipts = tuple(
+        candidate
+        for candidate in receipts.values()
+        if source_identity is not None and source_identity in candidate.created
+    )
+    source_receipt = source_receipts[0] if len(source_receipts) == 1 else None
+    source_content_mutations = (
+        tuple(
+            mutation
+            for mutation in source_receipt.mutations
+            if mutation.attribute == "mesh_content"
+            and mutation.resource == source_identity
+            and mutation.after is not None
+        )
+        if source_receipt is not None
+        else ()
+    )
+    source_counts = (
+        (
+            len(source_mesh.vertices),
+            len(source_mesh.edges),
+            len(source_mesh.polygons),
+        )
+        if isinstance(source_mesh, bpy.types.Mesh)
+        else (0, 0, 0)
+    )
+    result_counts = (
+        (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        if isinstance(result_mesh, bpy.types.Mesh)
+        else (0, 0, 0)
+    )
+    source_signature = (
+        mesh_content_signature(source_mesh)
+        if isinstance(source_mesh, bpy.types.Mesh)
+        else None
+    )
+    result_signature = (
+        mesh_content_signature(result_mesh)
+        if isinstance(result_mesh, bpy.types.Mesh)
+        else None
+    )
+    assigned = bool(
+        isinstance(target, bpy.types.Object)
+        and target.type == "MESH"
+        and isinstance(result_mesh, bpy.types.Mesh)
+        and target.data is result_mesh
+    )
+    receipt_matches = bool(
+        receipt is not None
+        and receipt.anchor == target_identity
+        and receipt.created == (result_identity,)
+        and len(data_mutations) == 1
+        and len(result_content_mutations) == 1
+        and isinstance(source_mesh, bpy.types.Mesh)
+    )
+    content_intact = bool(
+        result_signature is not None
+        and result_content_mutation is not None
+        and result_content_mutation.after == result_signature
+    )
+    source_content_intact = bool(
+        source_signature is not None
+        and len(source_content_mutations) == 1
+        and source_content_mutations[0].after == source_signature
+    )
+    result_name_matches = bool(
+        legacy_parameters_valid
+        or (
+            replay_parameters_valid
+            and isinstance(result_mesh, bpy.types.Mesh)
+            and result_mesh.name == parameters.get("resultMeshName")
+        )
+    )
+    within_limits = bool(
+        all(source_counts)
+        and all(result_counts)
+        and source_counts[0] <= 8192
+        and source_counts[1] <= 16384
+        and source_counts[2] <= 8192
+        and result_counts[0] <= 8192
+        and result_counts[1] <= 16384
+        and result_counts[2] <= 8192
+    )
+    receipt_proof = (
+        {
+            "receiptId": receipt.receipt_id,
+            "stepId": receipt.step_id,
+            "actionName": receipt.action_name,
+            "anchor": _identity_proof(receipt.anchor),
+            "target": _identity_proof(target_identity),
+            "source": _identity_proof(source_identity),
+            "result": _identity_proof(result_identity),
+            "sourceReceiptId": (
+                source_receipt.receipt_id if source_receipt is not None else None
+            ),
+            "sourceContent": (
+                source_content_mutations[0].after
+                if len(source_content_mutations) == 1
+                else None
+            ),
+            "resultContent": result_content_mutation.after,
+        }
+        if receipt_matches and result_content_mutation is not None
+        else None
+    )
+    source_sha256 = (
+        _mesh_signature_sha256(source_signature)
+        if source_signature is not None
+        else None
+    )
+    result_sha256 = (
+        _mesh_signature_sha256(result_signature)
+        if result_signature is not None
+        else None
+    )
+    receipt_sha256 = (
+        _stable_content_sha256(receipt_proof) if receipt_proof is not None else None
+    )
+    action_arguments_sha256 = (
+        _stable_content_sha256(dict(parameters))
+        if replay_parameters_valid
+        else None
+    )
+    return {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        "resultMeshId": result_mesh_id if isinstance(result_mesh_id, str) else None,
+        "parametersValid": parameters_valid,
+        "replayParametersValid": replay_parameters_valid,
+        "assigned": assigned,
+        "receiptMatches": receipt_matches,
+        "contentIntact": content_intact,
+        "sourceContentIntact": source_content_intact,
+        "withinLimits": within_limits,
+        "resultNameMatches": result_name_matches,
+        "sourceVertexCount": source_counts[0],
+        "sourceEdgeCount": source_counts[1],
+        "sourceFaceCount": source_counts[2],
+        "vertexCount": result_counts[0],
+        "edgeCount": result_counts[1],
+        "faceCount": result_counts[2],
+        "sourceMeshContentSha256": source_sha256,
+        "resultMeshContentSha256": result_sha256,
+        "receiptContentSha256": receipt_sha256,
+        "actionArgumentsSha256": action_arguments_sha256,
+        "target": target,
+        "sourceMesh": source_mesh,
+        "resultMesh": result_mesh,
+        "sourceIdentity": source_identity,
+        "resultIdentity": result_identity,
+        "receipt": receipt,
+        "attestationSeed": {
+            "actionName": action_name,
+            "targetId": target_id,
+            "resultMeshId": result_mesh_id,
+            "sourceMeshContentSha256": source_sha256,
+            "resultMeshContentSha256": result_sha256,
+            "receiptContentSha256": receipt_sha256,
+            "actionArgumentsSha256": action_arguments_sha256,
+            "sourceTopology": list(source_counts),
+            "resultTopology": list(result_counts),
+        },
+    }
+
+
+def _replacement_mesh_details(
+    proof: Mapping[str, Any], invariant: Mapping[str, Any]
+) -> dict[str, Any]:
+    stable = {
+        key: value
+        for key, value in proof.items()
+        if key
+        not in {
+            "target",
+            "sourceMesh",
+            "resultMesh",
+            "sourceIdentity",
+            "resultIdentity",
+            "receipt",
+            "attestationSeed",
+        }
+    }
+    attestation_ready = bool(
+        proof["replayParametersValid"]
+        and proof["assigned"]
+        and proof["receiptMatches"]
+        and proof["contentIntact"]
+        and proof["sourceContentIntact"]
+        and proof["withinLimits"]
+        and proof["resultNameMatches"]
+        and invariant.get("topologyMatches")
+    )
+    return {
+        **stable,
+        **invariant,
+        "attestationContentSha256": (
+            _stable_content_sha256({**proof["attestationSeed"], **invariant})
+            if attestation_ready
+            else None
+        ),
+    }
+
+
+def _replacement_mesh_observation_satisfied(details: Mapping[str, Any]) -> bool:
+    return bool(
+        details.get("parametersValid")
+        and details.get("assigned")
+        and details.get("receiptMatches")
+        and details.get("contentIntact")
+        and details.get("sourceContentIntact")
+        and details.get("withinLimits")
+        and details.get("resultNameMatches")
+        and details.get("topologyMatches")
+    )
 
 
 def _bounded_integer_parameter(
@@ -1003,6 +1333,213 @@ def _render_scene_ready(
 def _armature_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
+    try:
+        replay_definition = validate_armature(parameters)
+    except (KeyError, TypeError, ValueError):
+        replay_definition = None
+    if replay_definition is None and set(parameters).intersection(
+        {"objectName", "dataName", "collectionId", "bones"}
+    ):
+        armature_id = parameters.get("armatureId")
+        return False, {
+            "armatureId": armature_id if isinstance(armature_id, str) else None,
+            "boneNames": [],
+            "availableBoneNames": [],
+            "boundTargetIds": [],
+            "parametersValid": False,
+            "receiptMatches": False,
+            "ownershipMatches": False,
+            "bonesMatch": False,
+            "bindingsMatch": False,
+            "actionArgumentsSha256": None,
+            "armatureContentSha256": None,
+            "receiptContentSha256": None,
+            "attestationContentSha256": None,
+        }
+    if replay_definition is not None:
+        registry = build_resource_registry(receipts)
+        armature_identity = registry.get(replay_definition.logical_id)
+        data_identity = registry.get(f"{replay_definition.logical_id}.data")
+        collection_identity = registry.get(replay_definition.collection_id)
+        armature = (
+            resolve_resource(armature_identity)
+            if armature_identity is not None
+            else None
+        )
+        armature_data = (
+            resolve_resource(data_identity) if data_identity is not None else None
+        )
+        collection = (
+            resolve_resource(collection_identity)
+            if collection_identity is not None
+            else None
+        )
+        matching_receipts = tuple(
+            receipt
+            for receipt in receipts.values()
+            if receipt.action_name == "blender.rig.create_armature"
+            and armature_identity is not None
+            and armature_identity in receipt.created
+        )
+        receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+        expected_created = (
+            (data_identity, armature_identity)
+            if data_identity is not None and armature_identity is not None
+            else ()
+        )
+        collection_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.resource == armature_identity
+                and mutation.attribute == "users_collection"
+            )
+            if receipt is not None
+            else ()
+        )
+        binding_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.attribute == "bone_parent"
+            )
+            if receipt is not None
+            else ()
+        )
+        receipt_matches = bool(
+            receipt is not None
+            and receipt.anchor == armature_identity
+            and receipt.created == expected_created
+            and len(collection_mutations) == 1
+            and len(binding_mutations) == len(replay_definition.bindings)
+        )
+        ownership_matches = bool(
+            isinstance(armature, bpy.types.Object)
+            and armature.type == "ARMATURE"
+            and armature.data is armature_data
+            and armature.name == replay_definition.object_name
+            and isinstance(armature_data, bpy.types.Armature)
+            and armature_data.name == replay_definition.data_name
+            and isinstance(collection, bpy.types.Collection)
+            and armature.name in collection.objects
+            and receipt is not None
+            and armature_identity.receipt_token == receipt.receipt_id
+            and data_identity.receipt_token == receipt.receipt_id
+            and armature_identity.action_name == receipt.action_name
+            and data_identity.action_name == receipt.action_name
+        )
+        actual_bones = (
+            tuple(
+                {
+                    "boneName": bone.name,
+                    "head": [float(value) for value in bone.head_local],
+                    "tail": [float(value) for value in bone.tail_local],
+                    "parentName": bone.parent.name if bone.parent is not None else None,
+                }
+                for bone in armature_data.bones
+            )
+            if isinstance(armature_data, bpy.types.Armature)
+            else ()
+        )
+        expected_bones = tuple(
+            {
+                "boneName": bone.name,
+                "head": list(bone.head),
+                "tail": list(bone.tail),
+                "parentName": bone.parent_name,
+            }
+            for bone in replay_definition.bones
+        )
+        bones_match = actual_bones == expected_bones
+        bound_target_ids: list[str] = []
+        bindings_match = True
+        for binding in replay_definition.bindings:
+            target_identity = registry.get(binding.target_id)
+            target = (
+                resolve_resource(target_identity)
+                if target_identity is not None
+                else None
+            )
+            matching_mutations = (
+                tuple(
+                    mutation
+                    for mutation in binding_mutations
+                    if mutation.resource == target_identity
+                )
+                if target_identity is not None
+                else ()
+            )
+            matched = bool(
+                isinstance(target, bpy.types.Object)
+                and target.parent is armature
+                and target.parent_type == "BONE"
+                and target.parent_bone == binding.bone_name
+                and len(matching_mutations) == 1
+            )
+            bindings_match = bindings_match and matched
+            if matched:
+                bound_target_ids.append(binding.target_id)
+        armature_content = {
+            "armatureId": replay_definition.logical_id,
+            "objectName": replay_definition.object_name,
+            "dataName": replay_definition.data_name,
+            "collectionId": replay_definition.collection_id,
+            "bones": actual_bones,
+            "bindings": [
+                {"targetId": binding.target_id, "boneName": binding.bone_name}
+                for binding in replay_definition.bindings
+            ],
+        }
+        receipt_content = (
+            {
+                "receiptId": receipt.receipt_id,
+                "stepId": receipt.step_id,
+                "actionName": receipt.action_name,
+                "anchor": _identity_proof(receipt.anchor),
+                "created": [_identity_proof(item) for item in receipt.created],
+            }
+            if receipt_matches
+            else None
+        )
+        action_arguments_sha256 = _stable_content_sha256(dict(parameters))
+        armature_sha256 = _stable_content_sha256(armature_content)
+        receipt_sha256 = (
+            _stable_content_sha256(receipt_content)
+            if receipt_content is not None
+            else None
+        )
+        satisfied = bool(
+            receipt_matches
+            and ownership_matches
+            and bones_match
+            and bindings_match
+        )
+        return satisfied, {
+            "armatureId": replay_definition.logical_id,
+            "boneNames": [bone.name for bone in replay_definition.bones],
+            "availableBoneNames": [item["boneName"] for item in actual_bones],
+            "boundTargetIds": bound_target_ids,
+            "parametersValid": True,
+            "receiptMatches": receipt_matches,
+            "ownershipMatches": ownership_matches,
+            "bonesMatch": bones_match,
+            "bindingsMatch": bindings_match,
+            "actionArgumentsSha256": action_arguments_sha256,
+            "armatureContentSha256": armature_sha256,
+            "receiptContentSha256": receipt_sha256,
+            "attestationContentSha256": (
+                _stable_content_sha256(
+                    {
+                        "actionArgumentsSha256": action_arguments_sha256,
+                        "armatureContentSha256": armature_sha256,
+                        "receiptContentSha256": receipt_sha256,
+                    }
+                )
+                if satisfied
+                else None
+            ),
+        }
+
     armature_id = parameters.get("armatureId")
     raw_bone_names = parameters.get("boneNames")
     raw_bindings = parameters.get("bindings")
@@ -1065,6 +1602,254 @@ def _armature_ready(
 def _pose_animation_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
+    try:
+        replay_definition = validate_pose_animation(parameters)
+    except (KeyError, TypeError, ValueError):
+        replay_definition = None
+    if replay_definition is None and set(parameters).intersection(
+        {"actionName", "keyframes"}
+    ):
+        armature_id = parameters.get("armatureId")
+        action_id = parameters.get("actionId")
+        return False, {
+            "armatureId": armature_id if isinstance(armature_id, str) else None,
+            "actionId": action_id if isinstance(action_id, str) else None,
+            "parametersValid": False,
+            "receiptMatches": False,
+            "ownershipMatches": False,
+            "assigned": False,
+            "frameRange": [],
+            "expectedFrameRange": [],
+            "curveCount": 0,
+            "expectedCurveCount": 0,
+            "curvesMatch": False,
+            "valuesMatch": False,
+            "interpolationMatches": False,
+            "extrapolationMatches": False,
+            "actionContentIntact": False,
+            "actionArgumentsSha256": None,
+            "actionContentSha256": None,
+            "receiptContentSha256": None,
+            "attestationContentSha256": None,
+        }
+    if replay_definition is not None:
+        registry = build_resource_registry(receipts)
+        armature_identity = registry.get(replay_definition.armature_id)
+        action_identity = registry.get(replay_definition.logical_id)
+        armature = (
+            resolve_resource(armature_identity)
+            if armature_identity is not None
+            else None
+        )
+        animation = (
+            resolve_resource(action_identity) if action_identity is not None else None
+        )
+        matching_receipts = tuple(
+            receipt
+            for receipt in receipts.values()
+            if receipt.action_name == "blender.animation.create_pose_keyframes"
+            and action_identity is not None
+            and action_identity in receipt.created
+        )
+        receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+        action_content_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.resource == action_identity
+                and mutation.attribute == "action_keyframes"
+                and mutation.after is not None
+            )
+            if receipt is not None
+            else ()
+        )
+        bone_names = tuple(
+            dict.fromkeys(
+                pose.bone_name
+                for keyframe in replay_definition.keyframes
+                for pose in keyframe.poses
+            )
+        )
+        pose_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.resource == armature_identity
+                and mutation.attribute.startswith("pose_bone_state:")
+            )
+            if receipt is not None
+            else ()
+        )
+        animation_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.resource == armature_identity
+                and mutation.attribute == "animation_action"
+                and mutation.after == action_identity
+            )
+            if receipt is not None
+            else ()
+        )
+        receipt_matches = bool(
+            receipt is not None
+            and receipt.anchor == armature_identity
+            and receipt.created == (action_identity,)
+            and len(action_content_mutations) == 1
+            and len(animation_mutations) == 1
+            and len(pose_mutations) == len(bone_names)
+            and {mutation.attribute.removeprefix("pose_bone_state:") for mutation in pose_mutations}
+            == set(bone_names)
+        )
+        ownership_matches = bool(
+            isinstance(armature, bpy.types.Object)
+            and armature.type == "ARMATURE"
+            and isinstance(animation, bpy.types.Action)
+            and animation.name == replay_definition.name
+            and receipt is not None
+            and action_identity.receipt_token == receipt.receipt_id
+            and action_identity.action_name == receipt.action_name
+        )
+        assigned = bool(
+            isinstance(armature, bpy.types.Object)
+            and armature.animation_data is not None
+            and armature.animation_data.action is animation
+        )
+        expected_curves: dict[tuple[str, int], list[tuple[float, float]]] = {}
+        if isinstance(armature, bpy.types.Object) and armature.type == "ARMATURE":
+            for keyframe in replay_definition.keyframes:
+                for pose in keyframe.poses:
+                    pose_bone = armature.pose.bones.get(pose.bone_name)
+                    if pose_bone is None:
+                        continue
+                    for channel, values in (
+                        ("rotation_euler", pose.rotation_euler),
+                        ("location", pose.location),
+                        ("scale", pose.scale),
+                    ):
+                        if values is None:
+                            continue
+                        data_path = pose_bone.path_from_id(channel)
+                        for index, value in enumerate(values):
+                            expected_curves.setdefault((data_path, index), []).append(
+                                (float(keyframe.frame), float(value))
+                            )
+        actual_curves = {
+            (curve.data_path, curve.array_index): curve
+            for curve in (
+                action_fcurves(animation)
+                if isinstance(animation, bpy.types.Action)
+                else ()
+            )
+        }
+        curves_match = set(actual_curves) == set(expected_curves)
+        values_match = curves_match and all(
+            len(actual_curves[key].keyframe_points) == len(expected_points)
+            and all(
+                math.isclose(float(point.co[0]), expected_frame, abs_tol=1e-6)
+                and math.isclose(float(point.co[1]), expected_value, abs_tol=1e-6)
+                for point, (expected_frame, expected_value) in zip(
+                    actual_curves[key].keyframe_points,
+                    expected_points,
+                )
+            )
+            for key, expected_points in expected_curves.items()
+        )
+        interpolation_matches = curves_match and all(
+            point.interpolation == replay_definition.interpolation
+            for curve in actual_curves.values()
+            for point in curve.keyframe_points
+        )
+        extrapolation_matches = curves_match and all(
+            curve.extrapolation == replay_definition.extrapolation
+            for curve in actual_curves.values()
+        )
+        actual_range = (
+            tuple(float(value) for value in animation.frame_range)
+            if isinstance(animation, bpy.types.Action)
+            else ()
+        )
+        expected_range = (
+            float(replay_definition.keyframes[0].frame),
+            float(replay_definition.keyframes[-1].frame),
+        )
+        action_signature = (
+            action_keyframe_signature(animation)
+            if isinstance(animation, bpy.types.Action)
+            else None
+        )
+        action_content_intact = bool(
+            len(action_content_mutations) == 1
+            and action_signature == action_content_mutations[0].after
+        )
+        receipt_content = (
+            {
+                "receiptId": receipt.receipt_id,
+                "stepId": receipt.step_id,
+                "actionName": receipt.action_name,
+                "anchor": _identity_proof(receipt.anchor),
+                "created": [_identity_proof(item) for item in receipt.created],
+                "mutationAttributes": sorted(
+                    mutation.attribute for mutation in receipt.mutations
+                ),
+            }
+            if receipt_matches
+            else None
+        )
+        action_arguments_sha256 = _stable_content_sha256(dict(parameters))
+        action_sha256 = (
+            _stable_content_sha256(action_signature)
+            if action_signature is not None
+            else None
+        )
+        receipt_sha256 = (
+            _stable_content_sha256(receipt_content)
+            if receipt_content is not None
+            else None
+        )
+        satisfied = bool(
+            receipt_matches
+            and ownership_matches
+            and assigned
+            and curves_match
+            and values_match
+            and interpolation_matches
+            and extrapolation_matches
+            and actual_range == expected_range
+            and action_content_intact
+        )
+        return satisfied, {
+            "armatureId": replay_definition.armature_id,
+            "actionId": replay_definition.logical_id,
+            "parametersValid": True,
+            "receiptMatches": receipt_matches,
+            "ownershipMatches": ownership_matches,
+            "assigned": assigned,
+            "frameRange": list(actual_range),
+            "expectedFrameRange": list(expected_range),
+            "curveCount": len(actual_curves),
+            "expectedCurveCount": len(expected_curves),
+            "curvesMatch": curves_match,
+            "valuesMatch": values_match,
+            "interpolationMatches": interpolation_matches,
+            "extrapolationMatches": extrapolation_matches,
+            "actionContentIntact": action_content_intact,
+            "actionArgumentsSha256": action_arguments_sha256,
+            "actionContentSha256": action_sha256,
+            "receiptContentSha256": receipt_sha256,
+            "attestationContentSha256": (
+                _stable_content_sha256(
+                    {
+                        "actionArgumentsSha256": action_arguments_sha256,
+                        "actionContentSha256": action_sha256,
+                        "receiptContentSha256": receipt_sha256,
+                    }
+                )
+                if satisfied
+                else None
+            ),
+        }
+
     armature_id = parameters.get("armatureId")
     action_id = parameters.get("actionId")
     raw_frames = parameters.get("frames")
@@ -1198,6 +1983,262 @@ def _pose_animation_ready(
 def _skin_weights_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
+    try:
+        replay_definition = validate_skin_weights(parameters)
+    except (KeyError, TypeError, ValueError):
+        replay_definition = None
+    if replay_definition is None and set(parameters).intersection(
+        {"modifierName", "weights"}
+    ):
+        target_id = parameters.get("targetId")
+        armature_id = parameters.get("armatureId")
+        modifier_id = parameters.get("modifierId")
+        return False, {
+            "targetId": target_id if isinstance(target_id, str) else None,
+            "armatureId": armature_id if isinstance(armature_id, str) else None,
+            "modifierId": modifier_id if isinstance(modifier_id, str) else None,
+            "boneNames": [],
+            "deformBoneNames": [],
+            "vertexCount": None,
+            "parametersValid": False,
+            "receiptMatches": False,
+            "ownershipMatches": False,
+            "assignmentMatches": False,
+            "modifierMatches": False,
+            "meshContentIntact": False,
+            "preserveVolumeMatches": False,
+            "actionArgumentsSha256": None,
+            "weightsContentSha256": None,
+            "modifierContentSha256": None,
+            "receiptContentSha256": None,
+            "attestationContentSha256": None,
+        }
+    if replay_definition is not None:
+        registry = build_resource_registry(receipts)
+        target_identity = registry.get(replay_definition.target_id)
+        armature_identity = registry.get(replay_definition.armature_id)
+        target = (
+            resolve_resource(target_identity) if target_identity is not None else None
+        )
+        armature = (
+            resolve_resource(armature_identity)
+            if armature_identity is not None
+            else None
+        )
+        matching_receipts = tuple(
+            receipt
+            for receipt in receipts.values()
+            if receipt.action_name == "blender.rig.bind_skin_weights"
+            and receipt.anchor == target_identity
+        )
+        receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+        skin_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.resource == target_identity
+                and mutation.attribute
+                == f"skin_weights:{replay_definition.modifier_id}"
+            )
+            if receipt is not None
+            else ()
+        )
+        modifier_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.resource == target_identity
+                and mutation.attribute == f"modifier:{replay_definition.modifier_id}"
+            )
+            if receipt is not None
+            else ()
+        )
+        mesh_content_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.attribute == "mesh_content"
+                and mutation.after is not None
+            )
+            if receipt is not None
+            else ()
+        )
+        receipt_matches = bool(
+            receipt is not None
+            and receipt.created == ()
+            and len(skin_mutations) == 1
+            and len(modifier_mutations) == 1
+            and len(mesh_content_mutations) == 1
+        )
+        found_weights = find_owned_skin_weights(receipts, replay_definition.modifier_id)
+        weight_owner, weight_state = (
+            found_weights if found_weights is not None else (None, None)
+        )
+        found_modifier = find_owned_modifier(receipts, replay_definition.modifier_id)
+        modifier_owner, modifier = (
+            found_modifier if found_modifier is not None else (None, None)
+        )
+        bone_names = tuple(
+            dict.fromkeys(
+                influence.bone_name
+                for weight in replay_definition.weights
+                for influence in weight.influences
+            )
+        )
+        expected_assignments = {
+            bone_name: tuple(
+                (weight.vertex_index, influence.weight)
+                for weight in replay_definition.weights
+                for influence in weight.influences
+                if influence.bone_name == bone_name
+            )
+            for bone_name in bone_names
+        }
+        actual_assignments = (
+            {
+                group.display_name: tuple(group.assignments)
+                for group in weight_state.groups
+            }
+            if weight_state is not None
+            else {}
+        )
+        assignment_matches = bool(
+            weight_state is not None
+            and weight_state.vertex_count == len(replay_definition.weights)
+            and tuple(actual_assignments) == bone_names
+            and actual_assignments == expected_assignments
+        )
+        deform_bone_names = (
+            [
+                name
+                for name in bone_names
+                if armature.data.bones.get(name) is not None
+                and armature.data.bones[name].use_deform
+            ]
+            if isinstance(armature, bpy.types.Object)
+            and armature.type == "ARMATURE"
+            else []
+        )
+        ownership_matches = bool(
+            isinstance(target, bpy.types.Object)
+            and target.type == "MESH"
+            and isinstance(armature, bpy.types.Object)
+            and armature.type == "ARMATURE"
+            and weight_owner is target
+            and modifier_owner is target
+            and receipt is not None
+            and weight_state is not None
+            and weight_state.receipt_token == receipt.receipt_id
+            and weight_state.action_name == receipt.action_name
+        )
+        modifier_matches = bool(
+            modifier is not None
+            and modifier.name == replay_definition.modifier_name
+            and modifier.type == "ARMATURE"
+            and modifier.object is armature
+            and modifier.use_vertex_groups
+            and not modifier.use_bone_envelopes
+            and modifier.use_deform_preserve_volume
+            == replay_definition.preserve_volume
+        )
+        mesh_content_intact = bool(
+            isinstance(target, bpy.types.Object)
+            and target.type == "MESH"
+            and len(mesh_content_mutations) == 1
+            and mesh_content_signature(target.data)
+            == mesh_content_mutations[0].after
+        )
+        weights_content = {
+            "vertexCount": (
+                weight_state.vertex_count if weight_state is not None else None
+            ),
+            "groups": [
+                {
+                    "boneName": bone_name,
+                    "assignments": [list(item) for item in assignments],
+                }
+                for bone_name, assignments in actual_assignments.items()
+            ],
+        }
+        modifier_content = {
+            "modifierId": replay_definition.modifier_id,
+            "modifierName": (
+                modifier.name if modifier is not None else None
+            ),
+            "armatureId": replay_definition.armature_id,
+            "useVertexGroups": bool(
+                modifier is not None and modifier.use_vertex_groups
+            ),
+            "useBoneEnvelopes": bool(
+                modifier is not None and modifier.use_bone_envelopes
+            ),
+            "preserveVolume": bool(
+                modifier is not None and modifier.use_deform_preserve_volume
+            ),
+        }
+        receipt_content = (
+            {
+                "receiptId": receipt.receipt_id,
+                "stepId": receipt.step_id,
+                "actionName": receipt.action_name,
+                "anchor": _identity_proof(receipt.anchor),
+                "mutationAttributes": sorted(
+                    mutation.attribute for mutation in receipt.mutations
+                ),
+            }
+            if receipt_matches
+            else None
+        )
+        action_arguments_sha256 = _stable_content_sha256(dict(parameters))
+        weights_sha256 = _stable_content_sha256(weights_content)
+        modifier_sha256 = _stable_content_sha256(modifier_content)
+        receipt_sha256 = (
+            _stable_content_sha256(receipt_content)
+            if receipt_content is not None
+            else None
+        )
+        satisfied = bool(
+            receipt_matches
+            and ownership_matches
+            and assignment_matches
+            and modifier_matches
+            and mesh_content_intact
+            and len(deform_bone_names) == len(bone_names)
+        )
+        return satisfied, {
+            "targetId": replay_definition.target_id,
+            "armatureId": replay_definition.armature_id,
+            "modifierId": replay_definition.modifier_id,
+            "boneNames": list(bone_names),
+            "deformBoneNames": deform_bone_names,
+            "vertexCount": (
+                weight_state.vertex_count if weight_state is not None else None
+            ),
+            "parametersValid": True,
+            "receiptMatches": receipt_matches,
+            "ownershipMatches": ownership_matches,
+            "assignmentMatches": assignment_matches,
+            "modifierMatches": modifier_matches,
+            "meshContentIntact": mesh_content_intact,
+            "preserveVolumeMatches": modifier_matches,
+            "actionArgumentsSha256": action_arguments_sha256,
+            "weightsContentSha256": weights_sha256,
+            "modifierContentSha256": modifier_sha256,
+            "receiptContentSha256": receipt_sha256,
+            "attestationContentSha256": (
+                _stable_content_sha256(
+                    {
+                        "actionArgumentsSha256": action_arguments_sha256,
+                        "weightsContentSha256": weights_sha256,
+                        "modifierContentSha256": modifier_sha256,
+                        "receiptContentSha256": receipt_sha256,
+                    }
+                )
+                if satisfied
+                else None
+            ),
+        }
+
     target_id = parameters.get("targetId")
     armature_id = parameters.get("armatureId")
     modifier_id = parameters.get("modifierId")
@@ -1377,6 +2418,24 @@ def _render_artifact_exists(
 def _mesh_topology_matches(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
+    if "resultMeshId" in parameters:
+        proof = _replacement_mesh_proof(
+            parameters, receipts, "blender.mesh.edit_subdivide"
+        )
+        topology_grew = all(
+            proof[result_key] > proof[source_key]
+            for result_key, source_key in (
+                ("vertexCount", "sourceVertexCount"),
+                ("edgeCount", "sourceEdgeCount"),
+                ("faceCount", "sourceFaceCount"),
+            )
+        )
+        details = _replacement_mesh_details(
+            proof,
+            {"topologyMatches": topology_grew, "topologyGrew": topology_grew},
+        )
+        return _replacement_mesh_observation_satisfied(details), details
+
     target_id = parameters.get("targetId")
     registry = build_resource_registry(receipts)
     identity = registry.get(target_id) if isinstance(target_id, str) else None
@@ -1417,68 +2476,27 @@ def _mesh_topology_matches(
 def _mesh_triangulated(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
-    allowed_parameters = {"targetId", "resultMeshId"}
-    target_id = parameters.get("targetId")
-    result_mesh_id = parameters.get("resultMeshId")
-    parameters_valid = bool(
-        set(parameters) == allowed_parameters
-        and isinstance(target_id, str)
-        and target_id
-        and isinstance(result_mesh_id, str)
-        and result_mesh_id
+    proof = _replacement_mesh_proof(
+        parameters, receipts, "blender.mesh.edit_triangulate"
     )
-    registry = build_resource_registry(receipts)
-    target_identity = registry.get(target_id) if parameters_valid else None
-    result_identity = registry.get(result_mesh_id) if parameters_valid else None
-    target = resolve_resource(target_identity) if target_identity is not None else None
-    result_mesh = (
-        resolve_resource(result_identity) if result_identity is not None else None
+    result_mesh = proof["resultMesh"]
+    nonempty = all(
+        proof[key] > 0 for key in ("vertexCount", "edgeCount", "faceCount")
     )
-    counts = (
-        (
-            len(result_mesh.vertices),
-            len(result_mesh.edges),
-            len(result_mesh.polygons),
-        )
-        if isinstance(result_mesh, bpy.types.Mesh)
-        else (0, 0, 0)
-    )
-    nonempty = all(count > 0 for count in counts)
     all_triangles = bool(
         isinstance(result_mesh, bpy.types.Mesh)
         and result_mesh.polygons
         and all(len(polygon.vertices) == 3 for polygon in result_mesh.polygons)
     )
-    within_limits = bool(
-        counts[0] <= 8192 and counts[1] <= 16384 and counts[2] <= 8192
+    details = _replacement_mesh_details(
+        proof,
+        {
+            "topologyMatches": nonempty and all_triangles,
+            "nonempty": nonempty,
+            "allTriangles": all_triangles,
+        },
     )
-    assigned = bool(
-        isinstance(target, bpy.types.Object)
-        and target.type == "MESH"
-        and isinstance(result_mesh, bpy.types.Mesh)
-        and target.data is result_mesh
-    )
-    satisfied = bool(
-        parameters_valid
-        and assigned
-        and nonempty
-        and all_triangles
-        and within_limits
-    )
-    return satisfied, {
-        "targetId": target_id if isinstance(target_id, str) else None,
-        "resultMeshId": (
-            result_mesh_id if isinstance(result_mesh_id, str) else None
-        ),
-        "parametersValid": parameters_valid,
-        "assigned": assigned,
-        "nonempty": nonempty,
-        "allTriangles": all_triangles,
-        "withinLimits": within_limits,
-        "vertexCount": counts[0],
-        "edgeCount": counts[1],
-        "faceCount": counts[2],
-    }
+    return _replacement_mesh_observation_satisfied(details), details
 
 
 def _replacement_mesh_grew(
@@ -1486,134 +2504,20 @@ def _replacement_mesh_grew(
     receipts: Mapping[str, ActionReceipt],
     action_name: str,
 ) -> ObservationResult:
-    allowed_parameters = {"targetId", "resultMeshId"}
-    target_id = parameters.get("targetId")
-    result_mesh_id = parameters.get("resultMeshId")
-    parameters_valid = bool(
-        set(parameters) == allowed_parameters
-        and isinstance(target_id, str)
-        and target_id
-        and isinstance(result_mesh_id, str)
-        and result_mesh_id
-    )
-    registry = build_resource_registry(receipts)
-    target_identity = registry.get(target_id) if parameters_valid else None
-    result_identity = registry.get(result_mesh_id) if parameters_valid else None
-    target = resolve_resource(target_identity) if target_identity is not None else None
-    result_mesh = (
-        resolve_resource(result_identity) if result_identity is not None else None
-    )
-    matching_receipts = tuple(
-        receipt
-        for receipt in receipts.values()
-        if receipt.action_name == action_name
-        and result_identity is not None
-        and result_identity in receipt.created
-    )
-    receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
-    data_mutation = (
-        next(
-            (
-                mutation
-                for mutation in receipt.mutations
-                if mutation.attribute == "data"
-                and mutation.resource == target_identity
-                and mutation.after == result_identity
-            ),
-            None,
-        )
-        if receipt is not None
-        else None
-    )
-    content_mutation = (
-        next(
-            (
-                mutation
-                for mutation in receipt.mutations
-                if mutation.attribute == "mesh_content"
-                and mutation.resource == result_identity
-            ),
-            None,
-        )
-        if receipt is not None
-        else None
-    )
-    source_mesh = (
-        resolve_resource(data_mutation.before)
-        if data_mutation is not None and data_mutation.before is not None
-        else None
-    )
-    source_counts = (
-        (
-            len(source_mesh.vertices),
-            len(source_mesh.edges),
-            len(source_mesh.polygons),
-        )
-        if isinstance(source_mesh, bpy.types.Mesh)
-        else (0, 0, 0)
-    )
-    result_counts = (
-        (
-            len(result_mesh.vertices),
-            len(result_mesh.edges),
-            len(result_mesh.polygons),
-        )
-        if isinstance(result_mesh, bpy.types.Mesh)
-        else (0, 0, 0)
-    )
-    assigned = bool(
-        isinstance(target, bpy.types.Object)
-        and target.type == "MESH"
-        and isinstance(result_mesh, bpy.types.Mesh)
-        and target.data is result_mesh
-    )
+    proof = _replacement_mesh_proof(parameters, receipts, action_name)
     topology_grew = all(
-        result_count > source_count
-        for result_count, source_count in zip(result_counts, source_counts)
+        proof[result_key] > proof[source_key]
+        for result_key, source_key in (
+            ("vertexCount", "sourceVertexCount"),
+            ("edgeCount", "sourceEdgeCount"),
+            ("faceCount", "sourceFaceCount"),
+        )
     )
-    within_limits = bool(
-        result_counts[0] <= 8192
-        and result_counts[1] <= 16384
-        and result_counts[2] <= 8192
+    details = _replacement_mesh_details(
+        proof,
+        {"topologyMatches": topology_grew, "topologyGrew": topology_grew},
     )
-    content_intact = bool(
-        isinstance(result_mesh, bpy.types.Mesh)
-        and content_mutation is not None
-        and content_mutation.after is not None
-        and mesh_content_signature(result_mesh) == content_mutation.after
-    )
-    receipt_matches = bool(
-        receipt is not None
-        and data_mutation is not None
-        and content_mutation is not None
-        and isinstance(source_mesh, bpy.types.Mesh)
-    )
-    satisfied = bool(
-        parameters_valid
-        and assigned
-        and receipt_matches
-        and topology_grew
-        and within_limits
-        and content_intact
-    )
-    return satisfied, {
-        "targetId": target_id if isinstance(target_id, str) else None,
-        "resultMeshId": (
-            result_mesh_id if isinstance(result_mesh_id, str) else None
-        ),
-        "parametersValid": parameters_valid,
-        "assigned": assigned,
-        "receiptMatches": receipt_matches,
-        "topologyGrew": topology_grew,
-        "withinLimits": within_limits,
-        "contentIntact": content_intact,
-        "sourceVertexCount": source_counts[0],
-        "sourceEdgeCount": source_counts[1],
-        "sourceFaceCount": source_counts[2],
-        "vertexCount": result_counts[0],
-        "edgeCount": result_counts[1],
-        "faceCount": result_counts[2],
-    }
+    return _replacement_mesh_observation_satisfied(details), details
 
 
 def _mesh_region_extruded(
@@ -1635,6 +2539,61 @@ def _mesh_edges_beveled(
 def _mesh_faces_inset(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
+    replay_proof = _replacement_mesh_proof(
+        parameters, receipts, "blender.mesh.edit_inset_faces"
+    )
+    if set(parameters) != {"targetId", "resultMeshId"}:
+        source_mesh = replay_proof["sourceMesh"]
+        result_mesh = replay_proof["resultMesh"]
+        source_counts = (
+            replay_proof["sourceVertexCount"],
+            replay_proof["sourceEdgeCount"],
+            replay_proof["sourceFaceCount"],
+        )
+        result_counts = (
+            replay_proof["vertexCount"],
+            replay_proof["edgeCount"],
+            replay_proof["faceCount"],
+        )
+        loop_count = (
+            sum(len(polygon.vertices) for polygon in source_mesh.polygons)
+            if isinstance(source_mesh, bpy.types.Mesh)
+            else 0
+        )
+        expected_counts = (
+            source_counts[0] + loop_count,
+            source_counts[1] + 2 * loop_count,
+            source_counts[2] + loop_count,
+        )
+        topology_matches = bool(loop_count and result_counts == expected_counts)
+        result_nondegenerate = bool(
+            isinstance(result_mesh, bpy.types.Mesh)
+            and all(
+                math.isfinite(component)
+                for vertex in result_mesh.vertices
+                for component in vertex.co
+            )
+            and all(
+                math.isfinite(polygon.area) and polygon.area > 0.0
+                for polygon in result_mesh.polygons
+            )
+        )
+        details = _replacement_mesh_details(
+            replay_proof,
+            {
+                "topologyMatches": topology_matches,
+                "resultNondegenerate": result_nondegenerate,
+                "sourceLoopCount": loop_count,
+                "expectedVertexCount": expected_counts[0],
+                "expectedEdgeCount": expected_counts[1],
+                "expectedFaceCount": expected_counts[2],
+            },
+        )
+        return bool(
+            _replacement_mesh_observation_satisfied(details)
+            and result_nondegenerate
+        ), details
+
     allowed_parameters = {"targetId", "resultMeshId"}
     target_id = parameters.get("targetId")
     result_mesh_id = parameters.get("resultMeshId")
@@ -1794,6 +2753,109 @@ def _mesh_faces_inset(
 def _mesh_faces_poked(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
+    replay_proof = _replacement_mesh_proof(
+        parameters, receipts, "blender.mesh.edit_poke_faces"
+    )
+    if set(parameters) != {"targetId", "resultMeshId"}:
+        source_mesh = replay_proof["sourceMesh"]
+        result_mesh = replay_proof["resultMesh"]
+        receipt = replay_proof["receipt"]
+        source_identity = replay_proof["sourceIdentity"]
+        source_counts = (
+            replay_proof["sourceVertexCount"],
+            replay_proof["sourceEdgeCount"],
+            replay_proof["sourceFaceCount"],
+        )
+        result_counts = (
+            replay_proof["vertexCount"],
+            replay_proof["edgeCount"],
+            replay_proof["faceCount"],
+        )
+        source_content_mutations = (
+            tuple(
+                mutation
+                for mutation in receipt.mutations
+                if mutation.attribute == "mesh_content"
+                and mutation.resource == source_identity
+                and mutation.before == mutation.after
+                and mutation.before is not None
+            )
+            if receipt is not None
+            else ()
+        )
+        source_signature = (
+            mesh_content_signature(source_mesh)
+            if isinstance(source_mesh, bpy.types.Mesh)
+            else None
+        )
+        source_content_intact = bool(
+            len(source_content_mutations) == 1
+            and source_signature == source_content_mutations[0].after
+        )
+        loop_count = (
+            sum(len(polygon.vertices) for polygon in source_mesh.polygons)
+            if isinstance(source_mesh, bpy.types.Mesh)
+            else 0
+        )
+        expected_counts = (
+            source_counts[0] + source_counts[2],
+            source_counts[1] + loop_count,
+            loop_count,
+        )
+        topology_matches = bool(loop_count and result_counts == expected_counts)
+        all_triangles = bool(
+            isinstance(result_mesh, bpy.types.Mesh)
+            and result_mesh.polygons
+            and all(len(face.vertices) == 3 for face in result_mesh.polygons)
+        )
+        result_edge_lengths = (
+            tuple(
+                (
+                    result_mesh.vertices[edge.vertices[0]].co
+                    - result_mesh.vertices[edge.vertices[1]].co
+                ).length
+                for edge in result_mesh.edges
+            )
+            if isinstance(result_mesh, bpy.types.Mesh)
+            else ()
+        )
+        result_nondegenerate = bool(
+            isinstance(result_mesh, bpy.types.Mesh)
+            and all(
+                math.isfinite(component)
+                for vertex in result_mesh.vertices
+                for component in vertex.co
+            )
+            and all(
+                math.isfinite(length) and length > 0.0
+                for length in result_edge_lengths
+            )
+            and all(
+                math.isfinite(face.area) and face.area > 0.0
+                for face in result_mesh.polygons
+            )
+        )
+        details = _replacement_mesh_details(
+            replay_proof,
+            {
+                "topologyMatches": topology_matches,
+                "sourceContentIntact": source_content_intact,
+                "resultContentIntact": replay_proof["contentIntact"],
+                "allTriangles": all_triangles,
+                "resultNondegenerate": result_nondegenerate,
+                "sourceLoopCount": loop_count,
+                "expectedVertexCount": expected_counts[0],
+                "expectedEdgeCount": expected_counts[1],
+                "expectedFaceCount": expected_counts[2],
+            },
+        )
+        return bool(
+            _replacement_mesh_observation_satisfied(details)
+            and source_content_intact
+            and all_triangles
+            and result_nondegenerate
+        ), details
+
     allowed_parameters = {"targetId", "resultMeshId"}
     target_id = parameters.get("targetId")
     result_mesh_id = parameters.get("resultMeshId")

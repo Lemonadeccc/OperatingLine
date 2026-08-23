@@ -120,6 +120,29 @@ WEIGHTS = [
 ]
 
 
+ARMATURE_ARGUMENTS = {
+    "armatureId": "deform.armature",
+    "objectName": "OperatingLine.Rig.Deform",
+    "dataName": "OperatingLine.Rig.DeformData",
+    "collectionId": "snowman.collection",
+    "bones": [
+        {
+            "boneName": ROOT_BONE,
+            "head": [0.0, 0.0, 0.0],
+            "tail": [0.0, 0.0, 1.0],
+            "parentName": None,
+        },
+        {
+            "boneName": TIP_BONE,
+            "head": [0.0, 0.0, 1.0],
+            "tail": [0.0, 0.0, 2.0],
+            "parentName": ROOT_BONE,
+        },
+    ],
+    "bindings": [{"targetId": "deform.control", "boneName": ROOT_BONE}],
+}
+
+
 SKIN_ARGUMENTS = {
     "targetId": "deform.target",
     "armatureId": "deform.armature",
@@ -223,29 +246,7 @@ def plan() -> dict:
                 "deform.rig",
                 3,
                 "blender.rig.create_armature",
-                {
-                    "armatureId": "deform.armature",
-                    "objectName": "OperatingLine.Rig.Deform",
-                    "dataName": "OperatingLine.Rig.DeformData",
-                    "collectionId": "snowman.collection",
-                    "bones": [
-                        {
-                            "boneName": ROOT_BONE,
-                            "head": [0.0, 0.0, 0.0],
-                            "tail": [0.0, 0.0, 1.0],
-                            "parentName": None,
-                        },
-                        {
-                            "boneName": TIP_BONE,
-                            "head": [0.0, 0.0, 1.0],
-                            "tail": [0.0, 0.0, 2.0],
-                            "parentName": ROOT_BONE,
-                        },
-                    ],
-                    "bindings": [
-                        {"targetId": "deform.control", "boneName": ROOT_BONE}
-                    ],
-                },
+                ARMATURE_ARGUMENTS,
             ),
             step(
                 "deform.skin",
@@ -342,6 +343,28 @@ def main() -> None:
     armature = resolve_resource(registry["deform.armature"])
     assert target.type == "MESH" and armature.type == "ARMATURE"
     assert all(not bone.use_deform for bone in armature.data.bones)
+    armature_observation = evaluate_observations(
+        ({"kind": "armature_ready", "parameters": ARMATURE_ARGUMENTS},),
+        session.receipts,
+    )[0]
+    assert armature_observation["satisfied"] is True, armature_observation
+    assert armature_observation["details"]["attestationContentSha256"] is not None
+    assert evaluate_observations(
+        (
+            {
+                "kind": "armature_ready",
+                "parameters": {**ARMATURE_ARGUMENTS, "unexpected": True},
+            },
+        ),
+        session.receipts,
+    )[0]["satisfied"] is False
+    original_armature_name = armature.name
+    armature.name = "OperatingLine.Rig.Tampered"
+    assert evaluate_observations(
+        ({"kind": "armature_ready", "parameters": ARMATURE_ARGUMENTS},),
+        session.receipts,
+    )[0]["satisfied"] is False
+    armature.name = original_armature_name
 
     incomplete = rigging_actions.validate_skin_weights(
         {**SKIN_ARGUMENTS, "weights": WEIGHTS[:-1]}
@@ -399,18 +422,28 @@ def main() -> None:
         (
             {
                 "kind": "skin_weights_ready",
-                "parameters": {
-                    "targetId": "deform.target",
-                    "armatureId": "deform.armature",
-                    "modifierId": "deform.skin.modifier",
-                    "boneNames": [ROOT_BONE, TIP_BONE],
-                    "preserveVolume": True,
-                },
+                "parameters": SKIN_ARGUMENTS,
             },
         ),
         session.receipts,
     )[0]
     assert skin_observation["satisfied"] is True, skin_observation
+    assert skin_observation["details"]["attestationContentSha256"] is not None
+    assert evaluate_observations(
+        (
+            {
+                "kind": "skin_weights_ready",
+                "parameters": {**SKIN_ARGUMENTS, "unexpected": True},
+            },
+        ),
+        session.receipts,
+    )[0]["satisfied"] is False
+    target.vertex_groups[TIP_BONE].add((0,), 0.5, "REPLACE")
+    assert evaluate_observations(
+        ({"kind": "skin_weights_ready", "parameters": SKIN_ARGUMENTS},),
+        session.receipts,
+    )[0]["satisfied"] is False
+    target.vertex_groups[TIP_BONE].remove((0,))
     invalid_skin_observation = evaluate_observations(
         (
             {
@@ -444,20 +477,30 @@ def main() -> None:
         (
             {
                 "kind": "pose_animation_ready",
-                "parameters": {
-                    "armatureId": "deform.armature",
-                    "actionId": "deform.animation.action",
-                    "frames": [1, 10, 20],
-                    "boneNames": [ROOT_BONE, TIP_BONE],
-                    "channels": ["location", "rotation_euler", "scale"],
-                    "interpolation": "LINEAR",
-                    "extrapolation": "LINEAR",
-                },
+                "parameters": ANIMATION_ARGUMENTS,
             },
         ),
         session.receipts,
     )[0]
     assert animation_observation["satisfied"] is True, animation_observation
+    assert animation_observation["details"]["attestationContentSha256"] is not None
+    assert evaluate_observations(
+        (
+            {
+                "kind": "pose_animation_ready",
+                "parameters": {**ANIMATION_ARGUMENTS, "unexpected": True},
+            },
+        ),
+        session.receipts,
+    )[0]["satisfied"] is False
+    first_curve = curves[0]
+    original_key_value = float(first_curve.keyframe_points[0].co[1])
+    first_curve.keyframe_points[0].co[1] += 0.125
+    assert evaluate_observations(
+        ({"kind": "pose_animation_ready", "parameters": ANIMATION_ARGUMENTS},),
+        session.receipts,
+    )[0]["satisfied"] is False
+    first_curve.keyframe_points[0].co[1] = original_key_value
     invalid_animation_observation = evaluate_observations(
         (
             {
