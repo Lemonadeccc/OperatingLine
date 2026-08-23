@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.42.0",
+  "catalogVersion": "1.43.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.22.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -2371,8 +2371,14 @@
           ]
         },
         "mcp": {
-          "availability": "unavailable",
-          "reason": "No approved action-level MCP tool is available."
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
         }
       }
     },
@@ -2414,6 +2420,26 @@
         ],
         "reason": "The accepted action triangulates the complete bounded mesh into a new owned datablock with fixed FIXED/EAR_CLIP methods and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/face/triangulate_faces.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action creates and tags a bounded replacement mesh before atomically swapping the owned object link, so Blender's native in-place Edit Mode menu is not an equivalent managed transaction."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No catalog-verified shortcut track preserves the managed replacement-mesh identity, fixed triangulation methods, Observation gate, and compensating rollback contract."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
       }
     },
     {
@@ -2464,6 +2490,26 @@
         ],
         "reason": "The accepted action resolves stable source polygon indices, validates one connected bounded region, extrudes it by an exact local-space vector into a new owned mesh datablock, and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership, selection, observation, and rollback contract.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/tools/extrude_region.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action creates and tags a bounded replacement mesh before atomically swapping the owned object link, so Blender's native in-place Edit Mode menu is not an equivalent managed transaction."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No catalog-verified shortcut track preserves the accepted polygon-index region, exact local-space translation, managed identity, Observation gate, and compensating rollback contract."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
       }
     },
     {
@@ -2727,8 +2773,14 @@
           ]
         },
         "mcp": {
-          "availability": "unavailable",
-          "reason": "No approved action-level MCP tool is available."
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
         }
       }
     },
@@ -2977,8 +3029,14 @@
           ]
         },
         "mcp": {
-          "availability": "unavailable",
-          "reason": "No approved action-level MCP tool is available."
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
         }
       }
     },
@@ -3188,8 +3246,14 @@
           ]
         },
         "mcp": {
-          "availability": "unavailable",
-          "reason": "No approved action-level MCP tool is available."
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
         }
       }
     },
@@ -3749,6 +3813,26 @@
         ],
         "reason": "The accepted action creates several bones and rigid object bindings as one compensated transaction, not as one allowlisted native menu command.",
         "manualReference": "https://docs.blender.org/manual/en/latest/animation/armatures/introduction.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action creates a bounded multi-bone armature and rigid object bindings as one compensated transaction; no single Blender menu command represents the complete accepted action."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No catalog-verified shortcut sequence represents the complete accepted multi-bone armature and rigid-binding transaction."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
       }
     },
     {
@@ -3811,6 +3895,26 @@
         ],
         "reason": "The accepted action validates and assigns a complete bounded per-vertex weight table plus an Armature modifier atomically; Blender has no single native control representing that transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/properties/vertex_groups/vertex_groups.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action assigns a complete normalized per-vertex weight table and an owned Armature modifier atomically; no single Blender menu path represents that transaction."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No catalog-verified shortcut sequence represents the complete accepted skin-weight table and Armature modifier transaction."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
       }
     },
     {
@@ -3863,6 +3967,26 @@
         ],
         "reason": "The accepted action writes a bounded set of exact frames, pose transforms, interpolation, and extrapolation atomically; the native keyframe command alone cannot represent that complete parameterized transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/animation/keyframes/introduction.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action authors bounded multi-frame pose transforms, interpolation, and extrapolation atomically; no single Blender menu command represents the complete accepted animation."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No catalog-verified shortcut sequence represents the complete accepted multi-frame pose animation and curve settings."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
       }
     },
     {

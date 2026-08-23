@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.42.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.43.0');
     const uvSphereMenu = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
     )?.procedureMaterialization?.menu;
@@ -347,8 +347,17 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
       'blender.modifier.add_solidify',
       'blender.modifier.add_mirror',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.animation.create_pose_keyframes',
     ]);
     const uvSphereMcp = availableMcpRecipes[0]?.procedureMaterialization?.mcp;
     for (const recipe of availableMcpRecipes) {
@@ -446,7 +455,7 @@ describe('interaction catalog registry', () => {
     expect(bevelEdges?.procedureMaterialization).toMatchObject({
       menu: { availability: 'unavailable' },
       shortcut: { availability: 'available', projection: 'candidate_only' },
-      mcp: { availability: 'unavailable' },
+      mcp: { availability: 'available' },
     });
     const bevelShortcut = bevelEdges?.procedureMaterialization?.shortcut;
     if (bevelShortcut?.availability !== 'available') {
@@ -479,7 +488,7 @@ describe('interaction catalog registry', () => {
     expect(insetFaces?.procedureMaterialization).toMatchObject({
       menu: { availability: 'unavailable' },
       shortcut: { availability: 'available', projection: 'candidate_only' },
-      mcp: { availability: 'unavailable' },
+      mcp: { availability: 'available' },
     });
     const insetShortcut = insetFaces?.procedureMaterialization?.shortcut;
     if (insetShortcut?.availability !== 'available') {
@@ -843,7 +852,7 @@ describe('interaction catalog registry', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: { availability: 'available' },
     });
     const subdivideShortcut = subdivideMaterialization?.shortcut;
     if (subdivideShortcut?.availability !== 'available') {
@@ -1600,8 +1609,17 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
       'blender.modifier.add_solidify',
       'blender.modifier.add_mirror',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.animation.create_pose_keyframes',
     ]);
   });
 
@@ -1860,7 +1878,9 @@ describe('interaction catalog registry', () => {
       'a880342d7820f75af2de053b64d40ffd752dda09492273ef03510a8e77ac111d',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.41.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     const activeMenu = active.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
     )?.procedureMaterialization?.menu;
@@ -1902,7 +1922,9 @@ describe('interaction catalog registry', () => {
       'c7fc9b7db6c9391a6d82e62cd569e36986af21d0ddf5583249e6644421ef356f',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.42.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     const frozenSolidify = frozen.recipes.find(
       (recipe) => recipe.actionName === 'blender.modifier.add_solidify',
     );
@@ -1932,6 +1954,58 @@ describe('interaction catalog registry', () => {
     });
     active.catalogVersion = frozen.catalogVersion;
     delete activeSolidify!.procedureMaterialization;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.42.0 and promotes only the nine managed actions in 1.43.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.42.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '7cc79687c9b8e4de7c62461471b0fbed3fe11b1ec609b2278f4a8c28cb52c1de',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    const promotedActions = [
+      'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.animation.create_pose_keyframes',
+    ] as const;
+
+    expect(frozen.catalogVersion).toBe('1.42.0');
+    for (const actionName of promotedActions) {
+      const frozenRecipe = frozen.recipes.find((recipe) => recipe.actionName === actionName);
+      const activeRecipe = active.recipes.find((recipe) => recipe.actionName === actionName);
+      if (frozenRecipe === undefined || activeRecipe === undefined) {
+        throw new Error(`Expected promoted recipe ${actionName}`);
+      }
+      expect(activeRecipe.procedureMaterialization?.mcp).toEqual({
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'accepted_action_arguments',
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        authorization: 'accepted_replay_next_step',
+        resultBinding: 'companion_state_report',
+      });
+
+      if (frozenRecipe.procedureMaterialization === undefined) {
+        delete activeRecipe.procedureMaterialization;
+      } else {
+        activeRecipe.procedureMaterialization!.mcp = structuredClone(
+          frozenRecipe.procedureMaterialization.mcp,
+        );
+      }
+    }
+
+    active.catalogVersion = frozen.catalogVersion;
     expect(active).toEqual(frozen);
   });
 

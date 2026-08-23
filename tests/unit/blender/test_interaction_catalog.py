@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.42.0")
+        self.assertEqual(catalog.catalog_version, "1.43.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -1075,7 +1075,7 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             subdivide.procedure_materialization.mcp.availability,
-            "unavailable",
+            "available",
         )
         plane = next(
             recipe
@@ -1716,12 +1716,17 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_cylinder",
                     "blender.mesh.create_torus",
                     "blender.mesh.edit_subdivide",
+                    "blender.mesh.edit_triangulate",
+                    "blender.mesh.edit_extrude_region",
                     "blender.mesh.edit_bevel_edges",
                     "blender.mesh.edit_inset_faces",
                     "blender.mesh.edit_poke_faces",
                     "blender.modifier.add_solidify",
                     "blender.modifier.add_subdivision_surface",
                     "blender.modifier.add_mirror",
+                    "blender.rig.create_armature",
+                    "blender.rig.bind_skin_weights",
+                    "blender.animation.create_pose_keyframes",
                 }
             )
         )
@@ -1830,7 +1835,7 @@ class InteractionCatalogTests(unittest.TestCase):
         assert recipe.procedure_materialization is not None
         materialization = recipe.procedure_materialization
         self.assertEqual(materialization.menu.availability, "unavailable")
-        self.assertEqual(materialization.mcp.availability, "unavailable")
+        self.assertEqual(materialization.mcp.availability, "available")
         shortcut = materialization.shortcut
         self.assertEqual(
             (
@@ -1964,7 +1969,7 @@ class InteractionCatalogTests(unittest.TestCase):
         assert recipe.procedure_materialization is not None
         materialization = recipe.procedure_materialization
         self.assertEqual(materialization.menu.availability, "unavailable")
-        self.assertEqual(materialization.mcp.availability, "unavailable")
+        self.assertEqual(materialization.mcp.availability, "available")
         shortcut = materialization.shortcut
         self.assertEqual(
             (shortcut.availability, shortcut.projection),
@@ -2067,7 +2072,7 @@ class InteractionCatalogTests(unittest.TestCase):
         assert recipe.procedure_materialization is not None
         materialization = recipe.procedure_materialization
         self.assertEqual(materialization.menu.availability, "unavailable")
-        self.assertEqual(materialization.mcp.availability, "unavailable")
+        self.assertEqual(materialization.mcp.availability, "available")
         shortcut = materialization.shortcut
         self.assertEqual(
             (shortcut.availability, shortcut.projection),
@@ -3972,16 +3977,26 @@ class InteractionCatalogTests(unittest.TestCase):
                 self._load_raw(forged)
 
         for recipe_id in (
+            "blender.mesh.edit_subdivide.semantic",
+            "blender.mesh.edit_triangulate.semantic",
+            "blender.mesh.edit_extrude_region.semantic",
+            "blender.mesh.edit_bevel_edges.semantic",
+            "blender.mesh.edit_inset_faces.semantic",
+            "blender.mesh.edit_poke_faces.semantic",
             "blender.modifier.add_solidify.semantic",
             "blender.modifier.add_mirror.semantic",
+            "blender.rig.create_armature.semantic",
+            "blender.rig.bind_skin_weights.semantic",
+            "blender.animation.create_pose_keyframes.semantic",
         ):
             with self.subTest(recipe_id=recipe_id):
                 parse_mcp_materialization(available_mcp, recipe_id)
 
         for recipe_id in (
             "blender.mesh.create_primitive_batch.semantic",
-            "blender.mesh.edit_subdivide.semantic",
             "blender.mesh.create_monkey.native",
+            "blender.mesh.edit_subdivide.native",
+            "blender.rig.create_armature.native",
         ):
             with self.subTest(recipe_id=recipe_id):
                 with self.assertRaisesRegex(ValueError, "exact approved recipes"):

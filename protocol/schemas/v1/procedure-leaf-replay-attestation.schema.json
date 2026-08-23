@@ -1753,6 +1753,1261 @@
                 "properties": {
                   "kind": {
                     "type": "string",
+                    "const": "mesh_topology_matches"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cuts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                          },
+                          "smooth": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "cuts",
+                          "smooth"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyGrew": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "topologyGrew"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_triangulated"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "nonempty": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "allTriangles": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "nonempty",
+                      "allTriangles"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_region_extruded"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "polygonIndices": {
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "type": "array",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8191
+                            }
+                          },
+                          "translation": {
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "type": "array",
+                            "items": {
+                              "type": "number",
+                              "minimum": -1000,
+                              "maximum": 1000
+                            }
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "polygonIndices",
+                          "translation"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyGrew": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "topologyGrew"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_edges_beveled"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "width": {
+                            "type": "number",
+                            "minimum": 0.0001,
+                            "maximum": 100
+                          },
+                          "segments": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 16
+                          },
+                          "profile": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "width",
+                          "segments",
+                          "profile"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyGrew": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "topologyGrew"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_faces_inset"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "thickness": {
+                            "type": "number",
+                            "minimum": 0.0001,
+                            "maximum": 100
+                          },
+                          "depth": {
+                            "type": "number",
+                            "minimum": -100,
+                            "maximum": 100
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "thickness",
+                          "depth"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultNondegenerate": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceLoopCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 32768
+                      },
+                      "expectedVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "expectedEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "expectedFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "resultNondegenerate",
+                      "sourceLoopCount",
+                      "expectedVertexCount",
+                      "expectedEdgeCount",
+                      "expectedFaceCount"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_faces_poked"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "offset": {
+                            "type": "number",
+                            "minimum": -100,
+                            "maximum": 100
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "offset"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "allTriangles": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNondegenerate": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceLoopCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 32768
+                      },
+                      "expectedVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "expectedEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "expectedFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "resultContentIntact",
+                      "allTriangles",
+                      "resultNondegenerate",
+                      "sourceLoopCount",
+                      "expectedVertexCount",
+                      "expectedEdgeCount",
+                      "expectedFaceCount"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
                     "const": "modifier_ready"
                   },
                   "satisfied": {
@@ -2048,6 +3303,741 @@
                         "additionalProperties": false
                       }
                     ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "armature_ready"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "armatureId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "objectName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "dataName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "collectionId": {
+                            "type": "string",
+                            "const": "snowman.collection"
+                          },
+                          "bones": {
+                            "minItems": 1,
+                            "maxItems": 32,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "boneName": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^OperatingLine\\..*"
+                                },
+                                "head": {
+                                  "minItems": 3,
+                                  "maxItems": 3,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number",
+                                    "minimum": -1000,
+                                    "maximum": 1000
+                                  }
+                                },
+                                "tail": {
+                                  "minItems": 3,
+                                  "maxItems": 3,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number",
+                                    "minimum": -1000,
+                                    "maximum": 1000
+                                  }
+                                },
+                                "parentName": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^OperatingLine\\..*"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "boneName",
+                                "head",
+                                "tail",
+                                "parentName"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "bindings": {
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "targetId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "boneName": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^OperatingLine\\..*"
+                                }
+                              },
+                              "required": [
+                                "targetId",
+                                "boneName"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "armatureId",
+                          "objectName",
+                          "dataName",
+                          "collectionId",
+                          "bones",
+                          "bindings"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "armatureId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "boneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "availableBoneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "boundTargetIds": {
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        }
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "ownershipMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "bonesMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "bindingsMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "armatureContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "armatureId",
+                      "boneNames",
+                      "availableBoneNames",
+                      "boundTargetIds",
+                      "parametersValid",
+                      "receiptMatches",
+                      "ownershipMatches",
+                      "bonesMatch",
+                      "bindingsMatch",
+                      "actionArgumentsSha256",
+                      "armatureContentSha256",
+                      "receiptContentSha256",
+                      "attestationContentSha256"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "skin_weights_ready"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "armatureId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "preserveVolume": {
+                            "type": "boolean"
+                          },
+                          "weights": {
+                            "minItems": 1,
+                            "maxItems": 8192,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "vertexIndex": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 8191
+                                },
+                                "influences": {
+                                  "minItems": 1,
+                                  "maxItems": 8,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "boneName": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 180,
+                                        "pattern": "^OperatingLine\\..*"
+                                      },
+                                      "weight": {
+                                        "type": "number",
+                                        "minimum": 0.000001,
+                                        "maximum": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "boneName",
+                                      "weight"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "vertexIndex",
+                                "influences"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "armatureId",
+                          "modifierId",
+                          "modifierName",
+                          "preserveVolume",
+                          "weights"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "armatureId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "modifierId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "boneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "deformBoneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "ownershipMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assignmentMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "modifierMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "meshContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "preserveVolumeMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "weightsContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "modifierContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "armatureId",
+                      "modifierId",
+                      "boneNames",
+                      "deformBoneNames",
+                      "vertexCount",
+                      "parametersValid",
+                      "receiptMatches",
+                      "ownershipMatches",
+                      "assignmentMatches",
+                      "modifierMatches",
+                      "meshContentIntact",
+                      "preserveVolumeMatches",
+                      "actionArgumentsSha256",
+                      "weightsContentSha256",
+                      "modifierContentSha256",
+                      "receiptContentSha256",
+                      "attestationContentSha256"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "pose_animation_ready"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "actionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "actionName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "armatureId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "keyframes": {
+                            "minItems": 2,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "frame": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "poses": {
+                                  "minItems": 1,
+                                  "maxItems": 32,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "boneName": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 180,
+                                        "pattern": "^OperatingLine\\..*"
+                                      },
+                                      "rotationEuler": {
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "minimum": -6.283185307179586,
+                                          "maximum": 6.283185307179586
+                                        }
+                                      },
+                                      "location": {
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "minimum": -1000,
+                                          "maximum": 1000
+                                        }
+                                      },
+                                      "scale": {
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "minimum": 0.0001,
+                                          "maximum": 1000
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "boneName",
+                                      "rotationEuler"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "frame",
+                                "poses"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "interpolation": {
+                            "type": "string",
+                            "enum": [
+                              "BEZIER",
+                              "LINEAR",
+                              "CONSTANT"
+                            ]
+                          },
+                          "extrapolation": {
+                            "type": "string",
+                            "enum": [
+                              "CONSTANT",
+                              "LINEAR"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "actionId",
+                          "actionName",
+                          "armatureId",
+                          "keyframes",
+                          "interpolation",
+                          "extrapolation"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "armatureId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "actionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "ownershipMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "frameRange": {
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "expectedFrameRange": {
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "curveCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 288
+                      },
+                      "expectedCurveCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 288
+                      },
+                      "curvesMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "valuesMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "interpolationMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "extrapolationMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "armatureId",
+                      "actionId",
+                      "parametersValid",
+                      "receiptMatches",
+                      "ownershipMatches",
+                      "assigned",
+                      "frameRange",
+                      "expectedFrameRange",
+                      "curveCount",
+                      "expectedCurveCount",
+                      "curvesMatch",
+                      "valuesMatch",
+                      "interpolationMatches",
+                      "extrapolationMatches",
+                      "actionContentIntact",
+                      "actionArgumentsSha256",
+                      "actionContentSha256",
+                      "receiptContentSha256",
+                      "attestationContentSha256"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -2687,8 +4677,17 @@
                 "blender.mesh.create_torus",
                 "blender.mesh.create_cone",
                 "blender.mesh.create_cylinder",
+                "blender.mesh.edit_subdivide",
+                "blender.mesh.edit_triangulate",
+                "blender.mesh.edit_extrude_region",
+                "blender.mesh.edit_bevel_edges",
+                "blender.mesh.edit_inset_faces",
+                "blender.mesh.edit_poke_faces",
                 "blender.modifier.add_mirror",
-                "blender.modifier.add_solidify"
+                "blender.modifier.add_solidify",
+                "blender.rig.create_armature",
+                "blender.rig.bind_skin_weights",
+                "blender.animation.create_pose_keyframes"
               ]
             }
           },
@@ -4208,6 +6207,1261 @@
                 "properties": {
                   "kind": {
                     "type": "string",
+                    "const": "mesh_topology_matches"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cuts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 8
+                          },
+                          "smooth": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "cuts",
+                          "smooth"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyGrew": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "topologyGrew"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_triangulated"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "nonempty": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "allTriangles": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "nonempty",
+                      "allTriangles"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_region_extruded"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "polygonIndices": {
+                            "minItems": 1,
+                            "maxItems": 256,
+                            "type": "array",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 8191
+                            }
+                          },
+                          "translation": {
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "type": "array",
+                            "items": {
+                              "type": "number",
+                              "minimum": -1000,
+                              "maximum": 1000
+                            }
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "polygonIndices",
+                          "translation"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyGrew": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "topologyGrew"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_edges_beveled"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "width": {
+                            "type": "number",
+                            "minimum": 0.0001,
+                            "maximum": 100
+                          },
+                          "segments": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 16
+                          },
+                          "profile": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "width",
+                          "segments",
+                          "profile"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyGrew": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "topologyGrew"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_faces_inset"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "thickness": {
+                            "type": "number",
+                            "minimum": 0.0001,
+                            "maximum": 100
+                          },
+                          "depth": {
+                            "type": "number",
+                            "minimum": -100,
+                            "maximum": 100
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "thickness",
+                          "depth"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultNondegenerate": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceLoopCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 32768
+                      },
+                      "expectedVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "expectedEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "expectedFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "resultNondegenerate",
+                      "sourceLoopCount",
+                      "expectedVertexCount",
+                      "expectedEdgeCount",
+                      "expectedFaceCount"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mesh_faces_poked"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "resultMeshName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "offset": {
+                            "type": "number",
+                            "minimum": -100,
+                            "maximum": 100
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "resultMeshId",
+                          "resultMeshName",
+                          "offset"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "resultMeshId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "replayParametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "contentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "withinLimits": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNameMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "sourceFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "edgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "faceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "sourceMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultMeshContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "topologyMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "resultContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "allTriangles": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "resultNondegenerate": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "sourceLoopCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 32768
+                      },
+                      "expectedVertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "expectedEdgeCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 16384
+                      },
+                      "expectedFaceCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "resultMeshId",
+                      "parametersValid",
+                      "replayParametersValid",
+                      "assigned",
+                      "receiptMatches",
+                      "contentIntact",
+                      "sourceContentIntact",
+                      "withinLimits",
+                      "resultNameMatches",
+                      "sourceVertexCount",
+                      "sourceEdgeCount",
+                      "sourceFaceCount",
+                      "vertexCount",
+                      "edgeCount",
+                      "faceCount",
+                      "sourceMeshContentSha256",
+                      "resultMeshContentSha256",
+                      "receiptContentSha256",
+                      "actionArgumentsSha256",
+                      "topologyMatches",
+                      "attestationContentSha256",
+                      "resultContentIntact",
+                      "allTriangles",
+                      "resultNondegenerate",
+                      "sourceLoopCount",
+                      "expectedVertexCount",
+                      "expectedEdgeCount",
+                      "expectedFaceCount"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
                     "const": "modifier_ready"
                   },
                   "satisfied": {
@@ -4503,6 +7757,741 @@
                         "additionalProperties": false
                       }
                     ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "armature_ready"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "armatureId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "objectName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "dataName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "collectionId": {
+                            "type": "string",
+                            "const": "snowman.collection"
+                          },
+                          "bones": {
+                            "minItems": 1,
+                            "maxItems": 32,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "boneName": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^OperatingLine\\..*"
+                                },
+                                "head": {
+                                  "minItems": 3,
+                                  "maxItems": 3,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number",
+                                    "minimum": -1000,
+                                    "maximum": 1000
+                                  }
+                                },
+                                "tail": {
+                                  "minItems": 3,
+                                  "maxItems": 3,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number",
+                                    "minimum": -1000,
+                                    "maximum": 1000
+                                  }
+                                },
+                                "parentName": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180,
+                                      "pattern": "^OperatingLine\\..*"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "boneName",
+                                "head",
+                                "tail",
+                                "parentName"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "bindings": {
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "targetId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "boneName": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^OperatingLine\\..*"
+                                }
+                              },
+                              "required": [
+                                "targetId",
+                                "boneName"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "armatureId",
+                          "objectName",
+                          "dataName",
+                          "collectionId",
+                          "bones",
+                          "bindings"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "armatureId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "boneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "availableBoneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "boundTargetIds": {
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        }
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "ownershipMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "bonesMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "bindingsMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "armatureContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "armatureId",
+                      "boneNames",
+                      "availableBoneNames",
+                      "boundTargetIds",
+                      "parametersValid",
+                      "receiptMatches",
+                      "ownershipMatches",
+                      "bonesMatch",
+                      "bindingsMatch",
+                      "actionArgumentsSha256",
+                      "armatureContentSha256",
+                      "receiptContentSha256",
+                      "attestationContentSha256"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "skin_weights_ready"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "armatureId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "preserveVolume": {
+                            "type": "boolean"
+                          },
+                          "weights": {
+                            "minItems": 1,
+                            "maxItems": 8192,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "vertexIndex": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 8191
+                                },
+                                "influences": {
+                                  "minItems": 1,
+                                  "maxItems": 8,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "boneName": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 180,
+                                        "pattern": "^OperatingLine\\..*"
+                                      },
+                                      "weight": {
+                                        "type": "number",
+                                        "minimum": 0.000001,
+                                        "maximum": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "boneName",
+                                      "weight"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "vertexIndex",
+                                "influences"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "targetId",
+                          "armatureId",
+                          "modifierId",
+                          "modifierName",
+                          "preserveVolume",
+                          "weights"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "targetId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "armatureId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "modifierId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "boneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "deformBoneNames": {
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180,
+                          "pattern": "^OperatingLine\\..*"
+                        }
+                      },
+                      "vertexCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 8192
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "ownershipMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assignmentMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "modifierMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "meshContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "preserveVolumeMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "weightsContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "modifierContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "targetId",
+                      "armatureId",
+                      "modifierId",
+                      "boneNames",
+                      "deformBoneNames",
+                      "vertexCount",
+                      "parametersValid",
+                      "receiptMatches",
+                      "ownershipMatches",
+                      "assignmentMatches",
+                      "modifierMatches",
+                      "meshContentIntact",
+                      "preserveVolumeMatches",
+                      "actionArgumentsSha256",
+                      "weightsContentSha256",
+                      "modifierContentSha256",
+                      "receiptContentSha256",
+                      "attestationContentSha256"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "pose_animation_ready"
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "details": {
+                    "type": "object",
+                    "properties": {
+                      "parameters": {
+                        "type": "object",
+                        "properties": {
+                          "actionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "actionName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "armatureId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "keyframes": {
+                            "minItems": 2,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "frame": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100000
+                                },
+                                "poses": {
+                                  "minItems": 1,
+                                  "maxItems": 32,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "boneName": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 180,
+                                        "pattern": "^OperatingLine\\..*"
+                                      },
+                                      "rotationEuler": {
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "minimum": -6.283185307179586,
+                                          "maximum": 6.283185307179586
+                                        }
+                                      },
+                                      "location": {
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "minimum": -1000,
+                                          "maximum": 1000
+                                        }
+                                      },
+                                      "scale": {
+                                        "minItems": 3,
+                                        "maxItems": 3,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "minimum": 0.0001,
+                                          "maximum": 1000
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "boneName",
+                                      "rotationEuler"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "frame",
+                                "poses"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "interpolation": {
+                            "type": "string",
+                            "enum": [
+                              "BEZIER",
+                              "LINEAR",
+                              "CONSTANT"
+                            ]
+                          },
+                          "extrapolation": {
+                            "type": "string",
+                            "enum": [
+                              "CONSTANT",
+                              "LINEAR"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "actionId",
+                          "actionName",
+                          "armatureId",
+                          "keyframes",
+                          "interpolation",
+                          "extrapolation"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "supported": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "armatureId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "actionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "parametersValid": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "receiptMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "ownershipMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "assigned": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "frameRange": {
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "expectedFrameRange": {
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": 1,
+                          "maximum": 100000
+                        }
+                      },
+                      "curveCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 288
+                      },
+                      "expectedCurveCount": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 288
+                      },
+                      "curvesMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "valuesMatch": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "interpolationMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "extrapolationMatches": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionContentIntact": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "actionArgumentsSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "actionContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "receiptContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "attestationContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "parameters",
+                      "supported",
+                      "armatureId",
+                      "actionId",
+                      "parametersValid",
+                      "receiptMatches",
+                      "ownershipMatches",
+                      "assigned",
+                      "frameRange",
+                      "expectedFrameRange",
+                      "curveCount",
+                      "expectedCurveCount",
+                      "curvesMatch",
+                      "valuesMatch",
+                      "interpolationMatches",
+                      "extrapolationMatches",
+                      "actionContentIntact",
+                      "actionArgumentsSha256",
+                      "actionContentSha256",
+                      "receiptContentSha256",
+                      "attestationContentSha256"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [

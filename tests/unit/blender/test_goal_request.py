@@ -548,8 +548,17 @@ class GoalRequestTransportTests(unittest.TestCase):
             domain.ACTION_LEVEL_MCP_ACTIONS,
             domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS
             | {
+                "blender.mesh.edit_subdivide",
+                "blender.mesh.edit_triangulate",
+                "blender.mesh.edit_extrude_region",
+                "blender.mesh.edit_bevel_edges",
+                "blender.mesh.edit_inset_faces",
+                "blender.mesh.edit_poke_faces",
                 "blender.modifier.add_mirror",
                 "blender.modifier.add_solidify",
+                "blender.rig.create_armature",
+                "blender.rig.bind_skin_weights",
+                "blender.animation.create_pose_keyframes",
             },
         )
 
@@ -561,8 +570,17 @@ class GoalRequestTransportTests(unittest.TestCase):
             "blender.mesh.create_torus",
             "blender.mesh.create_cone",
             "blender.mesh.create_cylinder",
+            "blender.mesh.edit_subdivide",
+            "blender.mesh.edit_triangulate",
+            "blender.mesh.edit_extrude_region",
+            "blender.mesh.edit_bevel_edges",
+            "blender.mesh.edit_inset_faces",
+            "blender.mesh.edit_poke_faces",
             "blender.modifier.add_mirror",
             "blender.modifier.add_solidify",
+            "blender.rig.create_armature",
+            "blender.rig.bind_skin_weights",
+            "blender.animation.create_pose_keyframes",
         ):
             with self.subTest(action_name=action_name):
                 candidate = deepcopy(step)
@@ -571,8 +589,8 @@ class GoalRequestTransportTests(unittest.TestCase):
 
         for action_name in (
             "blender.mesh.create_primitive_batch",
-            "blender.mesh.edit_subdivide",
             "blender.mesh.create_monkey",
+            "blender.geometry_nodes.create_node_group",
         ):
             with self.subTest(action_name=action_name):
                 candidate = deepcopy(step)

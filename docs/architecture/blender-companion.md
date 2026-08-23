@@ -103,6 +103,13 @@ Solidify Modifier 保留 `Layout → Modifiers → Add Modifier → Solidify Set
 原生 UI 无法表达受管 identity/name、精确参数、固定 RNA、源内容/evaluated topology 门、Observation 与补偿
 回退，因此 menu/shortcut unavailable。InteractionCatalog `1.42.0` 只为已接受 replay 的 next step 声明
 `operatingline.blender.action.execute`，历史 `1.41.0` 不继承该权限。
+InteractionCatalog `1.43.0` 进一步为六个 replacement-mesh Edit、创建 Armature、显式蒙皮权重和姿势关键帧开放
+同一受管 executor。新 replay Observation 绑定完整 accepted action 参数、唯一 receipt、受管 ownership/content
+摘要和操作专属 invariant；稀疏 pose keyframe 按实际声明的 bone/channel 验证，不再使用 frames×bones×channels
+笛卡尔积近似。Edit 的 candidate-only 原生快捷键和全部 unavailable menu/shortcut 仍不构成 managed execution proof。
+菜单和默认快捷键事实按目标 Blender tag 的 `space_view3d.py`、`blender_default.py`、operator/RNA 与双版本运行时
+探针核对；项目不内置整套 Blender 源码。见
+[ADR 0106](../adr/0106-expanded-edit-rig-action-level-mcp.md)。
 Mirror Modifier 保留七步 `semantic_path`：`Layout → Owned Mesh → Modifiers → Add Modifier → Generate →
 Mirror → Managed Mirror Contract`。其中 Add Modifier、Generate 和 Mirror 分别记录真实 Host 标识
 `OBJECT_MT_modifier_add`、`OBJECT_MT_modifier_add_generate` 与 `object.modifier_add(type=MIRROR)`。

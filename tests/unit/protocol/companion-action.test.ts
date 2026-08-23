@@ -162,8 +162,17 @@ describe('companion action execution protocol', () => {
   it('delivers and reports status only for the exact managed action-level MCP allowlist', () => {
     expect(actionLevelMcpActionNames).toEqual([
       ...managedPrimitiveActionNames,
+      'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
       'blender.modifier.add_mirror',
       'blender.modifier.add_solidify',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.animation.create_pose_keyframes',
     ]);
     expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_solidify');
     expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_mirror');
@@ -178,8 +187,8 @@ describe('companion action execution protocol', () => {
     const request = delivery();
     for (const actionName of [
       'blender.mesh.create_primitive_batch',
-      'blender.mesh.edit_subdivide',
       'blender.mesh.create_monkey',
+      'blender.geometry_nodes.create_node_group',
     ]) {
       expect(
         companionActionExecutionDeliverySchema.safeParse({

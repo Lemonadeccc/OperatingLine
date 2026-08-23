@@ -39,8 +39,17 @@ const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_torus': 'torus_ready',
   'blender.mesh.create_cone': 'cone_ready',
   'blender.mesh.create_cylinder': 'cylinder_ready',
+  'blender.mesh.edit_subdivide': 'mesh_topology_matches',
+  'blender.mesh.edit_triangulate': 'mesh_triangulated',
+  'blender.mesh.edit_extrude_region': 'mesh_region_extruded',
+  'blender.mesh.edit_bevel_edges': 'mesh_edges_beveled',
+  'blender.mesh.edit_inset_faces': 'mesh_faces_inset',
+  'blender.mesh.edit_poke_faces': 'mesh_faces_poked',
   'blender.modifier.add_solidify': 'modifier_ready',
   'blender.modifier.add_mirror': 'modifier_ready',
+  'blender.rig.create_armature': 'armature_ready',
+  'blender.rig.bind_skin_weights': 'skin_weights_ready',
+  'blender.animation.create_pose_keyframes': 'pose_animation_ready',
 } as const satisfies Record<ProcedureLeafReplayActionName, string>;
 
 const replayIntegritySchema = z.strictObject({
@@ -878,6 +887,491 @@ const procedureLeafReplayMirrorDetailsSchema = z
     }
   });
 
+const replayLogicalIdSchema = z
+  .string()
+  .min(1)
+  .max(180)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const replayOwnedNameSchema = z.string().min(1).max(180).startsWith('OperatingLine.');
+const replayVector3Schema = (minimum: number, maximum: number) =>
+  z.array(z.number().min(minimum).max(maximum).finite()).length(3);
+const replayVertexCountSchema = z.number().int().positive().max(8192);
+const replayEdgeCountSchema = z.number().int().positive().max(16384);
+const replayFaceCountSchema = z.number().int().positive().max(8192);
+
+const replayReplacementMeshBaseParametersShape = {
+  targetId: replayLogicalIdSchema,
+  resultMeshId: replayLogicalIdSchema,
+  resultMeshName: replayOwnedNameSchema,
+} as const;
+
+const replaySubdivideParametersSchema = z.strictObject({
+  ...replayReplacementMeshBaseParametersShape,
+  cuts: z.number().int().min(1).max(8),
+  smooth: z.number().min(0).max(1).finite(),
+});
+const replayTriangulateParametersSchema = z.strictObject({
+  ...replayReplacementMeshBaseParametersShape,
+});
+const replayExtrudeParametersSchema = z
+  .strictObject({
+    ...replayReplacementMeshBaseParametersShape,
+    polygonIndices: z
+      .array(z.number().int().min(0).max(8191))
+      .min(1)
+      .max(256)
+      .refine((indices) => new Set(indices).size === indices.length),
+    translation: replayVector3Schema(-1000, 1000),
+  })
+  .superRefine((parameters, context) => {
+    const length = Math.hypot(...parameters.translation);
+    if (length < 0.0001 || length > 1000) {
+      context.addIssue({
+        code: 'custom',
+        path: ['translation'],
+        message: 'Extrude replay translation length must be within executor bounds',
+      });
+    }
+  });
+const replayBevelParametersSchema = z.strictObject({
+  ...replayReplacementMeshBaseParametersShape,
+  width: z.number().min(0.0001).max(100).finite(),
+  segments: z.number().int().min(1).max(16),
+  profile: z.number().min(0).max(1).finite(),
+});
+const replayInsetParametersSchema = z.strictObject({
+  ...replayReplacementMeshBaseParametersShape,
+  thickness: z.number().min(0.0001).max(100).finite(),
+  depth: z.number().min(-100).max(100).finite(),
+});
+const replayPokeParametersSchema = z.strictObject({
+  ...replayReplacementMeshBaseParametersShape,
+  offset: z.number().min(-100).max(100).finite(),
+});
+
+const replayReplacementMeshDetailsShape = {
+  supported: z.literal(true),
+  targetId: replayLogicalIdSchema,
+  resultMeshId: replayLogicalIdSchema,
+  parametersValid: z.literal(true),
+  replayParametersValid: z.literal(true),
+  assigned: z.literal(true),
+  receiptMatches: z.literal(true),
+  contentIntact: z.literal(true),
+  sourceContentIntact: z.literal(true),
+  withinLimits: z.literal(true),
+  resultNameMatches: z.literal(true),
+  sourceVertexCount: replayVertexCountSchema,
+  sourceEdgeCount: replayEdgeCountSchema,
+  sourceFaceCount: replayFaceCountSchema,
+  vertexCount: replayVertexCountSchema,
+  edgeCount: replayEdgeCountSchema,
+  faceCount: replayFaceCountSchema,
+  sourceMeshContentSha256: contentSha256Schema,
+  resultMeshContentSha256: contentSha256Schema,
+  receiptContentSha256: contentSha256Schema,
+  actionArgumentsSha256: contentSha256Schema,
+  topologyMatches: z.literal(true),
+  attestationContentSha256: contentSha256Schema,
+} as const;
+
+function validateReplacementMeshIdentity(
+  details: {
+    targetId: string;
+    resultMeshId: string;
+    parameters: { targetId: string; resultMeshId: string };
+  },
+  context: z.RefinementCtx,
+): void {
+  if (
+    details.targetId !== details.parameters.targetId ||
+    details.resultMeshId !== details.parameters.resultMeshId
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['parameters'],
+      message: 'Replacement-mesh replay details must match their action arguments',
+    });
+  }
+}
+
+const replayGrewDetailsSchema = (
+  parameters:
+    | typeof replaySubdivideParametersSchema
+    | typeof replayExtrudeParametersSchema
+    | typeof replayBevelParametersSchema,
+) =>
+  z
+    .strictObject({
+      parameters,
+      ...replayReplacementMeshDetailsShape,
+      topologyGrew: z.literal(true),
+    })
+    .superRefine((details, context) => {
+      validateReplacementMeshIdentity(details, context);
+      if (
+        details.vertexCount <= details.sourceVertexCount ||
+        details.edgeCount <= details.sourceEdgeCount ||
+        details.faceCount <= details.sourceFaceCount
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['vertexCount'],
+          message: 'Replacement-mesh replay topology must grow in every dimension',
+        });
+      }
+    });
+
+const replaySubdivideDetailsSchema = replayGrewDetailsSchema(replaySubdivideParametersSchema);
+const replayExtrudeDetailsSchema = replayGrewDetailsSchema(replayExtrudeParametersSchema);
+const replayBevelDetailsSchema = replayGrewDetailsSchema(replayBevelParametersSchema);
+const replayTriangulateDetailsSchema = z
+  .strictObject({
+    parameters: replayTriangulateParametersSchema,
+    ...replayReplacementMeshDetailsShape,
+    nonempty: z.literal(true),
+    allTriangles: z.literal(true),
+  })
+  .superRefine(validateReplacementMeshIdentity);
+
+const replayInsetDetailsSchema = z
+  .strictObject({
+    parameters: replayInsetParametersSchema,
+    ...replayReplacementMeshDetailsShape,
+    resultNondegenerate: z.literal(true),
+    sourceLoopCount: z.number().int().positive().max(32768),
+    expectedVertexCount: replayVertexCountSchema,
+    expectedEdgeCount: replayEdgeCountSchema,
+    expectedFaceCount: replayFaceCountSchema,
+  })
+  .superRefine((details, context) => {
+    validateReplacementMeshIdentity(details, context);
+    if (
+      details.expectedVertexCount !== details.sourceVertexCount + details.sourceLoopCount ||
+      details.expectedEdgeCount !== details.sourceEdgeCount + 2 * details.sourceLoopCount ||
+      details.expectedFaceCount !== details.sourceFaceCount + details.sourceLoopCount ||
+      details.vertexCount !== details.expectedVertexCount ||
+      details.edgeCount !== details.expectedEdgeCount ||
+      details.faceCount !== details.expectedFaceCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedVertexCount'],
+        message: 'Inset replay counts must match the source-loop topology proof',
+      });
+    }
+  });
+
+const replayPokeDetailsSchema = z
+  .strictObject({
+    parameters: replayPokeParametersSchema,
+    ...replayReplacementMeshDetailsShape,
+    resultContentIntact: z.literal(true),
+    allTriangles: z.literal(true),
+    resultNondegenerate: z.literal(true),
+    sourceLoopCount: z.number().int().positive().max(32768),
+    expectedVertexCount: replayVertexCountSchema,
+    expectedEdgeCount: replayEdgeCountSchema,
+    expectedFaceCount: replayFaceCountSchema,
+  })
+  .superRefine((details, context) => {
+    validateReplacementMeshIdentity(details, context);
+    if (
+      details.expectedVertexCount !== details.sourceVertexCount + details.sourceFaceCount ||
+      details.expectedEdgeCount !== details.sourceEdgeCount + details.sourceLoopCount ||
+      details.expectedFaceCount !== details.sourceLoopCount ||
+      details.vertexCount !== details.expectedVertexCount ||
+      details.edgeCount !== details.expectedEdgeCount ||
+      details.faceCount !== details.expectedFaceCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedVertexCount'],
+        message: 'Poke replay counts must match the source-loop topology proof',
+      });
+    }
+  });
+
+const replayBoneSchema = z
+  .strictObject({
+    boneName: replayOwnedNameSchema,
+    head: replayVector3Schema(-1000, 1000),
+    tail: replayVector3Schema(-1000, 1000),
+    parentName: replayOwnedNameSchema.nullable(),
+  })
+  .refine((bone) => bone.head.some((value, index) => value !== bone.tail[index]), {
+    path: ['tail'],
+    message: 'Armature bone head and tail must differ',
+  });
+const replayBindingSchema = z.strictObject({
+  targetId: replayLogicalIdSchema,
+  boneName: replayOwnedNameSchema,
+});
+const replayArmatureParametersSchema = z
+  .strictObject({
+    armatureId: replayLogicalIdSchema,
+    objectName: replayOwnedNameSchema,
+    dataName: replayOwnedNameSchema,
+    collectionId: z.literal('snowman.collection'),
+    bones: z.array(replayBoneSchema).min(1).max(32),
+    bindings: z.array(replayBindingSchema).min(1).max(64),
+  })
+  .superRefine((parameters, context) => {
+    const boneNames = parameters.bones.map((bone) => bone.boneName);
+    const targetIds = parameters.bindings.map((binding) => binding.targetId);
+    if (new Set(boneNames).size !== boneNames.length) {
+      context.addIssue({ code: 'custom', path: ['bones'], message: 'Bone names must be unique' });
+    }
+    if (new Set(targetIds).size !== targetIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['bindings'],
+        message: 'Binding targets must be unique',
+      });
+    }
+    const knownBones = new Set(boneNames);
+    if (parameters.bindings.some((binding) => !knownBones.has(binding.boneName))) {
+      context.addIssue({
+        code: 'custom',
+        path: ['bindings'],
+        message: 'Bindings must reference declared bones',
+      });
+    }
+    for (const bone of parameters.bones) {
+      const visited = new Set([bone.boneName]);
+      let parentName = bone.parentName;
+      while (parentName !== null) {
+        if (!knownBones.has(parentName) || visited.has(parentName)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['bones'],
+            message: 'Bone parents must exist and be acyclic',
+          });
+          break;
+        }
+        visited.add(parentName);
+        parentName =
+          parameters.bones.find((candidate) => candidate.boneName === parentName)?.parentName ??
+          null;
+      }
+    }
+  });
+const replayArmatureDetailsSchema = z
+  .strictObject({
+    parameters: replayArmatureParametersSchema,
+    supported: z.literal(true),
+    armatureId: replayLogicalIdSchema,
+    boneNames: z.array(replayOwnedNameSchema).min(1).max(32),
+    availableBoneNames: z.array(replayOwnedNameSchema).min(1).max(32),
+    boundTargetIds: z.array(replayLogicalIdSchema).min(1).max(64),
+    parametersValid: z.literal(true),
+    receiptMatches: z.literal(true),
+    ownershipMatches: z.literal(true),
+    bonesMatch: z.literal(true),
+    bindingsMatch: z.literal(true),
+    actionArgumentsSha256: contentSha256Schema,
+    armatureContentSha256: contentSha256Schema,
+    receiptContentSha256: contentSha256Schema,
+    attestationContentSha256: contentSha256Schema,
+  })
+  .superRefine((details, context) => {
+    const expectedBoneNames = details.parameters.bones.map((bone) => bone.boneName);
+    const expectedTargetIds = details.parameters.bindings.map((binding) => binding.targetId);
+    if (
+      details.armatureId !== details.parameters.armatureId ||
+      !equalStepIds(details.boneNames, expectedBoneNames) ||
+      !equalStepIds(details.availableBoneNames, expectedBoneNames) ||
+      !equalStepIds(details.boundTargetIds, expectedTargetIds)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Armature replay identities must match the action arguments',
+      });
+    }
+  });
+
+const replayInfluenceSchema = z.strictObject({
+  boneName: replayOwnedNameSchema,
+  weight: z.number().min(0.000001).max(1).finite(),
+});
+const replayVertexWeightSchema = z
+  .strictObject({
+    vertexIndex: z.number().int().min(0).max(8191),
+    influences: z.array(replayInfluenceSchema).min(1).max(8),
+  })
+  .superRefine((weight, context) => {
+    const names = weight.influences.map((influence) => influence.boneName);
+    if (
+      new Set(names).size !== names.length ||
+      Math.abs(weight.influences.reduce((sum, influence) => sum + influence.weight, 0) - 1) > 1e-6
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['influences'],
+        message: 'Skin influences must be unique and sum to one',
+      });
+    }
+  });
+const replaySkinWeightsParametersSchema = z
+  .strictObject({
+    targetId: replayLogicalIdSchema,
+    armatureId: replayLogicalIdSchema,
+    modifierId: replayLogicalIdSchema,
+    modifierName: replayOwnedNameSchema,
+    preserveVolume: z.boolean(),
+    weights: z.array(replayVertexWeightSchema).min(1).max(8192),
+  })
+  .refine(
+    (parameters) =>
+      new Set(parameters.weights.map((weight) => weight.vertexIndex)).size ===
+      parameters.weights.length,
+    {
+      path: ['weights'],
+      message: 'Skin vertex indices must be unique',
+    },
+  );
+const replaySkinWeightsDetailsSchema = z
+  .strictObject({
+    parameters: replaySkinWeightsParametersSchema,
+    supported: z.literal(true),
+    targetId: replayLogicalIdSchema,
+    armatureId: replayLogicalIdSchema,
+    modifierId: replayLogicalIdSchema,
+    boneNames: z.array(replayOwnedNameSchema).min(1).max(32),
+    deformBoneNames: z.array(replayOwnedNameSchema).min(1).max(32),
+    vertexCount: replayVertexCountSchema,
+    parametersValid: z.literal(true),
+    receiptMatches: z.literal(true),
+    ownershipMatches: z.literal(true),
+    assignmentMatches: z.literal(true),
+    modifierMatches: z.literal(true),
+    meshContentIntact: z.literal(true),
+    preserveVolumeMatches: z.literal(true),
+    actionArgumentsSha256: contentSha256Schema,
+    weightsContentSha256: contentSha256Schema,
+    modifierContentSha256: contentSha256Schema,
+    receiptContentSha256: contentSha256Schema,
+    attestationContentSha256: contentSha256Schema,
+  })
+  .superRefine((details, context) => {
+    const expectedBoneNames = Array.from(
+      new Set(
+        details.parameters.weights.flatMap((weight) =>
+          weight.influences.map((influence) => influence.boneName),
+        ),
+      ),
+    );
+    if (
+      details.targetId !== details.parameters.targetId ||
+      details.armatureId !== details.parameters.armatureId ||
+      details.modifierId !== details.parameters.modifierId ||
+      details.vertexCount !== details.parameters.weights.length ||
+      !equalStepIds(details.boneNames, expectedBoneNames) ||
+      !equalStepIds(details.deformBoneNames, expectedBoneNames)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Skin replay identities, bones, and vertex count must match the action arguments',
+      });
+    }
+  });
+
+const replayPoseSchema = z.strictObject({
+  boneName: replayOwnedNameSchema,
+  rotationEuler: replayVector3Schema(-2 * Math.PI, 2 * Math.PI),
+  location: replayVector3Schema(-1000, 1000).optional(),
+  scale: replayVector3Schema(0.0001, 1000).optional(),
+});
+const replayKeyframeSchema = z
+  .strictObject({
+    frame: z.number().int().min(1).max(100_000),
+    poses: z.array(replayPoseSchema).min(1).max(32),
+  })
+  .refine(
+    (keyframe) =>
+      new Set(keyframe.poses.map((pose) => pose.boneName)).size === keyframe.poses.length,
+    {
+      path: ['poses'],
+      message: 'Pose bone names must be unique within a keyframe',
+    },
+  );
+const replayPoseAnimationParametersSchema = z
+  .strictObject({
+    actionId: replayLogicalIdSchema,
+    actionName: replayOwnedNameSchema,
+    armatureId: replayLogicalIdSchema,
+    keyframes: z.array(replayKeyframeSchema).min(2).max(64),
+    interpolation: z.enum(['BEZIER', 'LINEAR', 'CONSTANT']),
+    extrapolation: z.enum(['CONSTANT', 'LINEAR']),
+  })
+  .superRefine((parameters, context) => {
+    if (
+      parameters.actionId === parameters.armatureId ||
+      parameters.keyframes.some(
+        (keyframe, index) => index > 0 && keyframe.frame <= parameters.keyframes[index - 1]!.frame,
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['keyframes'],
+        message: 'Pose replay IDs must differ and frames must strictly increase',
+      });
+    }
+  });
+const replayPoseAnimationDetailsSchema = z
+  .strictObject({
+    parameters: replayPoseAnimationParametersSchema,
+    supported: z.literal(true),
+    armatureId: replayLogicalIdSchema,
+    actionId: replayLogicalIdSchema,
+    parametersValid: z.literal(true),
+    receiptMatches: z.literal(true),
+    ownershipMatches: z.literal(true),
+    assigned: z.literal(true),
+    frameRange: z.array(z.number().min(1).max(100_000).finite()).length(2),
+    expectedFrameRange: z.array(z.number().min(1).max(100_000).finite()).length(2),
+    curveCount: z.number().int().positive().max(288),
+    expectedCurveCount: z.number().int().positive().max(288),
+    curvesMatch: z.literal(true),
+    valuesMatch: z.literal(true),
+    interpolationMatches: z.literal(true),
+    extrapolationMatches: z.literal(true),
+    actionContentIntact: z.literal(true),
+    actionArgumentsSha256: contentSha256Schema,
+    actionContentSha256: contentSha256Schema,
+    receiptContentSha256: contentSha256Schema,
+    attestationContentSha256: contentSha256Schema,
+  })
+  .superRefine((details, context) => {
+    const frames = details.parameters.keyframes.map((keyframe) => keyframe.frame);
+    const curveKeys = new Set<string>();
+    for (const keyframe of details.parameters.keyframes) {
+      for (const pose of keyframe.poses) {
+        curveKeys.add(`${pose.boneName}:rotationEuler`);
+        if (pose.location !== undefined) curveKeys.add(`${pose.boneName}:location`);
+        if (pose.scale !== undefined) curveKeys.add(`${pose.boneName}:scale`);
+      }
+    }
+    const expectedRange = [frames[0]!, frames.at(-1)!];
+    const expectedCurveCount = curveKeys.size * 3;
+    if (
+      details.armatureId !== details.parameters.armatureId ||
+      details.actionId !== details.parameters.actionId ||
+      !equalStepIds(details.frameRange.map(String), expectedRange.map(String)) ||
+      !equalStepIds(details.expectedFrameRange.map(String), expectedRange.map(String)) ||
+      details.curveCount !== expectedCurveCount ||
+      details.expectedCurveCount !== expectedCurveCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Pose replay IDs, frame range, and curve counts must match the action arguments',
+      });
+    }
+  });
+
 const procedureLeafReplayUvSphereObservationSchema = companionObservationSchema.safeExtend({
   kind: z.literal('uv_sphere_ready'),
   satisfied: z.literal(true),
@@ -929,6 +1423,52 @@ const procedureLeafReplayModifierObservationSchema = companionObservationSchema.
   ]),
 });
 
+const procedureLeafReplaySubdivideObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('mesh_topology_matches'),
+  satisfied: z.literal(true),
+  details: replaySubdivideDetailsSchema,
+});
+const procedureLeafReplayTriangulateObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('mesh_triangulated'),
+  satisfied: z.literal(true),
+  details: replayTriangulateDetailsSchema,
+});
+const procedureLeafReplayExtrudeObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('mesh_region_extruded'),
+  satisfied: z.literal(true),
+  details: replayExtrudeDetailsSchema,
+});
+const procedureLeafReplayBevelObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('mesh_edges_beveled'),
+  satisfied: z.literal(true),
+  details: replayBevelDetailsSchema,
+});
+const procedureLeafReplayInsetObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('mesh_faces_inset'),
+  satisfied: z.literal(true),
+  details: replayInsetDetailsSchema,
+});
+const procedureLeafReplayPokeObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('mesh_faces_poked'),
+  satisfied: z.literal(true),
+  details: replayPokeDetailsSchema,
+});
+const procedureLeafReplayArmatureObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('armature_ready'),
+  satisfied: z.literal(true),
+  details: replayArmatureDetailsSchema,
+});
+const procedureLeafReplaySkinWeightsObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('skin_weights_ready'),
+  satisfied: z.literal(true),
+  details: replaySkinWeightsDetailsSchema,
+});
+const procedureLeafReplayPoseAnimationObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('pose_animation_ready'),
+  satisfied: z.literal(true),
+  details: replayPoseAnimationDetailsSchema,
+});
+
 export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind', [
   procedureLeafReplayUvSphereObservationSchema,
   procedureLeafReplayIcosphereObservationSchema,
@@ -937,7 +1477,16 @@ export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind',
   procedureLeafReplayTorusObservationSchema,
   procedureLeafReplayConeObservationSchema,
   procedureLeafReplayCylinderObservationSchema,
+  procedureLeafReplaySubdivideObservationSchema,
+  procedureLeafReplayTriangulateObservationSchema,
+  procedureLeafReplayExtrudeObservationSchema,
+  procedureLeafReplayBevelObservationSchema,
+  procedureLeafReplayInsetObservationSchema,
+  procedureLeafReplayPokeObservationSchema,
   procedureLeafReplayModifierObservationSchema,
+  procedureLeafReplayArmatureObservationSchema,
+  procedureLeafReplaySkinWeightsObservationSchema,
+  procedureLeafReplayPoseAnimationObservationSchema,
 ]);
 export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 

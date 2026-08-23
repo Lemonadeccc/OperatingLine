@@ -4518,7 +4518,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       throw new BlenderActionExecutionError(code, statusCode, message);
     };
 
-    const requireManagedPrimitiveMcpTrack = (binding: ProcedureLeafReplayBinding) => {
+    const requireManagedBlenderActionMcpTrack = (binding: ProcedureLeafReplayBinding) => {
       const leaf = binding.materialization.tree.nodes.find(
         (node) => node.kind === 'leaf' && node.id === binding.leafId,
       );
@@ -4534,7 +4534,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         action.name !== binding.actionName
       ) {
         return actionExecutionRejected(
-          'This action-level executor is restricted to the managed Blender primitive set',
+          'This action-level executor is restricted to the catalog-authorized managed Blender action set',
           422,
           'action_execution_unsupported_action',
         );
@@ -4561,7 +4561,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         operation.resultBinding !== `${leaf.id}.companion_state_report`
       ) {
         return actionExecutionRejected(
-          'Replay binding lacks the exact catalog-grounded managed primitive MCP call',
+          'Replay binding lacks the exact catalog-grounded managed Blender action MCP call',
         );
       }
       return { action, leaf, operation };
@@ -4913,7 +4913,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       if (decision.decision !== 'accepted') {
         return actionExecutionRejected('The replay proposal was not accepted by the target user');
       }
-      const { action } = requireManagedPrimitiveMcpTrack(binding);
+      const { action } = requireManagedBlenderActionMcpTrack(binding);
       const proposal = binding.proposal;
       if (
         proposal.targetAdapterId !== 'blender' ||
@@ -4955,7 +4955,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         !sameProcedureLeafReplayValue(step.action.arguments, action.arguments)
       ) {
         return actionExecutionRejected(
-          'Accepted replay plan does not contain the exact managed primitive target leaf action',
+          'Accepted replay plan does not contain the exact managed Blender target leaf action',
         );
       }
 
@@ -5559,7 +5559,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.action.execute',
         {
           description:
-            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, Torus, Cone, Cylinder, Solidify Modifier, or Mirror Modifier leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
+            'Queue exactly one Catalog-authorized managed Blender action from an already human-accepted, started, untouched, instance-bound Procedure replay: one of seven mesh primitives; one of six replacement-mesh Edit actions (Subdivide, Triangulate, Extrude Region, Bevel Edges, Inset Faces, or Poke Faces); Mirror or Solidify; create an armature; bind explicit skin weights; or create pose keyframes. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all arguments from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or action arguments, and menu or shortcut tracks are not execution proof.',
           inputSchema: companionActionExecutionCreateRequestSchema,
           outputSchema: companionActionExecutionStatusSchema,
         },
@@ -7155,7 +7155,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.replay.propose',
         {
           description:
-            'Revalidate and materialize one bounded UV Sphere, Icosphere, Cube, Plane, Torus, Cone, or Cylinder leaf, create a human-reviewable instance-bound GuideProposal, and atomically store the complete replay binding. This does not accept or execute the proposal; menu and shortcut tracks remain unexecuted or explicitly unavailable provenance.',
+            'Revalidate and materialize one Catalog-authorized managed Blender leaf from the 18-action set: seven mesh primitives; six replacement-mesh Edit actions (Subdivide, Triangulate, Extrude Region, Bevel Edges, Inset Faces, and Poke Faces); Mirror and Solidify; create an armature; bind explicit skin weights; and create pose keyframes. Atomically store its immutable replay binding and create a human-reviewable, instance-bound GuideProposal. This does not accept, start, or execute the proposal; menu and shortcut tracks remain provenance candidates and are not execution proof.',
           inputSchema: deferMcpInputValidation(procedureLeafReplayProposalRequestSchema),
           outputSchema: procedureLeafReplayProposalResultSchema,
         },

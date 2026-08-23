@@ -651,6 +651,13 @@
           evaluated topology。成功继续绑定 decision、Start→Next 原生 Undo checkpoint、可信 receipt 与补偿
           回退；menu/shortcut 仍 unavailable，旧 binding 不继承权限。见
           [ADR 0101](adr/0101-solidify-action-level-mcp.md)。
+    - [x] Edit、骨骼、权重与动画 action-level MCP 扩展：冻结 InteractionCatalog `1.42.0`，由 `1.43.0`
+          为 Subdivide、Triangulate、Extrude Region、Bevel Edges、Inset Faces、Poke Faces、Create Armature、
+          Bind Skin Weights 与 Create Pose Keyframes 开放同一 accepted-replay executor。Runtime 仍只从不可变
+          binding 派生完整参数；Companion 强 Observation 逐项绑定 replacement Mesh 内容、骨架结构、逐顶点权重、
+          稀疏 FCurve/keyframe、唯一 receipt 和受管 ownership。原生菜单/快捷键轨迹继续保持 unavailable 或
+          candidate-only，不冒充 managed execution。Blender 菜单/keymap/RNA 事实按 4.5.3/5.1.1 官方源码与
+          运行时探针核对。见 [ADR 0106](adr/0106-expanded-edit-rig-action-level-mcp.md)。
     - [ ] Poke Faces 隔离三叶 compound proof：Blender 4.5.3/5.1.1 前台已严格通过 Forward
           `Enter Edit→Poke→Exit Edit`、Back/Redo 各一次原生 history operation、逐叶 intent/receipt、
           middle-leaf-only checkpoint/history、完整 current-state integrity、每叶 crash/reconnect 分类、持久 lock、
@@ -659,7 +666,8 @@
           crash/restart、`.blend` file-load 与 transport disconnect/reconnect；这些目前只做 marker mismatch 分类，
           所以完整 Wave 1B gate 未关闭。未发布或修改任何 catalog，production Poke 继续 unavailable，等待上述
           host 边界与 Wave 2 catalog publication/composition。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
-    - [ ] 真实逐控件 menu/shortcut executor，以及九种已证明 managed action 之外的复合与编辑叶节点覆盖。
+    - [ ] 真实逐控件 menu/shortcut executor，以及十八种已开放 managed action 之外的复合、Edit、Modifier、
+          Geometry Nodes、骨骼和动画叶节点覆盖。
     - [x] 可信 action failure 的确定性候选：只有唯一终态失败与 finalized automatic-rollback attestation、不可变
           replay binding 和精确目录全部一致时，Runtime 才按服务端 schema policy 生成待审参数修复，或从同一叶
           选择携带 `proofExecution` 的备用轨迹；启动可幂等补齐，只读查询不接受 caller evidence，不调用 Provider、

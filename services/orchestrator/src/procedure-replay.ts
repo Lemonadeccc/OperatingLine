@@ -351,6 +351,260 @@ function segmentEndpointsDiffer(parameters: Record<string, unknown>): boolean {
   );
 }
 
+const logicalResourceIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+function hasExactKeys(parameters: Record<string, unknown>, keys: readonly string[]): boolean {
+  return (
+    Object.keys(parameters).length === keys.length &&
+    Object.keys(parameters).every((key) => keys.includes(key))
+  );
+}
+
+function isLogicalResourceId(value: unknown): value is string {
+  return typeof value === 'string' && logicalResourceIdPattern.test(value);
+}
+
+function isOperatingLineName(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('OperatingLine.') && value.length <= 180;
+}
+
+function isUniqueIntegerArray(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  maximumLength: number,
+): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= maximumLength &&
+    value.every(
+      (item) => Number.isSafeInteger(item) && (item as number) >= minimum && item <= maximum,
+    ) &&
+    new Set(value).size === value.length
+  );
+}
+
+function isManagedReplacementMeshParameters(
+  parameters: Record<string, unknown>,
+  additionalKeys: readonly string[],
+): boolean {
+  return (
+    hasExactKeys(parameters, ['targetId', 'resultMeshId', 'resultMeshName', ...additionalKeys]) &&
+    isLogicalResourceId(parameters['targetId']) &&
+    isLogicalResourceId(parameters['resultMeshId']) &&
+    parameters['targetId'] !== parameters['resultMeshId'] &&
+    isOperatingLineName(parameters['resultMeshName'])
+  );
+}
+
+function uniqueStringsInEncounterOrder(values: readonly unknown[]): string[] {
+  const result: string[] = [];
+  for (const value of values) {
+    if (typeof value === 'string' && !result.includes(value)) result.push(value);
+  }
+  return result;
+}
+
+function isArmatureReplayParameters(parameters: Record<string, unknown>): boolean {
+  const bones = parameters['bones'];
+  const bindings = parameters['bindings'];
+  if (
+    !hasExactKeys(parameters, [
+      'armatureId',
+      'objectName',
+      'dataName',
+      'collectionId',
+      'bones',
+      'bindings',
+    ]) ||
+    !isLogicalResourceId(parameters['armatureId']) ||
+    !isOperatingLineName(parameters['objectName']) ||
+    !isOperatingLineName(parameters['dataName']) ||
+    parameters['collectionId'] !== 'snowman.collection' ||
+    !Array.isArray(bones) ||
+    bones.length < 1 ||
+    bones.length > 32 ||
+    !Array.isArray(bindings) ||
+    bindings.length < 1 ||
+    bindings.length > 64
+  ) {
+    return false;
+  }
+  const boneNames = new Set<string>();
+  for (const bone of bones) {
+    if (
+      typeof bone !== 'object' ||
+      bone === null ||
+      Array.isArray(bone) ||
+      !hasExactKeys(bone as Record<string, unknown>, ['boneName', 'head', 'tail', 'parentName']) ||
+      !isOperatingLineName((bone as Record<string, unknown>)['boneName']) ||
+      !isFiniteVector3((bone as Record<string, unknown>)['head'], true) ||
+      !isFiniteVector3((bone as Record<string, unknown>)['tail'], true) ||
+      sameCanonicalValue(
+        (bone as Record<string, unknown>)['head'],
+        (bone as Record<string, unknown>)['tail'],
+      )
+    ) {
+      return false;
+    }
+    const boneName = (bone as Record<string, unknown>)['boneName'] as string;
+    if (boneNames.has(boneName)) return false;
+    boneNames.add(boneName);
+  }
+  const targetIds = new Set<string>();
+  return bindings.every((binding) => {
+    if (typeof binding !== 'object' || binding === null || Array.isArray(binding)) return false;
+    const value = binding as Record<string, unknown>;
+    if (
+      !hasExactKeys(value, ['targetId', 'boneName']) ||
+      !isLogicalResourceId(value['targetId']) ||
+      typeof value['boneName'] !== 'string' ||
+      !boneNames.has(value['boneName']) ||
+      targetIds.has(value['targetId'])
+    ) {
+      return false;
+    }
+    targetIds.add(value['targetId']);
+    return true;
+  });
+}
+
+function isSkinWeightsReplayParameters(parameters: Record<string, unknown>): boolean {
+  const weights = parameters['weights'];
+  if (
+    !hasExactKeys(parameters, [
+      'targetId',
+      'armatureId',
+      'modifierId',
+      'modifierName',
+      'preserveVolume',
+      'weights',
+    ]) ||
+    !isLogicalResourceId(parameters['targetId']) ||
+    !isLogicalResourceId(parameters['armatureId']) ||
+    !isLogicalResourceId(parameters['modifierId']) ||
+    !isOperatingLineName(parameters['modifierName']) ||
+    typeof parameters['preserveVolume'] !== 'boolean' ||
+    !Array.isArray(weights) ||
+    weights.length < 1 ||
+    weights.length > 8192
+  ) {
+    return false;
+  }
+  const vertexIndices = new Set<number>();
+  return weights.every((weight) => {
+    if (typeof weight !== 'object' || weight === null || Array.isArray(weight)) return false;
+    const value = weight as Record<string, unknown>;
+    const vertexIndex = value['vertexIndex'];
+    const influences = value['influences'];
+    if (
+      !hasExactKeys(value, ['vertexIndex', 'influences']) ||
+      !Number.isSafeInteger(vertexIndex) ||
+      (vertexIndex as number) < 0 ||
+      (vertexIndex as number) > 8191 ||
+      vertexIndices.has(vertexIndex as number) ||
+      !Array.isArray(influences) ||
+      influences.length < 1 ||
+      influences.length > 8
+    ) {
+      return false;
+    }
+    vertexIndices.add(vertexIndex as number);
+    const boneNames = new Set<string>();
+    let total = 0;
+    for (const influence of influences) {
+      if (typeof influence !== 'object' || influence === null || Array.isArray(influence)) {
+        return false;
+      }
+      const item = influence as Record<string, unknown>;
+      if (
+        !hasExactKeys(item, ['boneName', 'weight']) ||
+        !isOperatingLineName(item['boneName']) ||
+        boneNames.has(item['boneName']) ||
+        !isFiniteNumber(item['weight']) ||
+        item['weight'] < 0.000001 ||
+        item['weight'] > 1
+      ) {
+        return false;
+      }
+      boneNames.add(item['boneName']);
+      total += item['weight'];
+    }
+    return Math.abs(total - 1) <= 1e-6;
+  });
+}
+
+function isPoseAnimationReplayParameters(parameters: Record<string, unknown>): boolean {
+  const keyframes = parameters['keyframes'];
+  if (
+    !hasExactKeys(parameters, [
+      'actionId',
+      'actionName',
+      'armatureId',
+      'interpolation',
+      'extrapolation',
+      'keyframes',
+    ]) ||
+    !isLogicalResourceId(parameters['actionId']) ||
+    !isOperatingLineName(parameters['actionName']) ||
+    !isLogicalResourceId(parameters['armatureId']) ||
+    !['BEZIER', 'LINEAR', 'CONSTANT'].includes(String(parameters['interpolation'])) ||
+    !['CONSTANT', 'LINEAR'].includes(String(parameters['extrapolation'])) ||
+    !Array.isArray(keyframes) ||
+    keyframes.length < 2 ||
+    keyframes.length > 64
+  ) {
+    return false;
+  }
+  let previousFrame = 0;
+  return keyframes.every((keyframe) => {
+    if (typeof keyframe !== 'object' || keyframe === null || Array.isArray(keyframe)) return false;
+    const value = keyframe as Record<string, unknown>;
+    const frame = value['frame'];
+    const poses = value['poses'];
+    if (
+      !hasExactKeys(value, ['frame', 'poses']) ||
+      !Number.isSafeInteger(frame) ||
+      (frame as number) <= previousFrame ||
+      (frame as number) > 100000 ||
+      !Array.isArray(poses) ||
+      poses.length < 1 ||
+      poses.length > 32
+    ) {
+      return false;
+    }
+    previousFrame = frame as number;
+    const boneNames = new Set<string>();
+    return poses.every((pose) => {
+      if (typeof pose !== 'object' || pose === null || Array.isArray(pose)) return false;
+      const item = pose as Record<string, unknown>;
+      const keys = Object.keys(item);
+      if (
+        !keys.every((key) => ['boneName', 'rotationEuler', 'location', 'scale'].includes(key)) ||
+        !keys.includes('boneName') ||
+        !keys.includes('rotationEuler') ||
+        !isOperatingLineName(item['boneName']) ||
+        boneNames.has(item['boneName']) ||
+        !isFiniteVector3(item['rotationEuler']) ||
+        !(item['rotationEuler'] as number[]).every(
+          (component) => component >= -2 * Math.PI && component <= 2 * Math.PI,
+        ) ||
+        (item['location'] !== undefined && !isFiniteVector3(item['location'], true)) ||
+        (item['scale'] !== undefined &&
+          (!isFiniteVector3(item['scale']) ||
+            !(item['scale'] as number[]).every(
+              (component) => component >= 0.0001 && component <= 1000,
+            )))
+      ) {
+        return false;
+      }
+      boneNames.add(item['boneName']);
+      return true;
+    });
+  });
+}
+
 const replayActionContracts = {
   'blender.mesh.create_uv_sphere': {
     observationShape: 'mesh_primitive',
@@ -538,6 +792,110 @@ const replayActionContracts = {
       segmentEndpointsDiffer(parameters),
     expectedTopology: () => ({ vertexCount: 64, edgeCount: 96, faceCount: 34 }),
   },
+  'blender.mesh.edit_subdivide': {
+    observationShape: 'managed_edit',
+    observationKind: 'mesh_topology_matches',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      resultMeshId: actionArguments['resultMeshId'],
+      resultMeshName: actionArguments['resultMeshName'],
+      cuts: actionArguments['cuts'],
+      smooth: actionArguments['smooth'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      isManagedReplacementMeshParameters(parameters, ['cuts', 'smooth']) &&
+      Number.isSafeInteger(parameters['cuts']) &&
+      (parameters['cuts'] as number) >= 1 &&
+      (parameters['cuts'] as number) <= 8 &&
+      isFiniteNumber(parameters['smooth']) &&
+      parameters['smooth'] >= 0 &&
+      parameters['smooth'] <= 1,
+  },
+  'blender.mesh.edit_triangulate': {
+    observationShape: 'managed_edit',
+    observationKind: 'mesh_triangulated',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      resultMeshId: actionArguments['resultMeshId'],
+      resultMeshName: actionArguments['resultMeshName'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      isManagedReplacementMeshParameters(parameters, []),
+  },
+  'blender.mesh.edit_extrude_region': {
+    observationShape: 'managed_edit',
+    observationKind: 'mesh_region_extruded',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      resultMeshId: actionArguments['resultMeshId'],
+      resultMeshName: actionArguments['resultMeshName'],
+      polygonIndices: structuredClone(actionArguments['polygonIndices']),
+      translation: structuredClone(actionArguments['translation']),
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      isManagedReplacementMeshParameters(parameters, ['polygonIndices', 'translation']) &&
+      isUniqueIntegerArray(parameters['polygonIndices'], 0, 8191, 256) &&
+      isFiniteVector3(parameters['translation'], true) &&
+      Math.hypot(...parameters['translation']) >= 0.0001 &&
+      Math.hypot(...parameters['translation']) <= 1000,
+  },
+  'blender.mesh.edit_bevel_edges': {
+    observationShape: 'managed_edit',
+    observationKind: 'mesh_edges_beveled',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      resultMeshId: actionArguments['resultMeshId'],
+      resultMeshName: actionArguments['resultMeshName'],
+      width: actionArguments['width'],
+      segments: actionArguments['segments'],
+      profile: actionArguments['profile'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      isManagedReplacementMeshParameters(parameters, ['width', 'segments', 'profile']) &&
+      isFiniteNumber(parameters['width']) &&
+      parameters['width'] >= 0.0001 &&
+      parameters['width'] <= 100 &&
+      Number.isSafeInteger(parameters['segments']) &&
+      (parameters['segments'] as number) >= 1 &&
+      (parameters['segments'] as number) <= 16 &&
+      isFiniteNumber(parameters['profile']) &&
+      parameters['profile'] >= 0 &&
+      parameters['profile'] <= 1,
+  },
+  'blender.mesh.edit_inset_faces': {
+    observationShape: 'managed_edit',
+    observationKind: 'mesh_faces_inset',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      resultMeshId: actionArguments['resultMeshId'],
+      resultMeshName: actionArguments['resultMeshName'],
+      thickness: actionArguments['thickness'],
+      depth: actionArguments['depth'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      isManagedReplacementMeshParameters(parameters, ['thickness', 'depth']) &&
+      isFiniteNumber(parameters['thickness']) &&
+      parameters['thickness'] >= 0.0001 &&
+      parameters['thickness'] <= 100 &&
+      isFiniteNumber(parameters['depth']) &&
+      parameters['depth'] >= -100 &&
+      parameters['depth'] <= 100,
+  },
+  'blender.mesh.edit_poke_faces': {
+    observationShape: 'managed_edit',
+    observationKind: 'mesh_faces_poked',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      resultMeshId: actionArguments['resultMeshId'],
+      resultMeshName: actionArguments['resultMeshName'],
+      offset: actionArguments['offset'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      isManagedReplacementMeshParameters(parameters, ['offset']) &&
+      isFiniteNumber(parameters['offset']) &&
+      parameters['offset'] >= -100 &&
+      parameters['offset'] <= 100,
+  },
   'blender.modifier.add_mirror': {
     observationShape: 'mirror_modifier',
     observationKind: 'modifier_ready',
@@ -588,6 +946,45 @@ const replayActionContracts = {
       parameters['useRim'] === true &&
       parameters['useRimOnly'] === false,
   },
+  'blender.rig.create_armature': {
+    observationShape: 'managed_armature',
+    observationKind: 'armature_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      armatureId: actionArguments['armatureId'],
+      objectName: actionArguments['objectName'],
+      dataName: actionArguments['dataName'],
+      collectionId: actionArguments['collectionId'],
+      bones: structuredClone(actionArguments['bones']),
+      bindings: structuredClone(actionArguments['bindings']),
+    }),
+    parametersValid: isArmatureReplayParameters,
+  },
+  'blender.rig.bind_skin_weights': {
+    observationShape: 'managed_skin_weights',
+    observationKind: 'skin_weights_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      armatureId: actionArguments['armatureId'],
+      modifierId: actionArguments['modifierId'],
+      modifierName: actionArguments['modifierName'],
+      preserveVolume: actionArguments['preserveVolume'],
+      weights: structuredClone(actionArguments['weights']),
+    }),
+    parametersValid: isSkinWeightsReplayParameters,
+  },
+  'blender.animation.create_pose_keyframes': {
+    observationShape: 'managed_pose_animation',
+    observationKind: 'pose_animation_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      actionId: actionArguments['actionId'],
+      actionName: actionArguments['actionName'],
+      armatureId: actionArguments['armatureId'],
+      interpolation: actionArguments['interpolation'] ?? 'BEZIER',
+      extrapolation: actionArguments['extrapolation'] ?? 'CONSTANT',
+      keyframes: structuredClone(actionArguments['keyframes']),
+    }),
+    parametersValid: isPoseAnimationReplayParameters,
+  },
 } as const satisfies Record<
   ProcedureLeafReplayActionName,
   | {
@@ -615,6 +1012,24 @@ const replayActionContracts = {
   | {
       readonly observationShape: 'solidify_modifier';
       readonly observationKind: 'modifier_ready';
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+    }
+  | {
+      readonly observationShape:
+        'managed_edit' | 'managed_armature' | 'managed_skin_weights' | 'managed_pose_animation';
+      readonly observationKind:
+        | 'mesh_topology_matches'
+        | 'mesh_triangulated'
+        | 'mesh_region_extruded'
+        | 'mesh_edges_beveled'
+        | 'mesh_faces_inset'
+        | 'mesh_faces_poked'
+        | 'armature_ready'
+        | 'skin_weights_ready'
+        | 'pose_animation_ready';
       readonly expectedParameters: (
         actionArguments: Record<string, unknown>,
       ) => Record<string, unknown>;
@@ -865,6 +1280,365 @@ export function buildProcedureLeafReplayBinding(input: {
   });
 }
 
+function isSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
+function sameStringArray(value: unknown, expected: readonly string[]): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length === expected.length &&
+    value.every((item, index) => item === expected[index])
+  );
+}
+
+function exactDetailKeys(details: Record<string, unknown>, keys: readonly string[]): boolean {
+  return hasExactKeys(details, keys);
+}
+
+function validMeshCounts(details: Record<string, unknown>): boolean {
+  return (
+    Number.isSafeInteger(details['sourceVertexCount']) &&
+    (details['sourceVertexCount'] as number) > 0 &&
+    (details['sourceVertexCount'] as number) <= 8192 &&
+    Number.isSafeInteger(details['sourceEdgeCount']) &&
+    (details['sourceEdgeCount'] as number) > 0 &&
+    (details['sourceEdgeCount'] as number) <= 16384 &&
+    Number.isSafeInteger(details['sourceFaceCount']) &&
+    (details['sourceFaceCount'] as number) > 0 &&
+    (details['sourceFaceCount'] as number) <= 8192 &&
+    Number.isSafeInteger(details['vertexCount']) &&
+    (details['vertexCount'] as number) > 0 &&
+    (details['vertexCount'] as number) <= 8192 &&
+    Number.isSafeInteger(details['edgeCount']) &&
+    (details['edgeCount'] as number) > 0 &&
+    (details['edgeCount'] as number) <= 16384 &&
+    Number.isSafeInteger(details['faceCount']) &&
+    (details['faceCount'] as number) > 0 &&
+    (details['faceCount'] as number) <= 8192
+  );
+}
+
+function validateManagedEditReplayDetails(
+  observationKind:
+    | 'mesh_topology_matches'
+    | 'mesh_triangulated'
+    | 'mesh_region_extruded'
+    | 'mesh_edges_beveled'
+    | 'mesh_faces_inset'
+    | 'mesh_faces_poked',
+  details: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  const commonKeys = [
+    'parameters',
+    'supported',
+    'targetId',
+    'resultMeshId',
+    'parametersValid',
+    'replayParametersValid',
+    'assigned',
+    'receiptMatches',
+    'contentIntact',
+    'sourceContentIntact',
+    'withinLimits',
+    'resultNameMatches',
+    'sourceVertexCount',
+    'sourceEdgeCount',
+    'sourceFaceCount',
+    'vertexCount',
+    'edgeCount',
+    'faceCount',
+    'sourceMeshContentSha256',
+    'resultMeshContentSha256',
+    'receiptContentSha256',
+    'actionArgumentsSha256',
+    'topologyMatches',
+    'attestationContentSha256',
+  ] as const;
+  const extraKeysByKind = {
+    mesh_topology_matches: ['topologyGrew'],
+    mesh_triangulated: ['nonempty', 'allTriangles'],
+    mesh_region_extruded: ['topologyGrew'],
+    mesh_edges_beveled: ['topologyGrew'],
+    mesh_faces_inset: [
+      'resultNondegenerate',
+      'sourceLoopCount',
+      'expectedVertexCount',
+      'expectedEdgeCount',
+      'expectedFaceCount',
+    ],
+    mesh_faces_poked: [
+      'resultContentIntact',
+      'allTriangles',
+      'resultNondegenerate',
+      'sourceLoopCount',
+      'expectedVertexCount',
+      'expectedEdgeCount',
+      'expectedFaceCount',
+    ],
+  } as const;
+  const requiredTrueKeys = [
+    'supported',
+    'parametersValid',
+    'replayParametersValid',
+    'assigned',
+    'receiptMatches',
+    'contentIntact',
+    'sourceContentIntact',
+    'withinLimits',
+    'resultNameMatches',
+    'topologyMatches',
+  ] as const;
+  const extraKeys = extraKeysByKind[observationKind];
+  if (
+    !exactDetailKeys(details, [...commonKeys, ...extraKeys]) ||
+    details['targetId'] !== expectedParameters['targetId'] ||
+    details['resultMeshId'] !== expectedParameters['resultMeshId'] ||
+    requiredTrueKeys.some((key) => details[key] !== true) ||
+    !validMeshCounts(details) ||
+    !isSha256(details['sourceMeshContentSha256']) ||
+    !isSha256(details['resultMeshContentSha256']) ||
+    !isSha256(details['receiptContentSha256']) ||
+    !isSha256(details['actionArgumentsSha256']) ||
+    !isSha256(details['attestationContentSha256'])
+  ) {
+    return false;
+  }
+  if (
+    ['mesh_topology_matches', 'mesh_region_extruded', 'mesh_edges_beveled'].includes(
+      observationKind,
+    )
+  ) {
+    return (
+      details['topologyGrew'] === true &&
+      (details['vertexCount'] as number) > (details['sourceVertexCount'] as number) &&
+      (details['edgeCount'] as number) > (details['sourceEdgeCount'] as number) &&
+      (details['faceCount'] as number) > (details['sourceFaceCount'] as number)
+    );
+  }
+  if (observationKind === 'mesh_triangulated') {
+    return details['nonempty'] === true && details['allTriangles'] === true;
+  }
+  const expectedCountsMatch =
+    Number.isSafeInteger(details['sourceLoopCount']) &&
+    (details['sourceLoopCount'] as number) > 0 &&
+    details['expectedVertexCount'] === details['vertexCount'] &&
+    details['expectedEdgeCount'] === details['edgeCount'] &&
+    details['expectedFaceCount'] === details['faceCount'] &&
+    details['resultNondegenerate'] === true;
+  const sourceLoopCount = details['sourceLoopCount'] as number;
+  const sourceVertexCount = details['sourceVertexCount'] as number;
+  const sourceEdgeCount = details['sourceEdgeCount'] as number;
+  const sourceFaceCount = details['sourceFaceCount'] as number;
+  if (observationKind === 'mesh_faces_inset') {
+    return (
+      expectedCountsMatch &&
+      details['expectedVertexCount'] === sourceVertexCount + sourceLoopCount &&
+      details['expectedEdgeCount'] === sourceEdgeCount + 2 * sourceLoopCount &&
+      details['expectedFaceCount'] === sourceFaceCount + sourceLoopCount
+    );
+  }
+  return (
+    expectedCountsMatch &&
+    details['expectedVertexCount'] === sourceVertexCount + sourceFaceCount &&
+    details['expectedEdgeCount'] === sourceEdgeCount + sourceLoopCount &&
+    details['expectedFaceCount'] === sourceLoopCount &&
+    details['resultContentIntact'] === true &&
+    details['allTriangles'] === true
+  );
+}
+
+function validateManagedArmatureReplayDetails(
+  details: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  const bones = expectedParameters['bones'];
+  const bindings = expectedParameters['bindings'];
+  if (!Array.isArray(bones) || !Array.isArray(bindings)) return false;
+  const expectedBoneNames = bones.map((bone) =>
+    typeof bone === 'object' && bone !== null && !Array.isArray(bone)
+      ? String((bone as Record<string, unknown>)['boneName'])
+      : '',
+  );
+  const expectedTargetIds = bindings.map((binding) =>
+    typeof binding === 'object' && binding !== null && !Array.isArray(binding)
+      ? String((binding as Record<string, unknown>)['targetId'])
+      : '',
+  );
+  const trueKeys = [
+    'supported',
+    'parametersValid',
+    'receiptMatches',
+    'ownershipMatches',
+    'bonesMatch',
+    'bindingsMatch',
+  ] as const;
+  return (
+    exactDetailKeys(details, [
+      'parameters',
+      'supported',
+      'armatureId',
+      'boneNames',
+      'availableBoneNames',
+      'boundTargetIds',
+      'parametersValid',
+      'receiptMatches',
+      'ownershipMatches',
+      'bonesMatch',
+      'bindingsMatch',
+      'actionArgumentsSha256',
+      'armatureContentSha256',
+      'receiptContentSha256',
+      'attestationContentSha256',
+    ]) &&
+    details['armatureId'] === expectedParameters['armatureId'] &&
+    sameStringArray(details['boneNames'], expectedBoneNames) &&
+    sameStringArray(details['availableBoneNames'], expectedBoneNames) &&
+    sameStringArray(details['boundTargetIds'], expectedTargetIds) &&
+    trueKeys.every((key) => details[key] === true) &&
+    isSha256(details['actionArgumentsSha256']) &&
+    isSha256(details['armatureContentSha256']) &&
+    isSha256(details['receiptContentSha256']) &&
+    isSha256(details['attestationContentSha256'])
+  );
+}
+
+function replaySkinBoneNames(parameters: Record<string, unknown>): string[] {
+  const weights = parameters['weights'];
+  if (!Array.isArray(weights)) return [];
+  return uniqueStringsInEncounterOrder(
+    weights.flatMap((weight) => {
+      if (typeof weight !== 'object' || weight === null || Array.isArray(weight)) return [];
+      const influences = (weight as Record<string, unknown>)['influences'];
+      return Array.isArray(influences)
+        ? influences.map((influence) =>
+            typeof influence === 'object' && influence !== null && !Array.isArray(influence)
+              ? (influence as Record<string, unknown>)['boneName']
+              : null,
+          )
+        : [];
+    }),
+  );
+}
+
+function validateManagedSkinWeightsReplayDetails(
+  details: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  const expectedBoneNames = replaySkinBoneNames(expectedParameters);
+  const weights = expectedParameters['weights'];
+  const trueKeys = [
+    'supported',
+    'parametersValid',
+    'receiptMatches',
+    'ownershipMatches',
+    'assignmentMatches',
+    'modifierMatches',
+    'meshContentIntact',
+    'preserveVolumeMatches',
+  ] as const;
+  return (
+    Array.isArray(weights) &&
+    exactDetailKeys(details, [
+      'parameters',
+      'supported',
+      'targetId',
+      'armatureId',
+      'modifierId',
+      'boneNames',
+      'deformBoneNames',
+      'vertexCount',
+      'parametersValid',
+      'receiptMatches',
+      'ownershipMatches',
+      'assignmentMatches',
+      'modifierMatches',
+      'meshContentIntact',
+      'preserveVolumeMatches',
+      'actionArgumentsSha256',
+      'weightsContentSha256',
+      'modifierContentSha256',
+      'receiptContentSha256',
+      'attestationContentSha256',
+    ]) &&
+    details['targetId'] === expectedParameters['targetId'] &&
+    details['armatureId'] === expectedParameters['armatureId'] &&
+    details['modifierId'] === expectedParameters['modifierId'] &&
+    sameStringArray(details['boneNames'], expectedBoneNames) &&
+    sameStringArray(details['deformBoneNames'], expectedBoneNames) &&
+    details['vertexCount'] === weights.length &&
+    trueKeys.every((key) => details[key] === true) &&
+    isSha256(details['actionArgumentsSha256']) &&
+    isSha256(details['weightsContentSha256']) &&
+    isSha256(details['modifierContentSha256']) &&
+    isSha256(details['receiptContentSha256']) &&
+    isSha256(details['attestationContentSha256'])
+  );
+}
+
+function validateManagedPoseAnimationReplayDetails(
+  details: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  const keyframes = expectedParameters['keyframes'];
+  if (!Array.isArray(keyframes) || keyframes.length < 2) return false;
+  const frame = (entry: unknown) =>
+    typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+      ? (entry as Record<string, unknown>)['frame']
+      : null;
+  const expectedRange = [frame(keyframes[0]), frame(keyframes.at(-1))];
+  const trueKeys = [
+    'supported',
+    'parametersValid',
+    'receiptMatches',
+    'ownershipMatches',
+    'assigned',
+    'curvesMatch',
+    'valuesMatch',
+    'interpolationMatches',
+    'extrapolationMatches',
+    'actionContentIntact',
+  ] as const;
+  return (
+    exactDetailKeys(details, [
+      'parameters',
+      'supported',
+      'armatureId',
+      'actionId',
+      'parametersValid',
+      'receiptMatches',
+      'ownershipMatches',
+      'assigned',
+      'frameRange',
+      'expectedFrameRange',
+      'curveCount',
+      'expectedCurveCount',
+      'curvesMatch',
+      'valuesMatch',
+      'interpolationMatches',
+      'extrapolationMatches',
+      'actionContentIntact',
+      'actionArgumentsSha256',
+      'actionContentSha256',
+      'receiptContentSha256',
+      'attestationContentSha256',
+    ]) &&
+    details['armatureId'] === expectedParameters['armatureId'] &&
+    details['actionId'] === expectedParameters['actionId'] &&
+    sameCanonicalValue(details['frameRange'], expectedRange) &&
+    sameCanonicalValue(details['expectedFrameRange'], expectedRange) &&
+    Number.isSafeInteger(details['curveCount']) &&
+    (details['curveCount'] as number) > 0 &&
+    details['curveCount'] === details['expectedCurveCount'] &&
+    trueKeys.every((key) => details[key] === true) &&
+    isSha256(details['actionArgumentsSha256']) &&
+    isSha256(details['actionContentSha256']) &&
+    isSha256(details['receiptContentSha256']) &&
+    isSha256(details['attestationContentSha256'])
+  );
+}
+
 export function validateStrongProcedureLeafReplayObservation(
   binding: ProcedureLeafReplayBinding,
   report: CompanionStateReport,
@@ -1010,6 +1784,40 @@ export function validateStrongProcedureLeafReplayObservation(
     ) {
       throw new ProcedureLeafReplayError(
         'Companion report lacks the exact satisfied managed Mirror observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'managed_edit') {
+    if (
+      !validateManagedEditReplayDetails(
+        actionContract.observationKind,
+        observation.details,
+        expectedParameters,
+      )
+    ) {
+      throw new ProcedureLeafReplayError(
+        `Companion report lacks the exact satisfied managed ${actionContract.observationKind} observation`,
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'managed_armature') {
+    if (!validateManagedArmatureReplayDetails(observation.details, expectedParameters)) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed armature observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'managed_skin_weights') {
+    if (!validateManagedSkinWeightsReplayDetails(observation.details, expectedParameters)) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed skin-weights observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'managed_pose_animation') {
+    if (!validateManagedPoseAnimationReplayDetails(observation.details, expectedParameters)) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed pose-animation observation',
         409,
       );
     }

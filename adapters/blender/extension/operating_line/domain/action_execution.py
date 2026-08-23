@@ -19,14 +19,29 @@ ACTION_LEVEL_MCP_PRIMITIVE_RECIPES = frozenset(
     for action_name in ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS
 )
 
-ACTION_LEVEL_MCP_ACTIONS = ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS | {
-    "blender.modifier.add_mirror",
-    "blender.modifier.add_solidify",
-}
-ACTION_LEVEL_MCP_RECIPES = ACTION_LEVEL_MCP_PRIMITIVE_RECIPES | {
-    "blender.modifier.add_mirror.semantic",
-    "blender.modifier.add_solidify.semantic",
-}
+_ACTION_LEVEL_MCP_SEMANTIC_ACTIONS = frozenset(
+    {
+        "blender.mesh.edit_subdivide",
+        "blender.mesh.edit_triangulate",
+        "blender.mesh.edit_extrude_region",
+        "blender.mesh.edit_bevel_edges",
+        "blender.mesh.edit_inset_faces",
+        "blender.mesh.edit_poke_faces",
+        "blender.modifier.add_mirror",
+        "blender.modifier.add_solidify",
+        "blender.rig.create_armature",
+        "blender.rig.bind_skin_weights",
+        "blender.animation.create_pose_keyframes",
+    }
+)
+
+ACTION_LEVEL_MCP_ACTIONS = (
+    ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS | _ACTION_LEVEL_MCP_SEMANTIC_ACTIONS
+)
+ACTION_LEVEL_MCP_RECIPES = ACTION_LEVEL_MCP_PRIMITIVE_RECIPES | frozenset(
+    f"{action_name}.semantic"
+    for action_name in _ACTION_LEVEL_MCP_SEMANTIC_ACTIONS
+)
 
 POKE_FACES_COMPOUND_RECIPES = {
     "forward": ("enter_edit", "poke", "exit_edit"),

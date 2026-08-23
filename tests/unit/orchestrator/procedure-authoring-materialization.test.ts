@@ -1618,7 +1618,7 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Subdivide leaf');
     }
 
-    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.tree.formatVersion).toBe('1.1.0');
     expect(result.coverage).toEqual([
       {
@@ -1626,7 +1626,7 @@ describe('procedure authoring materialization', () => {
         recipeId: 'blender.mesh.edit_subdivide.semantic',
         menu: 'unavailable',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     expect(leaf.action.arguments).toEqual({
@@ -1753,9 +1753,9 @@ describe('procedure authoring materialization', () => {
     ).not.toEqual(expect.arrayContaining(['targetId', 'resultMeshId', 'resultMeshName']));
     expect(leaf.mcpTracks).toEqual([
       expect.objectContaining({
-        availability: 'unavailable',
+        id: 'blender.mesh.edit_subdivide.semantic.mcp',
+        availability: 'available',
         modality: 'mcp',
-        reason: 'No approved action-level MCP tool is available.',
       }),
     ]);
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
@@ -2126,7 +2126,7 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Edit Mode Bevel leaf');
     }
 
-    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.tree.formatVersion).toBe('1.1.0');
     expect(result.coverage).toEqual([
       {
@@ -2134,7 +2134,7 @@ describe('procedure authoring materialization', () => {
         recipeId: 'blender.mesh.edit_bevel_edges.semantic',
         menu: 'unavailable',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     expect(leaf.action.arguments).toEqual({
@@ -2152,9 +2152,9 @@ describe('procedure authoring materialization', () => {
         "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent identity or transaction track.",
     });
     expect(leaf.mcpTracks[0]).toMatchObject({
-      availability: 'unavailable',
+      id: 'blender.mesh.edit_bevel_edges.semantic.mcp',
+      availability: 'available',
       modality: 'mcp',
-      reason: 'No approved action-level MCP tool is available.',
     });
     const shortcut = leaf.shortcutTracks[0];
     if (shortcut?.availability !== 'available') {
@@ -2299,7 +2299,7 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Edit Mode Inset leaf');
     }
 
-    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.tree.formatVersion).toBe('1.1.0');
     expect(result.coverage).toEqual([
       {
@@ -2307,7 +2307,7 @@ describe('procedure authoring materialization', () => {
         recipeId: 'blender.mesh.edit_inset_faces.semantic',
         menu: 'unavailable',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     expect(leaf.action.arguments).toEqual({
@@ -2333,9 +2333,9 @@ describe('procedure authoring materialization', () => {
         "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent identity or transaction track.",
     });
     expect(leaf.mcpTracks[0]).toMatchObject({
-      availability: 'unavailable',
+      id: 'blender.mesh.edit_inset_faces.semantic.mcp',
+      availability: 'available',
       modality: 'mcp',
-      reason: 'No approved action-level MCP tool is available.',
     });
     const shortcut = leaf.shortcutTracks[0];
     if (shortcut?.availability !== 'available') {
@@ -2470,7 +2470,7 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Edit Mode Poke leaf');
     }
 
-    expect(result).toMatchObject({ formatVersion: '1.3.0' });
+    expect(result).toMatchObject({ formatVersion: '1.4.0' });
     expect(result.tree.formatVersion).toBe('1.1.0');
     expect(result.coverage).toEqual([
       {
@@ -2478,7 +2478,7 @@ describe('procedure authoring materialization', () => {
         recipeId: 'blender.mesh.edit_poke_faces.semantic',
         menu: 'unavailable',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     expect(leaf.action.arguments).toEqual({
@@ -2497,7 +2497,11 @@ describe('procedure authoring materialization', () => {
       },
     ]);
     expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
-    expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+    expect(leaf.mcpTracks[0]).toMatchObject({
+      id: 'blender.mesh.edit_poke_faces.semantic.mcp',
+      availability: 'available',
+      modality: 'mcp',
+    });
     const shortcut = leaf.shortcutTracks[0];
     if (shortcut?.availability !== 'available') {
       throw new Error('expected available Edit Mode Poke shortcut track');

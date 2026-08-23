@@ -50,14 +50,23 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain('operatingline.blender.action.execute');
     expect(operatingLineMcpInstructions).toContain('operatingline.blender.action.status');
     expect(operatingLineMcpInstructions).toContain('accepted and started, untouched');
+    expect(operatingLineMcpInstructions).toContain('bounded 18-action managed Blender set');
+    expect(operatingLineMcpInstructions).toContain('seven mesh primitives');
     expect(operatingLineMcpInstructions).toContain(
-      'UV Sphere, Icosphere, Cube, Plane, Torus, Cone, Cylinder, Solidify Modifier, or Mirror Modifier replays',
+      'six replacement-mesh Edit actions (Subdivide, Triangulate, Extrude Region, Bevel Edges, Inset Faces, and Poke Faces)',
     );
+    expect(operatingLineMcpInstructions).toContain('Mirror and Solidify');
+    expect(operatingLineMcpInstructions).toContain('create an armature');
+    expect(operatingLineMcpInstructions).toContain('bind explicit skin weights');
+    expect(operatingLineMcpInstructions).toContain('create pose keyframes');
     expect(operatingLineMcpInstructions).toContain(
       'every other action-level MCP path remains unavailable',
     );
     expect(operatingLineMcpInstructions).toContain(
-      'never accepts arbitrary actions, Python, plan ids, step ids, or action parameters',
+      'never accepts arbitrary actions, Python, plan ids, step ids, or action arguments',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'menu tracks, and shortcut tracks are not action execution proof',
     );
     expect(operatingLineMcpInstructions).toContain(
       'recovery_required means delivery became indeterminate',
@@ -107,5 +116,6 @@ describe('OperatingLine MCP instructions', () => {
       'a failure checkpoint never becomes success evidence',
     );
     expect(operatingLineMcpInstructions).not.toContain('the MCP track remains unavailable');
+    expect(operatingLineMcpInstructions).not.toContain('managed primitive');
   });
 });

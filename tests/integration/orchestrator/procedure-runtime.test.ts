@@ -3530,7 +3530,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.3.0',
+        formatVersion: '1.4.0',
         catalogBinding: {
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
         },
@@ -3540,7 +3540,7 @@ describe('procedure compilation runtime', () => {
             recipeId: 'blender.mesh.edit_subdivide.semantic',
             menu: 'unavailable',
             shortcut: 'materialized',
-            mcp: 'unavailable',
+            mcp: 'materialized',
           },
         ],
       });
@@ -3553,7 +3553,11 @@ describe('procedure compilation runtime', () => {
         smooth: 0.25,
       });
       expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
-      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({
+        id: 'blender.mesh.edit_subdivide.semantic.mcp',
+        availability: 'available',
+        modality: 'mcp',
+      });
       const shortcut = leaf.shortcutTracks[0];
       if (shortcut?.availability !== 'available') {
         throw new Error('Expected one materialized Subdivide shortcut');
@@ -3901,7 +3905,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.3.0',
+        formatVersion: '1.4.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -3912,7 +3916,7 @@ describe('procedure compilation runtime', () => {
             recipeId: 'blender.mesh.edit_bevel_edges.semantic',
             menu: 'unavailable',
             shortcut: 'materialized',
-            mcp: 'unavailable',
+            mcp: 'materialized',
           },
         ],
       });
@@ -3926,7 +3930,11 @@ describe('procedure compilation runtime', () => {
         profile: 0.6,
       });
       expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
-      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({
+        id: 'blender.mesh.edit_bevel_edges.semantic.mcp',
+        availability: 'available',
+        modality: 'mcp',
+      });
       const shortcut = leaf.shortcutTracks[0];
       if (shortcut?.availability !== 'available') {
         throw new Error('Expected one materialized Edit Mode Bevel shortcut');
@@ -4073,7 +4081,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.3.0',
+        formatVersion: '1.4.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -4084,7 +4092,7 @@ describe('procedure compilation runtime', () => {
             recipeId: 'blender.mesh.edit_inset_faces.semantic',
             menu: 'unavailable',
             shortcut: 'materialized',
-            mcp: 'unavailable',
+            mcp: 'materialized',
           },
         ],
       });
@@ -4106,7 +4114,11 @@ describe('procedure compilation runtime', () => {
         },
       ]);
       expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
-      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({
+        id: 'blender.mesh.edit_inset_faces.semantic.mcp',
+        availability: 'available',
+        modality: 'mcp',
+      });
       const shortcut = leaf.shortcutTracks[0];
       if (shortcut?.availability !== 'available') {
         throw new Error('Expected one materialized Edit Mode Inset shortcut');
@@ -4244,7 +4256,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.3.0',
+        formatVersion: '1.4.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -4255,7 +4267,7 @@ describe('procedure compilation runtime', () => {
             recipeId: 'blender.mesh.edit_poke_faces.semantic',
             menu: 'unavailable',
             shortcut: 'materialized',
-            mcp: 'unavailable',
+            mcp: 'materialized',
           },
         ],
       });
@@ -4276,7 +4288,11 @@ describe('procedure compilation runtime', () => {
         },
       ]);
       expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
-      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({
+        id: 'blender.mesh.edit_poke_faces.semantic.mcp',
+        availability: 'available',
+        modality: 'mcp',
+      });
       const shortcut = leaf.shortcutTracks[0];
       if (shortcut?.availability !== 'available') {
         throw new Error('Expected one materialized Edit Mode Poke shortcut');
@@ -5553,7 +5569,7 @@ describe('procedure compilation runtime', () => {
         });
         expect(execution.result?.isError).toBe(true);
         expect(execution.result?.content?.[0]?.text).toContain(
-          'Replay binding lacks the exact catalog-grounded managed primitive MCP call',
+          'Replay binding lacks the exact catalog-grounded managed Blender action MCP call',
         );
       } finally {
         await runtime.stop();

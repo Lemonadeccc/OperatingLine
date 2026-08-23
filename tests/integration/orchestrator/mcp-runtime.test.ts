@@ -399,7 +399,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.blender.execution-track.status' },
             {
               name: 'operatingline.blender.action.execute',
-              description: expect.stringContaining('Mirror Modifier'),
+              description: expect.stringContaining('six replacement-mesh Edit actions'),
             },
             { name: 'operatingline.blender.action.status' },
             { name: 'operatingline.blender.shortcut-proof.execute' },
@@ -436,7 +436,10 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.authoring.zero-baseline.refinement.status' },
             { name: 'operatingline.procedure.authoring.validate' },
             { name: 'operatingline.procedure.authoring.materialize' },
-            { name: 'operatingline.procedure.replay.propose' },
+            {
+              name: 'operatingline.procedure.replay.propose',
+              description: expect.stringContaining('18-action set'),
+            },
             { name: 'operatingline.procedure.shortcut-proof.propose' },
             { name: 'operatingline.procedure.menu-control-proof.propose' },
             { name: 'operatingline.procedure.replay.finalize' },

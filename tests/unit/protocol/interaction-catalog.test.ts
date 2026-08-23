@@ -9,8 +9,9 @@ import {
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import {
+  actionLevelMcpActionNames,
+  actionLevelMcpRecipeIdByAction,
   interactionCatalogSchema,
-  managedPrimitiveActionNames,
   validateInteractionCatalog,
   type InteractionCatalog,
 } from '@operatingline/protocol';
@@ -227,56 +228,32 @@ function installConeSegmentFrame(catalog: InteractionCatalog) {
 }
 
 describe('interaction catalog protocol', () => {
-  it('permits action-level MCP only for the seven managed primitives and exact Mirror recipe', () => {
-    const availableRecipe = structuredClone(
-      recipeFor(blenderInteractionCatalog, 'blender.mesh.create_uv_sphere'),
-    );
-    const availableMenu = availableRecipe.procedureMaterialization?.menu;
-    if (
-      availableMenu?.availability !== 'available' ||
-      availableMenu.parameterBinding !== 'ordered_parameter_operations'
-    ) {
-      throw new Error('Expected UV Sphere ordered menu');
-    }
-    delete availableMenu.proofExecution;
-
-    for (const actionName of managedPrimitiveActionNames) {
+  it('permits action-level MCP only for the exact approved Blender action and recipe pairs', () => {
+    for (const actionName of actionLevelMcpActionNames) {
       const catalog = structuredClone(blenderInteractionCatalog);
-      catalog.recipes = [structuredClone(availableRecipe)];
-      catalog.recipes[0]!.id = `${actionName}.native`;
-      catalog.recipes[0]!.actionName = actionName;
+      catalog.recipes = [structuredClone(recipeFor(blenderInteractionCatalog, actionName))];
+      const menu = catalog.recipes[0]!.procedureMaterialization?.menu;
+      if (menu?.availability === 'available') delete menu.proofExecution;
+      const shortcut = catalog.recipes[0]!.procedureMaterialization?.shortcut;
+      if (shortcut?.availability === 'available') delete shortcut.proofExecution;
       expect(() => validateInteractionCatalog(catalog)).not.toThrow();
-    }
-
-    const mirrorOnly = structuredClone(blenderInteractionCatalog);
-    mirrorOnly.recipes = [
-      structuredClone(recipeFor(blenderInteractionCatalog, 'blender.modifier.add_mirror')),
-    ];
-    expect(() => validateInteractionCatalog(mirrorOnly)).not.toThrow();
-
-    const wrongMirrorRecipe = structuredClone(mirrorOnly);
-    wrongMirrorRecipe.recipes[0]!.id = 'blender.modifier.add_mirror.native';
-    expect(() => validateInteractionCatalog(wrongMirrorRecipe)).toThrow(
-      'action-level MCP is restricted to exact approved Blender recipes',
-    );
-
-    for (const actionName of [
-      'blender.mesh.create_primitive_batch',
-      'blender.mesh.edit_subdivide',
-      'blender.mesh.create_monkey',
-    ]) {
-      const catalog = structuredClone(blenderInteractionCatalog);
-      catalog.recipes = [structuredClone(availableRecipe)];
-      catalog.recipes[0]!.actionName = actionName;
-      expect(() => validateInteractionCatalog(catalog)).toThrow(
+      const wrongRecipe = structuredClone(catalog);
+      wrongRecipe.recipes[0]!.id = actionLevelMcpRecipeIdByAction[actionName].endsWith('.native')
+        ? `${actionName}.semantic`
+        : `${actionName}.native`;
+      expect(() => validateInteractionCatalog(wrongRecipe)).toThrow(
         'action-level MCP is restricted to exact approved Blender recipes',
       );
     }
 
-    const wrongRecipe = structuredClone(blenderInteractionCatalog);
-    wrongRecipe.recipes = [structuredClone(availableRecipe)];
-    wrongRecipe.recipes[0]!.id = 'blender.mesh.create_uv_sphere.semantic';
-    expect(() => validateInteractionCatalog(wrongRecipe)).toThrow(
+    const unsupported = structuredClone(blenderInteractionCatalog);
+    unsupported.recipes = [
+      structuredClone(recipeFor(blenderInteractionCatalog, 'blender.mesh.create_uv_sphere')),
+    ];
+    const unsupportedMenu = unsupported.recipes[0]!.procedureMaterialization?.menu;
+    if (unsupportedMenu?.availability === 'available') delete unsupportedMenu.proofExecution;
+    unsupported.recipes[0]!.actionName = 'blender.geometry_nodes.create_transform';
+    expect(() => validateInteractionCatalog(unsupported)).toThrow(
       'action-level MCP is restricted to exact approved Blender recipes',
     );
   });
@@ -284,7 +261,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.42.0');
+    expect(catalog.catalogVersion).toBe('1.43.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -352,6 +329,7 @@ describe('interaction catalog protocol', () => {
       '1.40.0',
       '1.41.0',
       '1.42.0',
+      '1.43.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
@@ -365,8 +343,17 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
       'blender.modifier.add_solidify',
       'blender.modifier.add_mirror',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.animation.create_pose_keyframes',
     ]);
     for (const recipe of availableMcpRecipes) {
       expect(recipe.procedureMaterialization?.mcp).toEqual({
@@ -1283,7 +1270,7 @@ describe('interaction catalog protocol', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: { availability: 'available' },
     });
     const subdivideShortcut = subdivide.procedureMaterialization?.shortcut;
     if (subdivideShortcut?.availability !== 'available') {
@@ -1489,7 +1476,7 @@ describe('interaction catalog protocol', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: { availability: 'available' },
     });
     if (bevelEdges.guidance.kind !== 'semantic_path') {
       throw new Error('Expected semantic Bevel Edges guidance');
@@ -1626,7 +1613,7 @@ describe('interaction catalog protocol', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: { availability: 'available' },
     });
     if (insetFaces.guidance.kind !== 'semantic_path') {
       throw new Error('Expected semantic Inset Faces guidance');
@@ -1716,7 +1703,7 @@ describe('interaction catalog protocol', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: { availability: 'available' },
     });
     if (pokeFaces.guidance.kind !== 'semantic_path') {
       throw new Error('Expected semantic Poke Faces guidance');
@@ -1838,12 +1825,17 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
       'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
       'blender.mesh.edit_bevel_edges',
       'blender.mesh.edit_inset_faces',
       'blender.mesh.edit_poke_faces',
       'blender.modifier.add_subdivision_surface',
       'blender.modifier.add_solidify',
       'blender.modifier.add_mirror',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.animation.create_pose_keyframes',
     ]);
     expect(
       catalog.recipes.filter((recipe) => !materializedActionNames.has(recipe.actionName)),

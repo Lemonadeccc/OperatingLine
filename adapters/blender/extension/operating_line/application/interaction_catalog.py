@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from ..domain import (
     is_action_level_mcp_action,
+    is_action_level_mcp_primitive,
     is_action_level_mcp_recipe,
 )
 
@@ -2097,14 +2098,15 @@ def _validate_ordered_parameter_operations(
     if materialization is None:
         return
     expected_action_level_mcp_recipe_id = (
-        f"{recipe.action_name}.semantic"
-        if recipe.action_name.startswith("blender.modifier.")
-        else f"{recipe.action_name}.native"
+        f"{recipe.action_name}.native"
+        if is_action_level_mcp_primitive(recipe.action_name)
+        else f"{recipe.action_name}.semantic"
     )
     if (
         materialization.mcp.availability == "available"
         and (
             not is_action_level_mcp_action(recipe.action_name)
+            or not is_action_level_mcp_recipe(recipe.id)
             or recipe.id != expected_action_level_mcp_recipe_id
         )
     ):

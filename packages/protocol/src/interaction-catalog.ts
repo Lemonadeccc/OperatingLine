@@ -2,7 +2,10 @@ import { z } from 'zod';
 
 import type { ActionCatalog } from './catalog.js';
 import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
-import { actionLevelMcpActionNameSchema } from './managed-primitive-action.js';
+import {
+  actionLevelMcpActionNameSchema,
+  actionLevelMcpRecipeIdByAction,
+} from './managed-primitive-action.js';
 import {
   procedureParameterPathSegmentSchema,
   procedureParameterTransformSchema,
@@ -1300,13 +1303,13 @@ function validateRecipe(recipe: InteractionRecipe): void {
   }
 
   const mcp = recipe.procedureMaterialization?.mcp;
-  const expectedActionLevelMcpRecipeId = recipe.actionName.startsWith('blender.modifier.')
-    ? `${recipe.actionName}.semantic`
-    : `${recipe.actionName}.native`;
+  const parsedActionLevelMcpActionName = actionLevelMcpActionNameSchema.safeParse(
+    recipe.actionName,
+  );
   if (
     mcp?.availability === 'available' &&
-    (!actionLevelMcpActionNameSchema.safeParse(recipe.actionName).success ||
-      recipe.id !== expectedActionLevelMcpRecipeId)
+    (!parsedActionLevelMcpActionName.success ||
+      recipe.id !== actionLevelMcpRecipeIdByAction[parsedActionLevelMcpActionName.data])
   ) {
     throw new Error(
       `Interaction recipe ${recipe.id} action-level MCP is restricted to exact approved Blender recipes`,
