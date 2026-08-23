@@ -1,32 +1,168 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "formatVersion": {
+  "oneOf": [
+    {
+      "$ref": "#/definitions/__schema0"
+    },
+    {
+      "$ref": "#/definitions/__schema30"
+    }
+  ],
+  "definitions": {
+    "__schema0": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "$ref": "#/definitions/__schema1"
+        },
+        "requestId": {
+          "$ref": "#/definitions/__schema2"
+        },
+        "replayId": {
+          "$ref": "#/definitions/__schema3"
+        },
+        "proofId": {
+          "$ref": "#/definitions/__schema4"
+        },
+        "deliveryId": {
+          "$ref": "#/definitions/__schema5"
+        },
+        "target": {
+          "$ref": "#/definitions/__schema6"
+        },
+        "targetProfile": {
+          "type": "string",
+          "const": "factory_cube_8_12_6"
+        },
+        "proposalId": {
+          "$ref": "#/definitions/__schema7"
+        },
+        "plan": {
+          "$ref": "#/definitions/__schema8"
+        },
+        "executionId": {
+          "$ref": "#/definitions/__schema10"
+        },
+        "leafId": {
+          "$ref": "#/definitions/__schema11"
+        },
+        "interactionCatalogVersion": {
+          "$ref": "#/definitions/__schema12"
+        },
+        "interactionCatalogContentSha256": {
+          "$ref": "#/definitions/__schema9"
+        },
+        "shortcutTrackContentSha256": {
+          "$ref": "#/definitions/__schema9"
+        },
+        "bindingContentSha256": {
+          "$ref": "#/definitions/__schema9"
+        },
+        "binding": {
+          "$ref": "#/definitions/__schema13"
+        },
+        "executorId": {
+          "type": "string",
+          "const": "blender.subdivision_surface_f9.event_simulate.v1"
+        },
+        "executionBoundary": {
+          "$ref": "#/definitions/__schema25"
+        },
+        "authorization": {
+          "$ref": "#/definitions/__schema26"
+        },
+        "transport": {
+          "$ref": "#/definitions/__schema27"
+        },
+        "operationIds": {
+          "$ref": "#/definitions/__schema20"
+        },
+        "expectedState": {
+          "$ref": "#/definitions/__schema28"
+        },
+        "requestedAt": {
+          "$ref": "#/definitions/__schema29"
+        },
+        "dispatchedAt": {
+          "$ref": "#/definitions/__schema29"
+        },
+        "kind": {
+          "type": "string",
+          "const": "native_terminal_reconcile"
+        },
+        "recoveryId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "acknowledgedProgressReceiptChainHeads": {
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema9"
+          }
+        },
+        "recoveryRequestedAt": {
+          "$ref": "#/definitions/__schema29"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "requestId",
+        "replayId",
+        "proofId",
+        "deliveryId",
+        "target",
+        "targetProfile",
+        "proposalId",
+        "plan",
+        "executionId",
+        "leafId",
+        "interactionCatalogVersion",
+        "interactionCatalogContentSha256",
+        "shortcutTrackContentSha256",
+        "bindingContentSha256",
+        "binding",
+        "executorId",
+        "executionBoundary",
+        "authorization",
+        "transport",
+        "operationIds",
+        "expectedState",
+        "requestedAt",
+        "dispatchedAt",
+        "kind",
+        "recoveryId",
+        "acknowledgedProgressReceiptChainHeads",
+        "recoveryRequestedAt"
+      ],
+      "additionalProperties": false
+    },
+    "__schema1": {
       "type": "string",
       "const": "1.0.0"
     },
-    "requestId": {
+    "__schema2": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "replayId": {
+    "__schema3": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "proofId": {
+    "__schema4": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "deliveryId": {
+    "__schema5": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "target": {
+    "__schema6": {
       "type": "object",
       "properties": {
         "adapterId": {
@@ -45,16 +181,12 @@
       ],
       "additionalProperties": false
     },
-    "targetProfile": {
-      "type": "string",
-      "const": "factory_cube_8_12_6"
-    },
-    "proposalId": {
+    "__schema7": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "plan": {
+    "__schema8": {
       "type": "object",
       "properties": {
         "id": {
@@ -67,8 +199,7 @@
           "maximum": 9007199254740991
         },
         "contentSha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/definitions/__schema9"
         }
       },
       "required": [
@@ -78,37 +209,38 @@
       ],
       "additionalProperties": false
     },
-    "executionId": {
+    "__schema9": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "__schema10": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "leafId": {
+    "__schema11": {
       "type": "string",
       "minLength": 1
     },
-    "interactionCatalogVersion": {
+    "__schema12": {
       "type": "string",
       "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
     },
-    "interactionCatalogContentSha256": {
-      "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
+    "__schema13": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/__schema14"
+        },
+        {
+          "$ref": "#/definitions/__schema23"
+        }
+      ]
     },
-    "shortcutTrackContentSha256": {
-      "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
-    },
-    "bindingContentSha256": {
-      "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
-    },
-    "binding": {
+    "__schema14": {
       "type": "object",
       "properties": {
         "formatVersion": {
-          "type": "string",
-          "const": "1.0.0"
+          "$ref": "#/definitions/__schema1"
         },
         "bindingId": {
           "type": "string",
@@ -116,8 +248,7 @@
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "proposalRecordContentSha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/definitions/__schema15"
         },
         "proofId": {
           "type": "string",
@@ -135,23 +266,7 @@
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "target": {
-          "type": "object",
-          "properties": {
-            "adapterId": {
-              "type": "string",
-              "const": "blender"
-            },
-            "instanceId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            }
-          },
-          "required": [
-            "adapterId",
-            "instanceId"
-          ],
-          "additionalProperties": false
+          "$ref": "#/definitions/__schema16"
         },
         "proposalId": {
           "type": "string",
@@ -171,8 +286,7 @@
               "maximum": 9007199254740991
             },
             "contentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "$ref": "#/definitions/__schema15"
             }
           },
           "required": [
@@ -188,8 +302,7 @@
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
         "leafId": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          "$ref": "#/definitions/__schema17"
         },
         "recipeId": {
           "type": "string",
@@ -278,9 +391,7 @@
               "const": "accepted"
             },
             "decidedAt": {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              "$ref": "#/definitions/__schema18"
             }
           },
           "required": [
@@ -337,20 +448,16 @@
           "type": "object",
           "properties": {
             "actionCatalogVersion": {
-              "type": "string",
-              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+              "$ref": "#/definitions/__schema19"
             },
             "interactionCatalogVersion": {
-              "type": "string",
-              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+              "$ref": "#/definitions/__schema19"
             },
             "interactionCatalogContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "$ref": "#/definitions/__schema15"
             },
             "shortcutTrackContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "$ref": "#/definitions/__schema15"
             }
           },
           "required": [
@@ -378,76 +485,16 @@
           "const": "event_simulate"
         },
         "operationIds": {
-          "type": "array",
-          "items": [
-            {
-              "type": "string",
-              "const": "shortcut.add_subdivision_surface_level_one"
-            },
-            {
-              "type": "string",
-              "const": "shortcut.open_adjust_last_operation"
-            },
-            {
-              "type": "string",
-              "const": "shortcut.set_viewport_level"
-            },
-            {
-              "type": "string",
-              "const": "shortcut.close_adjust_last_operation"
-            }
-          ],
-          "additionalItems": false,
-          "minItems": 4,
-          "maxItems": 4
+          "$ref": "#/definitions/__schema20"
         },
         "startState": {
-          "type": "object",
-          "properties": {
-            "reportId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "sequence": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "reportId",
-            "sequence"
-          ],
-          "additionalProperties": false
+          "$ref": "#/definitions/__schema21"
         },
         "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          "$ref": "#/definitions/__schema18"
         },
         "integrity": {
-          "type": "object",
-          "properties": {
-            "algorithm": {
-              "type": "string",
-              "const": "sha256"
-            },
-            "canonicalization": {
-              "type": "string",
-              "const": "operatingline-json-value-v1"
-            },
-            "contentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            }
-          },
-          "required": [
-            "algorithm",
-            "canonicalization",
-            "contentSha256"
-          ],
-          "additionalProperties": false
+          "$ref": "#/definitions/__schema22"
         }
       },
       "required": [
@@ -480,23 +527,43 @@
       ],
       "additionalProperties": false
     },
-    "executorId": {
+    "__schema15": {
       "type": "string",
-      "const": "blender.subdivision_surface_f9.event_simulate.v1"
+      "pattern": "^[a-f0-9]{64}$"
     },
-    "executionBoundary": {
+    "__schema16": {
+      "type": "object",
+      "properties": {
+        "adapterId": {
+          "type": "string",
+          "const": "blender"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "adapterId",
+        "instanceId"
+      ],
+      "additionalProperties": false
+    },
+    "__schema17": {
       "type": "string",
-      "const": "blender_window_event_simulate"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
     },
-    "authorization": {
+    "__schema18": {
       "type": "string",
-      "const": "accepted_replay_next_step"
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
     },
-    "transport": {
+    "__schema19": {
       "type": "string",
-      "const": "event_simulate"
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
     },
-    "operationIds": {
+    "__schema20": {
       "type": "array",
       "items": [
         {
@@ -520,7 +587,7 @@
       "minItems": 4,
       "maxItems": 4
     },
-    "expectedState": {
+    "__schema21": {
       "type": "object",
       "properties": {
         "reportId": {
@@ -540,69 +607,569 @@
       ],
       "additionalProperties": false
     },
-    "requestedAt": {
-      "type": "string",
-      "format": "date-time",
-      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    "__schema22": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "const": "sha256"
+        },
+        "canonicalization": {
+          "type": "string",
+          "const": "operatingline-json-value-v1"
+        },
+        "contentSha256": {
+          "$ref": "#/definitions/__schema15"
+        }
+      },
+      "required": [
+        "algorithm",
+        "canonicalization",
+        "contentSha256"
+      ],
+      "additionalProperties": false
     },
-    "dispatchedAt": {
-      "type": "string",
-      "format": "date-time",
-      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    "__schema23": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "$ref": "#/definitions/__schema1"
+        },
+        "bindingId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "proposalRecordContentSha256": {
+          "$ref": "#/definitions/__schema15"
+        },
+        "proofId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "replayId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "target": {
+          "$ref": "#/definitions/__schema16"
+        },
+        "proposalId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "contentSha256": {
+              "$ref": "#/definitions/__schema15"
+            }
+          },
+          "required": [
+            "id",
+            "revision",
+            "contentSha256"
+          ],
+          "additionalProperties": false
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "leafId": {
+          "$ref": "#/definitions/__schema17"
+        },
+        "recipeId": {
+          "type": "string",
+          "const": "blender.mesh.edit_subdivide.semantic"
+        },
+        "actionName": {
+          "type": "string",
+          "const": "blender.mesh.edit_subdivide"
+        },
+        "acceptedAction": {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "name": {
+              "type": "string",
+              "const": "blender.mesh.edit_subdivide"
+            },
+            "arguments": {
+              "type": "object",
+              "properties": {
+                "targetId": {
+                  "type": "string",
+                  "const": "tutorial.cube"
+                },
+                "resultMeshId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "resultMeshName": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "cuts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "smooth": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "targetId",
+                "resultMeshId",
+                "resultMeshName",
+                "cuts",
+                "smooth"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "adapterId",
+            "name",
+            "arguments"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": {
+          "type": "string",
+          "const": "factory_cube_single_user_mesh_8_12_6"
+        },
+        "acceptedDecision": {
+          "type": "object",
+          "properties": {
+            "decisionId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "proposalId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "decision": {
+              "type": "string",
+              "const": "accepted"
+            },
+            "decidedAt": {
+              "$ref": "#/definitions/__schema18"
+            }
+          },
+          "required": [
+            "decisionId",
+            "proposalId",
+            "instanceId",
+            "adapterId",
+            "decision",
+            "decidedAt"
+          ],
+          "additionalProperties": false
+        },
+        "proofScope": {
+          "type": "object",
+          "properties": {
+            "managedActionResult": {
+              "type": "string",
+              "const": "not_executed"
+            },
+            "managedIdentityVerified": {
+              "type": "boolean",
+              "const": false
+            },
+            "managedReceiptCreated": {
+              "type": "boolean",
+              "const": false
+            },
+            "managedReplacementMeshCreated": {
+              "type": "boolean",
+              "const": false
+            },
+            "nativeMutationKind": {
+              "type": "string",
+              "const": "in_place_edit_mesh_subdivide"
+            },
+            "omittedAcceptedArguments": {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "targetId"
+                },
+                {
+                  "type": "string",
+                  "const": "resultMeshId"
+                },
+                {
+                  "type": "string",
+                  "const": "resultMeshName"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "managedActionResult",
+            "managedIdentityVerified",
+            "managedReceiptCreated",
+            "managedReplacementMeshCreated",
+            "nativeMutationKind",
+            "omittedAcceptedArguments"
+          ],
+          "additionalProperties": false
+        },
+        "materialization": {
+          "type": "object",
+          "properties": {
+            "actionCatalogVersion": {
+              "$ref": "#/definitions/__schema19"
+            },
+            "interactionCatalogVersion": {
+              "$ref": "#/definitions/__schema19"
+            },
+            "interactionCatalogContentSha256": {
+              "$ref": "#/definitions/__schema15"
+            },
+            "shortcutTrackContentSha256": {
+              "$ref": "#/definitions/__schema15"
+            }
+          },
+          "required": [
+            "actionCatalogVersion",
+            "interactionCatalogVersion",
+            "interactionCatalogContentSha256",
+            "shortcutTrackContentSha256"
+          ],
+          "additionalProperties": false
+        },
+        "executorId": {
+          "type": "string",
+          "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+        },
+        "executionBoundary": {
+          "type": "string",
+          "const": "blender_window_event_simulate"
+        },
+        "authorization": {
+          "type": "string",
+          "const": "accepted_replay_next_step"
+        },
+        "transport": {
+          "type": "string",
+          "const": "event_simulate"
+        },
+        "operationIds": {
+          "$ref": "#/definitions/__schema24"
+        },
+        "nativeUndoDepth": {
+          "type": "number",
+          "const": 4
+        },
+        "nativeRedoDepth": {
+          "type": "number",
+          "const": 4
+        },
+        "startState": {
+          "$ref": "#/definitions/__schema21"
+        },
+        "createdAt": {
+          "$ref": "#/definitions/__schema18"
+        },
+        "integrity": {
+          "$ref": "#/definitions/__schema22"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "bindingId",
+        "proposalRecordContentSha256",
+        "proofId",
+        "requestId",
+        "replayId",
+        "target",
+        "proposalId",
+        "plan",
+        "executionId",
+        "leafId",
+        "recipeId",
+        "actionName",
+        "acceptedAction",
+        "targetProfile",
+        "acceptedDecision",
+        "proofScope",
+        "materialization",
+        "executorId",
+        "executionBoundary",
+        "authorization",
+        "transport",
+        "operationIds",
+        "nativeUndoDepth",
+        "nativeRedoDepth",
+        "startState",
+        "createdAt",
+        "integrity"
+      ],
+      "additionalProperties": false
     },
-    "kind": {
-      "type": "string",
-      "const": "native_terminal_reconcile"
-    },
-    "recoveryId": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-    },
-    "acknowledgedProgressReceiptChainHeads": {
-      "maxItems": 4,
+    "__schema24": {
       "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^[a-f0-9]{64}$"
-      }
+      "items": [
+        {
+          "type": "string",
+          "const": "shortcut.enter_edit_mode"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.select_all_mesh_elements"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.search_subdivide"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.execute_subdivide"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.open_adjust_last_operation"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.set_number_of_cuts"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.set_smoothness"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.close_adjust_last_operation"
+        },
+        {
+          "type": "string",
+          "const": "shortcut.return_to_object_mode"
+        }
+      ],
+      "additionalItems": false,
+      "minItems": 9,
+      "maxItems": 9
     },
-    "recoveryRequestedAt": {
+    "__schema25": {
+      "type": "string",
+      "const": "blender_window_event_simulate"
+    },
+    "__schema26": {
+      "type": "string",
+      "const": "accepted_replay_next_step"
+    },
+    "__schema27": {
+      "type": "string",
+      "const": "event_simulate"
+    },
+    "__schema28": {
+      "type": "object",
+      "properties": {
+        "reportId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "sequence": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "reportId",
+        "sequence"
+      ],
+      "additionalProperties": false
+    },
+    "__schema29": {
       "type": "string",
       "format": "date-time",
       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "__schema30": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "$ref": "#/definitions/__schema1"
+        },
+        "requestId": {
+          "$ref": "#/definitions/__schema2"
+        },
+        "replayId": {
+          "$ref": "#/definitions/__schema3"
+        },
+        "proofId": {
+          "$ref": "#/definitions/__schema4"
+        },
+        "deliveryId": {
+          "$ref": "#/definitions/__schema5"
+        },
+        "target": {
+          "$ref": "#/definitions/__schema6"
+        },
+        "targetProfile": {
+          "type": "string",
+          "const": "factory_cube_single_user_mesh_8_12_6"
+        },
+        "proposalId": {
+          "$ref": "#/definitions/__schema7"
+        },
+        "plan": {
+          "$ref": "#/definitions/__schema8"
+        },
+        "executionId": {
+          "$ref": "#/definitions/__schema10"
+        },
+        "leafId": {
+          "$ref": "#/definitions/__schema11"
+        },
+        "interactionCatalogVersion": {
+          "$ref": "#/definitions/__schema12"
+        },
+        "interactionCatalogContentSha256": {
+          "$ref": "#/definitions/__schema9"
+        },
+        "shortcutTrackContentSha256": {
+          "$ref": "#/definitions/__schema9"
+        },
+        "bindingContentSha256": {
+          "$ref": "#/definitions/__schema9"
+        },
+        "binding": {
+          "$ref": "#/definitions/__schema13"
+        },
+        "executorId": {
+          "type": "string",
+          "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+        },
+        "executionBoundary": {
+          "$ref": "#/definitions/__schema25"
+        },
+        "authorization": {
+          "$ref": "#/definitions/__schema26"
+        },
+        "transport": {
+          "$ref": "#/definitions/__schema27"
+        },
+        "operationIds": {
+          "$ref": "#/definitions/__schema24"
+        },
+        "expectedState": {
+          "$ref": "#/definitions/__schema28"
+        },
+        "requestedAt": {
+          "$ref": "#/definitions/__schema29"
+        },
+        "dispatchedAt": {
+          "$ref": "#/definitions/__schema29"
+        },
+        "nativeUndoDepth": {
+          "type": "number",
+          "const": 4
+        },
+        "nativeRedoDepth": {
+          "type": "number",
+          "const": 4
+        },
+        "kind": {
+          "type": "string",
+          "const": "native_terminal_reconcile"
+        },
+        "recoveryId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "acknowledgedProgressReceiptChainHeads": {
+          "maxItems": 9,
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema9"
+          }
+        },
+        "recoveryRequestedAt": {
+          "$ref": "#/definitions/__schema29"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "requestId",
+        "replayId",
+        "proofId",
+        "deliveryId",
+        "target",
+        "targetProfile",
+        "proposalId",
+        "plan",
+        "executionId",
+        "leafId",
+        "interactionCatalogVersion",
+        "interactionCatalogContentSha256",
+        "shortcutTrackContentSha256",
+        "bindingContentSha256",
+        "binding",
+        "executorId",
+        "executionBoundary",
+        "authorization",
+        "transport",
+        "operationIds",
+        "expectedState",
+        "requestedAt",
+        "dispatchedAt",
+        "nativeUndoDepth",
+        "nativeRedoDepth",
+        "kind",
+        "recoveryId",
+        "acknowledgedProgressReceiptChainHeads",
+        "recoveryRequestedAt"
+      ],
+      "additionalProperties": false
     }
   },
-  "required": [
-    "formatVersion",
-    "requestId",
-    "replayId",
-    "proofId",
-    "deliveryId",
-    "target",
-    "targetProfile",
-    "proposalId",
-    "plan",
-    "executionId",
-    "leafId",
-    "interactionCatalogVersion",
-    "interactionCatalogContentSha256",
-    "shortcutTrackContentSha256",
-    "bindingContentSha256",
-    "binding",
-    "executorId",
-    "executionBoundary",
-    "authorization",
-    "transport",
-    "operationIds",
-    "expectedState",
-    "requestedAt",
-    "dispatchedAt",
-    "kind",
-    "recoveryId",
-    "acknowledgedProgressReceiptChainHeads",
-    "recoveryRequestedAt"
-  ],
-  "additionalProperties": false,
   "$id": "https://operatingline.dev/schema/v1/companion-shortcut-proof-terminal-reconciliation-delivery.json"
 }

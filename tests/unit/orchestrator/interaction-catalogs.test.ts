@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.43.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.44.0');
     const uvSphereMenu = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
     )?.procedureMaterialization?.menu;
@@ -865,16 +865,25 @@ describe('interaction catalog registry', () => {
       {
         kind: 'selection',
         label: 'Active Target',
-        value: 'Exactly one accepted target Mesh object is active and selected',
+        value: 'Exactly the factory Cube is active and selected',
       },
       { kind: 'keymap', label: 'Keymap', value: 'Blender' },
       { kind: 'modal_state', label: 'Modal UI', value: 'None' },
+      { kind: 'scene_state', label: 'Object Identity', value: 'Cube' },
+      {
+        kind: 'scene_state',
+        label: 'Initial Topology',
+        value: '8 vertices, 12 edges, 6 polygons',
+      },
       {
         kind: 'scene_state',
         label: 'Mesh Elements',
         value: 'All target mesh elements are visible',
       },
       { kind: 'scene_state', label: 'Mesh Data Users', value: '1' },
+      { kind: 'scene_state', label: 'Scene Mesh Datablocks', value: '1' },
+      { kind: 'scene_state', label: 'Modifiers', value: 'None' },
+      { kind: 'scene_state', label: 'Shape Keys', value: 'None' },
       { kind: 'scene_state', label: 'UI Language', value: 'English' },
     ]);
     expect(subdivideShortcut.operations.map((operation) => operation.id)).toEqual([
@@ -1965,7 +1974,13 @@ describe('interaction catalog registry', () => {
       '7cc79687c9b8e4de7c62461471b0fbed3fe11b1ec609b2278f4a8c28cb52c1de',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.43.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '9dbf1a507b6bb2dc3f5b13fbc7fbe53acf3fdd8756908d5de6d2643f40964a72',
+    );
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
     const promotedActions = [
       'blender.mesh.edit_subdivide',
       'blender.mesh.edit_triangulate',
@@ -2006,6 +2021,96 @@ describe('interaction catalog registry', () => {
     }
 
     active.catalogVersion = frozen.catalogVersion;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.43.0 and adds only the exact Edit Subdivide shortcut proof in 1.44.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.43.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '9dbf1a507b6bb2dc3f5b13fbc7fbe53acf3fdd8756908d5de6d2643f40964a72',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    const frozenShortcut = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
+    )?.procedureMaterialization?.shortcut;
+    const activeShortcut = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
+    )?.procedureMaterialization?.shortcut;
+    if (
+      frozenShortcut?.availability !== 'available' ||
+      activeShortcut?.availability !== 'available'
+    ) {
+      throw new Error('Expected Edit Subdivide shortcut materialization');
+    }
+
+    expect(frozenShortcut.proofExecution).toBeUndefined();
+    expect(activeShortcut.proofExecution).toEqual({
+      executorId: 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1',
+      targetProfile: 'factory_cube_single_user_mesh_8_12_6',
+      executionBoundary: 'blender_window_event_simulate',
+      osHidInput: false,
+      managedActionExecuted: false,
+      managedReceiptCreated: false,
+      managedReplacementMeshCreated: false,
+      nativeMutationKind: 'in_place_edit_mesh_subdivide',
+      authorization: 'accepted_replay_next_step',
+      transport: 'event_simulate',
+      hostVersions: ['4.5.3', '5.1.1'],
+      operationIds: [
+        'shortcut.enter_edit_mode',
+        'shortcut.select_all_mesh_elements',
+        'shortcut.search_subdivide',
+        'shortcut.execute_subdivide',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_number_of_cuts',
+        'shortcut.set_smoothness',
+        'shortcut.close_adjust_last_operation',
+        'shortcut.return_to_object_mode',
+      ],
+      strongObservationKind: 'mesh_edit_subdivide_shortcut_ready',
+      nativeUndoCheckpointRequired: true,
+      nativeUndoDepth: 4,
+      nativeRedoDepth: 4,
+    });
+    expect(activeShortcut.preconditions).toEqual([
+      { kind: 'workspace', label: 'Workspace', value: 'Layout' },
+      { kind: 'editor', label: 'Editor', value: 'VIEW_3D' },
+      { kind: 'mode', label: 'Mode', value: 'OBJECT' },
+      {
+        kind: 'selection',
+        label: 'Active Target',
+        value: 'Exactly the factory Cube is active and selected',
+      },
+      { kind: 'keymap', label: 'Keymap', value: 'Blender' },
+      { kind: 'modal_state', label: 'Modal UI', value: 'None' },
+      { kind: 'scene_state', label: 'Object Identity', value: 'Cube' },
+      {
+        kind: 'scene_state',
+        label: 'Initial Topology',
+        value: '8 vertices, 12 edges, 6 polygons',
+      },
+      {
+        kind: 'scene_state',
+        label: 'Mesh Elements',
+        value: 'All target mesh elements are visible',
+      },
+      { kind: 'scene_state', label: 'Mesh Data Users', value: '1' },
+      { kind: 'scene_state', label: 'Scene Mesh Datablocks', value: '1' },
+      { kind: 'scene_state', label: 'Modifiers', value: 'None' },
+      { kind: 'scene_state', label: 'Shape Keys', value: 'None' },
+      { kind: 'scene_state', label: 'UI Language', value: 'English' },
+    ]);
+
+    active.catalogVersion = frozen.catalogVersion;
+    delete activeShortcut.proofExecution;
+    activeShortcut.preconditions.splice(
+      0,
+      activeShortcut.preconditions.length,
+      ...structuredClone(frozenShortcut.preconditions),
+    );
     expect(active).toEqual(frozen);
   });
 

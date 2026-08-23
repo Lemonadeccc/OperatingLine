@@ -36,6 +36,11 @@ sys.modules[blender_actions.__name__] = blender_actions
 observations = ModuleType(f"{PACKAGE_NAME}.infrastructure.observations")
 observations.evaluate_observations = lambda *_args, **_kwargs: []
 sys.modules[observations.__name__] = observations
+edit_subdivide_history = ModuleType(
+    f"{PACKAGE_NAME}.infrastructure.edit_subdivide_shortcut_history"
+)
+edit_subdivide_history.edit_subdivide_shortcut_history_mutation_locked = lambda: False
+sys.modules[edit_subdivide_history.__name__] = edit_subdivide_history
 
 companion = import_module(f"{PACKAGE_NAME}.application.companion")
 
@@ -1009,6 +1014,7 @@ class MenuControlCompanionTests(unittest.TestCase):
                     module = ModuleType(module_name)
                     module.SubdivisionSurfaceF9ShortcutProof = Driver
                     delivery = {
+                        "executorId": "blender.subdivision_surface_f9.event_simulate.v1",
                         "requestId": str(uuid.uuid4()),
                         "proofId": str(uuid.uuid4()),
                         "deliveryId": str(uuid.uuid4()),
@@ -1099,6 +1105,7 @@ class MenuControlCompanionTests(unittest.TestCase):
                         module = ModuleType(module_name)
                         module.SubdivisionSurfaceF9ShortcutProof = Driver
                         delivery = {
+                            "executorId": "blender.subdivision_surface_f9.event_simulate.v1",
                             "requestId": str(uuid.uuid4()),
                             "proofId": str(uuid.uuid4()),
                             "deliveryId": str(uuid.uuid4()),

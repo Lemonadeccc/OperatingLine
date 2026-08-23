@@ -67,10 +67,15 @@ Cylinder 也使用四步 guidance 加中点 Location、Object Name 的六步 men
 canonical zero-roll XYZ Euler 将本地 `+Z` 对齐 `end-start`，本地 `-Z` 端对应
 `start`，本地 `+Z` 端对应 `end`，两端使用同一 `radius`，且不声称与 managed
 executor quaternion/roll 精确等价。
-Subdivide 保留 managed copy/swap `semantic_path`，并增加 candidate-only 九步 shortcut：`TAB`、`A`、
+Subdivide 保留 managed copy/swap `semantic_path`，并增加九步 candidate-only shortcut：`TAB`、`A`、
 `F3`（literal query `subdivide`）、`ENTER`、`F9`、Number of Cuts、Smoothness、`ENTER`、`TAB`。它将 `cuts` 与
 `smooth` 逐控件绑定，并显式省略 `targetId`、`resultMeshId` 和 `resultMeshName`；原生路径直接修改当前 Mesh，
-不等价于 managed replacement Mesh。Subdivision Surface Modifier 新增 candidate-only 四步 shortcut：
+不等价于 managed replacement Mesh。InteractionCatalog `1.44.0` 为这条轨迹增加独立、已审批 replay 才可使用的
+`blender.mesh_edit_subdivide_f3_f9.event_simulate.v1`：仅接受 untouched、单用户 `8/12/6` factory Cube，生成
+九段严格事件/参数收据和 `mesh_edit_subdivide_shortcut_ready` Observation，并固定声明 managed action、receipt 与
+replacement Mesh 均未产生。object/Mesh pointer 必须保持不变，topology、geometry 与 scene hash 同时通过，完整
+history 使用独立 v2 marker 和四次 Undo/四次 Redo。projection 仍为 `candidate_only`，因此该证明不提升为 managed
+action 等价轨迹。Subdivision Surface Modifier 新增 candidate-only 四步 shortcut：
 `Ctrl+1` 以 literal `level=1`、`relative=false`、`ensure_modifier=true` 创建默认 modifier，`F9` 打开
 `object.subdivision_set` 的 Adjust Last Operation，Level 绑定 accepted `viewportLevel`，再以 `ENTER`
 结束 surface。`targetId`、`modifierId`、`modifierName` 显式省略；目标版本的 `F3` 搜索路径实测不可用，
@@ -123,9 +128,10 @@ Icosphere shortcut 使用 ProcedureTree `1.1.0` / Result `1.3.0`，Cube 与 Plan
 `1.2.0`，Subdivide shortcut 使用 Result `1.3.0`，其余这些 menu-only 结果使用 Result `1.1.0`；轨迹仍是
 `candidate`/`structural_only` 教学投影。Icosphere 的创建与 F9 参数前缀已在 Blender 4.5.3/5.1.1
 完成真实事件回放并验证 3/2.5、162 顶点和半径，但后续移动/重命名及 managed action 语义仍不是完整
-UI operation replay。Subdivide 的九步真实事件回放在相同版本中验证 `cuts = 2`、`smooth = 0.25`、
-56 vertices、108 edges、54 polygons，并证明 Mesh pointer 与 datablock 数量不变；这正是原生 in-place
-mutation 与 managed copy/swap 不等价的证据。Subdivision Surface 的四步轨迹在两个版本分别验证
+UI operation replay。Subdivide 的九步真实事件回放在相同版本中验证 `cuts/smooth = 1/0、2/0.5、8/1`，
+拓扑分别为 `26/48/24`、`56/108/54`、`488/972/486`，并证明 object/Mesh pointer 与 datablock 数量不变；
+完整过程需要四次 Undo 才严格回到 factory baseline，四次 Redo 才回到相同参数化 geometry hash。这正是原生
+in-place mutation 与 managed copy/swap 不等价的证据。Subdivision Surface 的四步轨迹在两个版本分别验证
 level 1/2/3，得到 `26/48/24`、`98/192/96`、`386/768/384` vertices/edges/polygons；render level
 始终为 2，源 Mesh pointer 与 datablock 数量不变。该 UI 默认 modifier 不等价于 managed identity、
 receipt、Observation 与补偿事务。Edit Mode Bevel 的十步轨迹在两个版本均验证 `width=0.2`、
@@ -174,7 +180,8 @@ Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/U
 材质、骨骼、显式蒙皮权重、动画和渲染等二十条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
 菜单项；Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 提供 candidate shortcut，
-其菜单仍 unavailable；其中只有 Subdivision Surface 的 `1.39.0` 精确轨迹另有受审批的 proof executor。
+其菜单仍 unavailable；其中 Subdivision Surface 的 `1.39.0` 四步轨迹和 Subdivide 的 `1.44.0` 九步
+factory-Cube 轨迹各有独立、受审批的 proof executor。
 未来只有新的版本专用 recipe
 通过真实宿主测试后，才能升级为 `native_path`。见
 [ADR 0024](../adr/0024-versioned-interaction-catalog.md) 与
@@ -184,10 +191,11 @@ Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/U
 [ADR 0029](../adr/0029-bounded-edit-modifier-geometry-nodes.md) 与
 [ADR 0037](../adr/0037-bounded-solidify-modifier.md) 与
 [ADR 0038](../adr/0038-bounded-edit-triangulate.md) 与
-[ADR 0094](../adr/0094-native-subdivision-shortcut-proof.md)。
+[ADR 0094](../adr/0094-native-subdivision-shortcut-proof.md) 与
+[ADR 0107](../adr/0107-native-edit-subdivide-shortcut-proof.md)。
 
-通用 Procedure replay 切片不驱动上述菜单或 candidate shortcut；ADR 0094 的 Subdivision Surface
-`native_shortcut_proof` 是独立、显式审批且仅限 factory Cube 的例外。Orchestrator 重新验证并物化单一 UV Sphere、
+通用 Procedure replay 切片不驱动上述菜单或 candidate shortcut；ADR 0094 的 Subdivision Surface 与
+ADR 0107 的 Edit Mode Subdivide `native_shortcut_proof` 是独立、显式审批且仅限各自 factory Cube profile 的例外。Orchestrator 重新验证并物化单一 UV Sphere、
 Icosphere、Cube、Plane、Torus、Cone、Cylinder、Solidify 或 Mirror leaf 后，只向目标实例投递普通待审
 GuideProposal；用户 Accept 后可由 Blender 的既有受管 Session action 执行；只有精确目录声明 MCP available 的
 accepted、已 Start、未触碰 next step 才能改走通用 action-level executor。该公开请求只携带 replay/request

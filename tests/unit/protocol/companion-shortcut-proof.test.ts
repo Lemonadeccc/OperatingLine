@@ -24,9 +24,12 @@ import {
   companionShortcutProofTerminalReconciliationDeliverySchema,
   computeCompanionShortcutProofResultContentSha256,
   computeCompanionShortcutProofTerminalMarkerContentSha256,
+  computeProcedureShortcutProofAttestationContentSha256,
   computeProcedureShortcutProofBindingContentSha256,
   computeProcedureShortcutProofNativeObservationContentSha256,
   computeProcedureShortcutProofOperationReceiptContentSha256,
+  computeProcedureShortcutProofStrongObservationContentSha256,
+  procedureShortcutProofOperationReceiptSchema,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
 
@@ -272,6 +275,135 @@ function receiptPrefix() {
   });
 }
 
+function successfulResult(operationReceipts = receiptPrefix()) {
+  const strongObservationContent = {
+    kind: 'subdivision_surface_shortcut_ready',
+    satisfied: true,
+    observationId: 'abababab-abab-4bab-8bab-abababababab',
+    observedAt: '2026-08-20T10:00:05.000+08:00',
+    targetId: 'tutorial.cube',
+    modifierType: 'SUBSURF',
+    modifierCount: 1,
+    viewportLevel: 2,
+    subdivisionType: 'CATMULL_CLARK',
+    renderLevels: 2,
+    quality: 3,
+    modifierStackMatches: true,
+    evaluatedTopologyWithinBounds: true,
+    sceneFingerprintSha256: '9'.repeat(64),
+  } as const;
+  const strongObservation = {
+    ...strongObservationContent,
+    contentSha256:
+      computeProcedureShortcutProofStrongObservationContentSha256(strongObservationContent),
+  } as const;
+  const attestationContent = {
+    formatVersion: '1.0.0',
+    attestationId: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd',
+    deliveryId: ids.deliveryId,
+    binding: binding(),
+    bindingContentSha256: binding().integrity.contentSha256,
+    managedActionResult: 'not_executed',
+    managedIdentityVerified: false,
+    executor: {
+      executorId: 'blender.subdivision_surface_f9.event_simulate.v1',
+      executionBoundary: 'blender_window_event_simulate',
+      transport: 'event_simulate',
+      osHidInput: false,
+    },
+    operationReceipts,
+    strongObservation,
+    nativeUndoCheckpoint: {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_shortcut_proof_native_undo_checkpoint',
+      checkpointId: 'dededede-dede-4ede-8ede-dededededede',
+      proofId: ids.proofId,
+      replayId: ids.replayId,
+      previousCheckpointId: null,
+      operation: 'shortcut_proof',
+      undoLockId: 'efefefef-efef-4fef-8fef-efefefefefef',
+      targetId: 'tutorial.cube',
+      marker: { key: '_operating_line_shortcut_proof_history_v1', matched: true },
+      journal: {
+        entryPresent: true,
+        baselineSnapshotPresent: true,
+        finalSnapshotPresent: true,
+        undoRedoRoundTripVerified: true,
+        mutationLeaseHeld: true,
+      },
+      baselineState: {
+        targetId: 'tutorial.cube',
+        modifierCount: 0,
+        activeObjectMode: 'OBJECT',
+        selectedObjectCount: 1,
+      },
+      finalState: {
+        targetId: 'tutorial.cube',
+        modifierType: 'SUBSURF',
+        modifierCount: 1,
+        viewportLevel: 2,
+      },
+      baselineSceneFingerprintSha256: '8'.repeat(64),
+      finalSceneFingerprintSha256: '9'.repeat(64),
+      receiptChainRootSha256: operationReceipts[0]!.contentSha256,
+      receiptChainHeadSha256: operationReceipts.at(-1)!.contentSha256,
+      strongObservationContentSha256: strongObservation.contentSha256,
+      committedAt: '2026-08-20T10:00:06.000+08:00',
+    },
+    attestedAt: '2026-08-20T10:00:07.000+08:00',
+  } as const;
+  const attestation = {
+    ...attestationContent,
+    integrity: {
+      algorithm: 'sha256',
+      canonicalization: 'operatingline-json-value-v1',
+      contentSha256: computeProcedureShortcutProofAttestationContentSha256(attestationContent),
+    },
+  } as const;
+  return {
+    ...delivery(),
+    status: 'succeeded',
+    managedActionResult: 'not_executed',
+    managedIdentityVerified: false,
+    requiresUndoToUnlock: true,
+    terminalEvidence: { kind: 'succeeded_locked', attestation },
+    error: null,
+    occurredAt: '2026-08-20T10:00:08.000+08:00',
+  } as const;
+}
+
+function crossProfileReceiptResult() {
+  const receipts = receiptPrefix();
+  const legacyF9Receipt = receipts[1]!;
+  const { contentSha256: _legacyF9Hash, ...legacyF9Content } = legacyF9Receipt;
+  void _legacyF9Hash;
+  const editF9Content = {
+    ...legacyF9Content,
+    context: { ...legacyF9Content.context, mode: 'EDIT_MESH' },
+    sourceOperationId: 'shortcut.execute_subdivide',
+    sourceOperatorId: 'mesh.subdivide',
+  } as const;
+  const editF9Receipt = {
+    ...editF9Content,
+    contentSha256: computeProcedureShortcutProofOperationReceiptContentSha256(editF9Content),
+  } as const;
+  const rehashAfter = (receipt: (typeof receipts)[number], previousHash: string) => {
+    const { contentSha256: _oldHash, ...content } = receipt;
+    void _oldHash;
+    const linkedContent = { ...content, previousReceiptContentSha256: previousHash };
+    return {
+      ...linkedContent,
+      contentSha256: computeProcedureShortcutProofOperationReceiptContentSha256(linkedContent),
+    };
+  };
+  const thirdReceipt = rehashAfter(receipts[2]!, editF9Receipt.contentSha256);
+  const fourthReceipt = rehashAfter(receipts[3]!, thirdReceipt.contentSha256);
+  return {
+    result: successfulResult([receipts[0]!, editF9Receipt, thirdReceipt, fourthReceipt]),
+    editF9Receipt,
+  };
+}
+
 function failedCheckpointResult(prefixLength: 0 | 1 | 2 | 3 | 4) {
   const prefix = receiptPrefix().slice(0, prefixLength);
   const last = prefix.at(-1);
@@ -464,7 +596,34 @@ describe('companion shortcut proof protocol', () => {
         `https://operatingline.dev/schema/v1/${filename.replace('.schema.json', '.json')}`,
       );
       if (filename !== 'companion-shortcut-proof-recovery-request.schema.json') {
-        expect(schema['additionalProperties']).toBe(false);
+        const rootIsStrict = schema['additionalProperties'] === false;
+        const alternatives = Array.isArray(schema['oneOf'])
+          ? schema['oneOf']
+          : Array.isArray(schema['anyOf'])
+            ? schema['anyOf']
+            : [];
+        const definitions =
+          typeof schema['definitions'] === 'object' && schema['definitions'] !== null
+            ? (schema['definitions'] as Record<string, unknown>)
+            : {};
+        const resolveRootAlternative = (alternative: unknown): unknown => {
+          if (typeof alternative !== 'object' || alternative === null) return alternative;
+          const reference = (alternative as Record<string, unknown>)['$ref'];
+          const prefix = '#/definitions/';
+          if (typeof reference !== 'string' || !reference.startsWith(prefix)) return alternative;
+          return definitions[reference.slice(prefix.length)];
+        };
+        const alternativesAreStrict =
+          alternatives.length > 0 &&
+          alternatives.every((alternative) => {
+            const resolved = resolveRootAlternative(alternative);
+            return (
+              typeof resolved === 'object' &&
+              resolved !== null &&
+              (resolved as Record<string, unknown>)['additionalProperties'] === false
+            );
+          });
+        expect(rootIsStrict || alternativesAreStrict).toBe(true);
       }
       await validatePublicJsonSchemaCases(schema, [{ value: {}, accepted: false }]);
     }
@@ -860,6 +1019,21 @@ describe('companion shortcut proof protocol', () => {
         result: { ...rejected, requestId: ids.replayId },
       }).success,
     ).toBe(false);
+  });
+
+  it('accepts the exact legacy Subdivision Surface success receipt tuple', () => {
+    const result = successfulResult();
+
+    expect(companionShortcutProofResultSchema.parse(result)).toEqual(result);
+  });
+
+  it('rejects an Edit Mode Subdivide F9 receipt injected into the legacy success tuple', () => {
+    const { result, editF9Receipt } = crossProfileReceiptResult();
+
+    expect(procedureShortcutProofOperationReceiptSchema.parse(editF9Receipt)).toEqual(
+      editF9Receipt,
+    );
+    expect(companionShortcutProofResultSchema.safeParse(result).success).toBe(false);
   });
 
   it('accepts failure checkpoints with empty and canonical one-to-four operation prefixes', () => {

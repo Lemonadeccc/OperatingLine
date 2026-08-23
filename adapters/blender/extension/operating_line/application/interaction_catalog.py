@@ -191,9 +191,13 @@ class ShortcutProofExecutionDefinition:
     authorization: str
     transport: str
     host_versions: tuple[str, str]
-    operation_ids: tuple[str, str, str, str]
+    operation_ids: tuple[str, ...]
     strong_observation_kind: str
     native_undo_checkpoint_required: bool
+    managed_replacement_mesh_created: bool | None = None
+    native_mutation_kind: str | None = None
+    native_undo_depth: int | None = None
+    native_redo_depth: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1593,13 +1597,26 @@ def _parse_shortcut_materialization(
         raise ValueError(f"{label} has unsupported parameterBinding")
     if raw["projection"] != "candidate_only":
         raise ValueError(f"{label} projection must be candidate_only")
+    preconditions = _parse_shortcut_preconditions(raw["preconditions"], recipe_id)
     proof_execution = None
     if "proofExecution" in raw:
-        if recipe_id != "blender.modifier.add_subdivision_surface.semantic":
-            raise ValueError(
-                f"{label} proofExecution is restricted to Subdivision Surface"
-            )
         proof = _expect_object(raw["proofExecution"], f"{label} proofExecution")
+        executor_id = _expect_string(
+            proof.get("executorId"), f"{label} proofExecution executorId"
+        )
+        subdivide_executor_id = (
+            "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+        )
+        profile_specific_keys = (
+            {
+                "managedReplacementMeshCreated",
+                "nativeMutationKind",
+                "nativeUndoDepth",
+                "nativeRedoDepth",
+            }
+            if executor_id == subdivide_executor_id
+            else set()
+        )
         _expect_exact_keys(
             proof,
             required={
@@ -1607,36 +1624,118 @@ def _parse_shortcut_materialization(
                 "managedActionExecuted", "managedReceiptCreated", "authorization",
                 "transport", "hostVersions", "operationIds",
                 "strongObservationKind", "nativeUndoCheckpointRequired",
-            },
+            } | profile_specific_keys,
             label=f"{label} proofExecution",
         )
+        proof_profiles = {
+            "blender.subdivision_surface_f9.event_simulate.v1": {
+                "recipeId": "blender.modifier.add_subdivision_surface.semantic",
+                "targetProfile": "factory_cube_8_12_6",
+                "strongObservationKind": "subdivision_surface_shortcut_ready",
+                "operationIds": (
+                    "shortcut.add_subdivision_surface_level_one",
+                    "shortcut.open_adjust_last_operation",
+                    "shortcut.set_viewport_level",
+                    "shortcut.close_adjust_last_operation",
+                ),
+            },
+            "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1": {
+                "recipeId": "blender.mesh.edit_subdivide.semantic",
+                "targetProfile": "factory_cube_single_user_mesh_8_12_6",
+                "strongObservationKind": "mesh_edit_subdivide_shortcut_ready",
+                "operationIds": (
+                    "shortcut.enter_edit_mode",
+                    "shortcut.select_all_mesh_elements",
+                    "shortcut.search_subdivide",
+                    "shortcut.execute_subdivide",
+                    "shortcut.open_adjust_last_operation",
+                    "shortcut.set_number_of_cuts",
+                    "shortcut.set_smoothness",
+                    "shortcut.close_adjust_last_operation",
+                    "shortcut.return_to_object_mode",
+                ),
+            },
+        }
+        profile = proof_profiles.get(executor_id)
+        if profile is None:
+            raise ValueError(f"{label} proofExecution has unsupported executorId")
+        if recipe_id != profile["recipeId"]:
+            restricted_recipe = (
+                "Subdivision Surface"
+                if executor_id
+                == "blender.subdivision_surface_f9.event_simulate.v1"
+                else "blender.mesh.edit_subdivide"
+            )
+            raise ValueError(
+                f"{label} proofExecution is restricted to {restricted_recipe}"
+            )
         expected_scalar = {
-            "executorId": "blender.subdivision_surface_f9.event_simulate.v1",
-            "targetProfile": "factory_cube_8_12_6",
+            "executorId": executor_id,
+            "targetProfile": profile["targetProfile"],
             "executionBoundary": "blender_window_event_simulate",
             "osHidInput": False,
             "managedActionExecuted": False,
             "managedReceiptCreated": False,
             "authorization": "accepted_replay_next_step",
             "transport": "event_simulate",
-            "strongObservationKind": "subdivision_surface_shortcut_ready",
+            "strongObservationKind": profile["strongObservationKind"],
             "nativeUndoCheckpointRequired": True,
         }
+        if executor_id == subdivide_executor_id:
+            expected_scalar.update(
+                {
+                    "managedReplacementMeshCreated": False,
+                    "nativeMutationKind": "in_place_edit_mesh_subdivide",
+                    "nativeUndoDepth": 4,
+                    "nativeRedoDepth": 4,
+                }
+            )
         for key, expected_value in expected_scalar.items():
             if type(proof[key]) is not type(expected_value) or proof[key] != expected_value:
                 raise ValueError(f"{label} proofExecution has unsupported {key}")
         host_versions = tuple(proof["hostVersions"]) if isinstance(proof["hostVersions"], list) else ()
         operation_ids = tuple(proof["operationIds"]) if isinstance(proof["operationIds"], list) else ()
-        expected_operation_ids = (
-            "shortcut.add_subdivision_surface_level_one",
-            "shortcut.open_adjust_last_operation",
-            "shortcut.set_viewport_level",
-            "shortcut.close_adjust_last_operation",
-        )
+        expected_operation_ids = profile["operationIds"]
         if host_versions != ("4.5.3", "5.1.1"):
             raise ValueError(f"{label} proofExecution has unsupported hostVersions")
         if operation_ids != expected_operation_ids:
             raise ValueError(f"{label} proofExecution must bind exact operationIds")
+        if executor_id == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            expected_preconditions = (
+                ("workspace", "Workspace", "Layout"),
+                ("editor", "Editor", "VIEW_3D"),
+                ("mode", "Mode", "OBJECT"),
+                (
+                    "selection",
+                    "Active Target",
+                    "Exactly the factory Cube is active and selected",
+                ),
+                ("keymap", "Keymap", "Blender"),
+                ("modal_state", "Modal UI", "None"),
+                ("scene_state", "Object Identity", "Cube"),
+                (
+                    "scene_state",
+                    "Initial Topology",
+                    "8 vertices, 12 edges, 6 polygons",
+                ),
+                (
+                    "scene_state",
+                    "Mesh Elements",
+                    "All target mesh elements are visible",
+                ),
+                ("scene_state", "Mesh Data Users", "1"),
+                ("scene_state", "Scene Mesh Datablocks", "1"),
+                ("scene_state", "Modifiers", "None"),
+                ("scene_state", "Shape Keys", "None"),
+                ("scene_state", "UI Language", "English"),
+            )
+            actual_preconditions = tuple(
+                (item.kind, item.label, item.value) for item in preconditions
+            )
+            if actual_preconditions != expected_preconditions:
+                raise ValueError(
+                    f"{label} proofExecution requires exact factory Cube preconditions"
+                )
         proof_execution = ShortcutProofExecutionDefinition(
             executor_id=expected_scalar["executorId"],
             target_profile=expected_scalar["targetProfile"],
@@ -1650,6 +1749,12 @@ def _parse_shortcut_materialization(
             operation_ids=expected_operation_ids,
             strong_observation_kind=expected_scalar["strongObservationKind"],
             native_undo_checkpoint_required=True,
+            managed_replacement_mesh_created=expected_scalar.get(
+                "managedReplacementMeshCreated"
+            ),
+            native_mutation_kind=expected_scalar.get("nativeMutationKind"),
+            native_undo_depth=expected_scalar.get("nativeUndoDepth"),
+            native_redo_depth=expected_scalar.get("nativeRedoDepth"),
         )
     operations = _parse_shortcut_operations(raw["operations"], recipe_id, guidance)
     if proof_execution is not None and tuple(operation.id for operation in operations) != proof_execution.operation_ids:
@@ -1660,7 +1765,7 @@ def _parse_shortcut_materialization(
         semantic_binding="all_leaf_operations",
         parameter_binding="ordered_parameter_operations",
         projection="candidate_only",
-        preconditions=_parse_shortcut_preconditions(raw["preconditions"], recipe_id),
+        preconditions=preconditions,
         shortcut_operations=operations,
         omitted_action_arguments=_parse_omitted_action_arguments(
             raw["omittedActionArguments"], recipe_id

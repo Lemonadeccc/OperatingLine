@@ -9,6 +9,7 @@ import {
   computeProcedureShortcutProofNativeObservationContentSha256,
   computeProcedureShortcutProofOperationReceiptContentSha256,
   computeProcedureShortcutProofStrongObservationContentSha256,
+  meshEditSubdivideShortcutProofOperationIds,
   procedureShortcutProofBindingSchema,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
@@ -154,6 +155,84 @@ function queuedProof(overrides: Record<string, unknown> = {}) {
   } as const;
 }
 
+function queuedEditSubdivideProof() {
+  const base = queuedProof();
+  const bindingContent = {
+    formatVersion: '1.0.0',
+    bindingId: randomUUID(),
+    proofId: base.proofId,
+    requestId: base.requestId,
+    replayId: base.replayId,
+    target: base.target,
+    proposalId: base.proposalId,
+    plan: base.plan,
+    executionId: base.executionId,
+    leafId: 'tutorial.mesh.edit_subdivide',
+    recipeId: 'blender.mesh.edit_subdivide.semantic',
+    actionName: 'blender.mesh.edit_subdivide',
+    acceptedAction: {
+      adapterId: 'blender',
+      name: 'blender.mesh.edit_subdivide',
+      arguments: {
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.subdivided_mesh',
+        resultMeshName: 'OperatingLine.Cube.Subdivided',
+        cuts: 2,
+        smooth: 0.25,
+      },
+    },
+    targetProfile: 'factory_cube_single_user_mesh_8_12_6',
+    acceptedDecision: base.binding.acceptedDecision,
+    proofScope: {
+      managedActionResult: 'not_executed',
+      managedIdentityVerified: false,
+      managedReceiptCreated: false,
+      managedReplacementMeshCreated: false,
+      nativeMutationKind: 'in_place_edit_mesh_subdivide',
+      omittedAcceptedArguments: ['targetId', 'resultMeshId', 'resultMeshName'],
+    },
+    proposalRecordContentSha256: base.binding.proposalRecordContentSha256,
+    materialization: {
+      actionCatalogVersion: '1.22.0',
+      interactionCatalogVersion: '1.44.0',
+      interactionCatalogContentSha256: '6'.repeat(64),
+      shortcutTrackContentSha256: '7'.repeat(64),
+    },
+    executorId: 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1',
+    executionBoundary: 'blender_window_event_simulate',
+    authorization: 'accepted_replay_next_step',
+    transport: 'event_simulate',
+    operationIds: meshEditSubdivideShortcutProofOperationIds,
+    nativeUndoDepth: 4,
+    nativeRedoDepth: 4,
+    startState: base.binding.startState,
+    createdAt: base.binding.createdAt,
+  } as const;
+  const binding = {
+    ...bindingContent,
+    integrity: {
+      algorithm: 'sha256',
+      canonicalization: 'operatingline-json-value-v1',
+      contentSha256: computeProcedureShortcutProofBindingContentSha256(bindingContent),
+    },
+  } as const;
+  bindings.set(base.requestId, binding);
+  return {
+    ...base,
+    targetProfile: binding.targetProfile,
+    leafId: binding.leafId,
+    interactionCatalogVersion: binding.materialization.interactionCatalogVersion,
+    interactionCatalogContentSha256: binding.materialization.interactionCatalogContentSha256,
+    shortcutTrackContentSha256: binding.materialization.shortcutTrackContentSha256,
+    bindingContentSha256: binding.integrity.contentSha256,
+    binding,
+    executorId: binding.executorId,
+    operationIds: meshEditSubdivideShortcutProofOperationIds,
+    nativeUndoDepth: 4,
+    nativeRedoDepth: 4,
+  } as const;
+}
+
 function progressFor(
   delivery: NonNullable<
     ReturnType<ReturnType<typeof createBlenderShortcutProofExecutionCoordinator>['poll']>
@@ -163,9 +242,9 @@ function progressFor(
   return {
     ...delivery,
     status: 'in_progress',
-    completedOperationIds: operationIds.slice(0, count),
+    completedOperationIds: delivery.operationIds.slice(0, count),
     receiptChainHeadSha256: count.toString(16).repeat(64),
-    occurredAt: `2026-08-20T10:00:0${count + 1}Z`,
+    occurredAt: `2026-08-20T10:00:${String(count + 1).padStart(2, '0')}Z`,
   } as const;
 }
 
@@ -361,6 +440,258 @@ function successfulResult(
   } as const;
 }
 
+function successfulEditSubdivideResult(
+  delivery: NonNullable<
+    ReturnType<ReturnType<typeof createBlenderShortcutProofExecutionCoordinator>['poll']>
+  >,
+) {
+  const binding = procedureShortcutProofBindingSchema.parse(bindings.get(delivery.requestId));
+  const point = (role: 'viewport_center' | 'number_cuts_control' | 'smoothness_control') => ({
+    x: 400,
+    y: 300,
+    role,
+  });
+  const event = (
+    type: string,
+    value: 'PRESS' | 'RELEASE' | 'NOTHING' = 'PRESS',
+    role: 'viewport_center' | 'number_cuts_control' | 'smoothness_control' = 'viewport_center',
+    ctrl = false,
+    unicode?: string,
+  ) => ({
+    type,
+    value,
+    ctrl,
+    shift: false,
+    point: point(role),
+    ...(unicode === undefined ? {} : { unicode }),
+  });
+  let previousReceiptContentSha256: string | null = null;
+  const operationReceipts = meshEditSubdivideShortcutProofOperationIds.map((operationId, index) => {
+    const common = {
+      receiptId: randomUUID(),
+      proofId: delivery.proofId,
+      requestId: delivery.requestId,
+      deliveryId: delivery.deliveryId,
+      bindingContentSha256: delivery.bindingContentSha256,
+      operationId,
+      order: index + 1,
+      previousReceiptContentSha256,
+      outcome: 'succeeded' as const,
+      occurredAt: `2026-08-20T10:00:${String(index + 2).padStart(2, '0')}Z`,
+    };
+    const context = {
+      windowId: 'window-1',
+      areaType: 'VIEW_3D' as const,
+      regionType: 'WINDOW' as const,
+      mode: (index === 0 ? 'OBJECT' : 'EDIT_MESH') as 'OBJECT' | 'EDIT_MESH',
+    };
+    const stack = {
+      operatorStackBeforeSha256: `${(index + 1).toString(16)}`.repeat(64),
+      operatorStackAfterSha256: `${(index + 2).toString(16)}`.repeat(64),
+    };
+    let content: Record<string, unknown>;
+    if (index === 5 || index === 6) {
+      const numberCuts = index === 5;
+      const role = numberCuts ? 'number_cuts_control' : 'smoothness_control';
+      const enteredText = numberCuts ? '2' : '0.25';
+      const eventType = (character: string) =>
+        ({ '0': 'ZERO', '2': 'TWO', '5': 'FIVE', '.': 'PERIOD' })[character]!;
+      content = {
+        ...common,
+        kind: 'operator_property_update',
+        context,
+        surfaceOperationId: meshEditSubdivideShortcutProofOperationIds[4],
+        surfaceOperatorId: 'mesh.subdivide',
+        controlId: numberCuts ? 'mesh.subdivide.number_cuts' : 'mesh.subdivide.smoothness',
+        newValue: numberCuts ? 2 : 0.25,
+        enteredText,
+        activationEventEvidence: [
+          event('MOUSEMOVE', 'NOTHING', role),
+          event('LEFTMOUSE', 'PRESS', role),
+          event('LEFTMOUSE', 'RELEASE', role),
+          event('LEFTMOUSE', 'PRESS', role),
+          event('LEFTMOUSE', 'RELEASE', role),
+        ],
+        selectAllEventEvidence: [event('A', 'PRESS', 'viewport_center', true)],
+        textEventEvidence: [...enteredText].map((character) =>
+          event(eventType(character), 'PRESS', 'viewport_center', false, character),
+        ),
+        confirmEventEvidence: [event('RET'), event('RET', 'RELEASE')],
+      };
+    } else {
+      const key = ['TAB', 'A', 'F3', 'RET', 'F9', '', '', 'RET', 'TAB'][index]!;
+      content = {
+        ...common,
+        kind: 'key_input',
+        context,
+        eventEvidence: [event(key), event(key, 'RELEASE')],
+        ...stack,
+        ...(index === 0 ? { modeBefore: 'OBJECT', modeAfter: 'EDIT_MESH' } : {}),
+        ...(index === 1 ? { allVisibleMeshElementsSelected: true } : {}),
+        ...(index === 2
+          ? {
+              query: 'subdivide',
+              selectedOperatorId: 'mesh.subdivide',
+              queryEventEvidence: [...'subdivide'].map((character) =>
+                event(character.toUpperCase(), 'PRESS', 'viewport_center', false, character),
+              ),
+            }
+          : {}),
+        ...(index === 3 ? { executedOperatorId: 'mesh.subdivide' } : {}),
+        ...(index === 4
+          ? {
+              sourceOperationId: meshEditSubdivideShortcutProofOperationIds[3],
+              sourceOperatorId: 'mesh.subdivide',
+            }
+          : {}),
+        ...(index === 7
+          ? { surfaceOperationId: meshEditSubdivideShortcutProofOperationIds[4] }
+          : {}),
+        ...(index === 8 ? { modeBefore: 'EDIT_MESH', modeAfter: 'OBJECT' } : {}),
+      };
+    }
+    const receipt = {
+      ...content,
+      contentSha256: computeProcedureShortcutProofOperationReceiptContentSha256(content),
+    };
+    previousReceiptContentSha256 = receipt.contentSha256;
+    return receipt;
+  });
+  const strongObservationContent = {
+    kind: 'mesh_edit_subdivide_shortcut_ready',
+    satisfied: true,
+    observationId: randomUUID(),
+    observedAt: '2026-08-20T10:00:12Z',
+    targetId: 'tutorial.cube',
+    objectName: 'Cube',
+    objectPointer: 1001,
+    meshName: 'Cube',
+    meshPointer: 2001,
+    meshUsers: 1,
+    meshDatablockCount: 1,
+    sameObjectIdentity: true,
+    sameMeshIdentity: true,
+    managedReplacementMeshCreated: false,
+    modifierCount: 0,
+    shapeKeyCount: 0,
+    activeObjectMode: 'OBJECT',
+    selectedObjectCount: 1,
+    operatorId: 'MESH_OT_subdivide',
+    cuts: 2,
+    smooth: 0.25,
+    topology: { vertices: 56, edges: 108, polygons: 54 },
+    topologySha256: '6'.repeat(64),
+    geometrySha256: '7'.repeat(64),
+    sceneFingerprintSha256: '8'.repeat(64),
+  } as const;
+  const strongObservation = {
+    ...strongObservationContent,
+    contentSha256:
+      computeProcedureShortcutProofStrongObservationContentSha256(strongObservationContent),
+  } as const;
+  const attestationContent = {
+    formatVersion: '1.0.0',
+    attestationId: randomUUID(),
+    deliveryId: delivery.deliveryId,
+    binding,
+    bindingContentSha256: delivery.bindingContentSha256,
+    managedActionResult: 'not_executed',
+    managedIdentityVerified: false,
+    managedReceiptCreated: false,
+    managedReplacementMeshCreated: false,
+    nativeMutationKind: 'in_place_edit_mesh_subdivide',
+    executor: {
+      executorId: delivery.executorId,
+      executionBoundary: delivery.executionBoundary,
+      transport: delivery.transport,
+      osHidInput: false,
+    },
+    operationReceipts,
+    strongObservation,
+    nativeUndoCheckpoint: {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_shortcut_proof_native_undo_checkpoint',
+      checkpointId: randomUUID(),
+      proofId: delivery.proofId,
+      replayId: delivery.replayId,
+      previousCheckpointId: null,
+      operation: 'shortcut_proof',
+      undoLockId: randomUUID(),
+      targetId: 'tutorial.cube',
+      executorId: delivery.executorId,
+      nativeMutationKind: 'in_place_edit_mesh_subdivide',
+      nativeUndoDepth: 4,
+      nativeRedoDepth: 4,
+      marker: { key: '_operating_line_shortcut_proof_history_v2', matched: true },
+      journal: {
+        entryPresent: true,
+        baselineSnapshotPresent: true,
+        finalSnapshotPresent: true,
+        undoRedoRoundTripVerified: true,
+        mutationLeaseHeld: true,
+      },
+      baselineState: {
+        targetId: 'tutorial.cube',
+        objectName: 'Cube',
+        objectPointer: 1001,
+        meshPointer: 2001,
+        meshUsers: 1,
+        meshDatablockCount: 1,
+        modifierCount: 0,
+        shapeKeyCount: 0,
+        activeObjectMode: 'OBJECT',
+        selectedObjectCount: 1,
+        topologySha256: '9'.repeat(64),
+        geometrySha256: 'a'.repeat(64),
+      },
+      finalState: {
+        targetId: 'tutorial.cube',
+        objectName: 'Cube',
+        objectPointer: 1001,
+        meshPointer: 2001,
+        meshUsers: 1,
+        meshDatablockCount: 1,
+        modifierCount: 0,
+        shapeKeyCount: 0,
+        activeObjectMode: 'OBJECT',
+        selectedObjectCount: 1,
+        cuts: 2,
+        smooth: 0.25,
+        topologySha256: '6'.repeat(64),
+        geometrySha256: '7'.repeat(64),
+      },
+      baselineSceneFingerprintSha256: 'b'.repeat(64),
+      finalSceneFingerprintSha256: '8'.repeat(64),
+      receiptChainRootSha256: operationReceipts[0]!.contentSha256,
+      receiptChainHeadSha256: operationReceipts.at(-1)!.contentSha256,
+      strongObservationContentSha256: strongObservation.contentSha256,
+      committedAt: '2026-08-20T10:00:13Z',
+    },
+    attestedAt: '2026-08-20T10:00:14Z',
+  } as const;
+  const attestation = {
+    ...attestationContent,
+    integrity: {
+      algorithm: 'sha256',
+      canonicalization: 'operatingline-json-value-v1',
+      contentSha256: computeProcedureShortcutProofAttestationContentSha256(attestationContent),
+    },
+  } as const;
+  return {
+    ...delivery,
+    status: 'succeeded',
+    managedActionResult: 'not_executed',
+    managedIdentityVerified: false,
+    managedReceiptCreated: false,
+    managedReplacementMeshCreated: false,
+    nativeMutationKind: 'in_place_edit_mesh_subdivide',
+    requiresUndoToUnlock: true,
+    terminalEvidence: { kind: 'succeeded_locked', attestation },
+    error: null,
+    occurredAt: '2026-08-20T10:00:15Z',
+  } as const;
+}
+
 function failedResult(
   delivery: NonNullable<
     ReturnType<ReturnType<typeof createBlenderShortcutProofExecutionCoordinator>['poll']>
@@ -459,11 +790,20 @@ function restoredResult(
   },
   occurredAt: string,
 ) {
+  const editSubdivideIdentity =
+    delivery.executorId === 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'
+      ? {
+          managedReceiptCreated: false as const,
+          managedReplacementMeshCreated: false as const,
+          nativeMutationKind: 'in_place_edit_mesh_subdivide' as const,
+        }
+      : {};
   return {
     ...delivery,
     status: 'restored',
     managedActionResult: 'not_executed',
     managedIdentityVerified: false,
+    ...editSubdivideIdentity,
     requiresUndoToUnlock: false,
     terminalEvidence: {
       kind: 'restored',
@@ -492,11 +832,20 @@ function reappliedResult(
   },
   occurredAt: string,
 ) {
+  const editSubdivideIdentity =
+    delivery.executorId === 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'
+      ? {
+          managedReceiptCreated: false as const,
+          managedReplacementMeshCreated: false as const,
+          nativeMutationKind: 'in_place_edit_mesh_subdivide' as const,
+        }
+      : {};
   return {
     ...delivery,
     status: 'reapplied_locked',
     managedActionResult: 'not_executed',
     managedIdentityVerified: false,
+    ...editSubdivideIdentity,
     requiresUndoToUnlock: true,
     terminalEvidence: {
       kind: 'reapplied_locked',
@@ -509,6 +858,60 @@ function reappliedResult(
       reappliedAt: occurredAt,
     },
     error: null,
+    occurredAt,
+  } as const;
+}
+
+function createLockedEditSubdivideHistory() {
+  const database = createEventDatabase();
+  const originalFingerprint = 'a'.repeat(64);
+  const coordinator = createBlenderShortcutProofExecutionCoordinator({
+    database,
+    now: dispatchNow,
+  });
+  const queued = queuedEditSubdivideProof();
+  coordinator.queue(queued, originalFingerprint);
+  const delivery = coordinator.poll('blender', queued.target.instanceId, originalFingerprint)!;
+  const terminal = successfulEditSubdivideResult(delivery);
+  terminal.terminalEvidence.attestation.operationReceipts.forEach((receipt, index) => {
+    coordinator.progress(
+      {
+        ...progressFor(delivery, index + 1),
+        receiptChainHeadSha256: receipt.contentSha256,
+      },
+      originalFingerprint,
+    );
+  });
+  coordinator.complete(terminal, originalFingerprint);
+  return { database, delivery, originalFingerprint, queued, terminal } as const;
+}
+
+function historyRecoveryAck(
+  recovery: NonNullable<
+    ReturnType<
+      ReturnType<typeof createBlenderShortcutProofExecutionCoordinator>['pollHistoryRecovery']
+    >
+  >,
+  occurredAt = '2026-08-20T10:01:01Z',
+) {
+  return {
+    kind: 'native_history_rebind',
+    formatVersion: recovery.formatVersion,
+    requestId: recovery.requestId,
+    replayId: recovery.replayId,
+    proofId: recovery.proofId,
+    deliveryId: recovery.deliveryId,
+    target: recovery.target,
+    bindingContentSha256: recovery.bindingContentSha256,
+    recoveryId: recovery.recoveryId,
+    history: recovery.history,
+    status: recovery.expectedStatus,
+    expectedMarkerContentSha256: recovery.expectedMarkerContentSha256,
+    currentSceneFingerprintSha256:
+      recovery.expectedStatus === 'restored'
+        ? recovery.history.baselineSceneFingerprintSha256
+        : recovery.history.lockedSceneFingerprintSha256,
+    mutationLocked: recovery.expectedStatus !== 'restored',
     occurredAt,
   } as const;
 }
@@ -673,6 +1076,219 @@ describe('Blender shortcut proof execution coordinator', () => {
     });
   });
 
+  it('persists the Edit Subdivide nine-head chain before accepting success', () => {
+    const database = createEventDatabase();
+    const coordinator = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: dispatchNow,
+    });
+    const queued = queuedEditSubdivideProof();
+    const fingerprint = 'a'.repeat(64);
+    coordinator.queue(queued, fingerprint);
+    const delivery = coordinator.poll('blender', queued.target.instanceId, fingerprint)!;
+    const result = successfulEditSubdivideResult(delivery);
+    const receipts = result.terminalEvidence.attestation.operationReceipts;
+    expect(receipts.map((receipt) => receipt.operationId)).toEqual([
+      ...meshEditSubdivideShortcutProofOperationIds,
+    ]);
+    expect(receipts.map((receipt) => receipt.previousReceiptContentSha256)).toEqual([
+      null,
+      ...receipts.slice(0, -1).map((receipt) => receipt.contentSha256),
+    ]);
+
+    receipts.forEach((receipt, index) => {
+      const progress = {
+        ...progressFor(delivery, index + 1),
+        receiptChainHeadSha256: receipt.contentSha256,
+      };
+      expect(coordinator.progress(progress, fingerprint)).toBe('accepted');
+      expect(coordinator.progress(progress, fingerprint)).toBe('duplicate');
+      if (index < receipts.length - 1) {
+        expect(() => coordinator.complete(result, fingerprint)).toThrowError(
+          /requires all 9 progress receipts/,
+        );
+      }
+    });
+
+    expect(coordinator.complete(result, fingerprint)).toBe('accepted');
+    expect(
+      database.events.filter((event) => event.eventType === 'blender.shortcut-proof.progressed'),
+    ).toHaveLength(9);
+    expect(database.events.at(-1)?.payload).toMatchObject({
+      progressReceiptChainHeads: receipts.map((receipt) => receipt.contentSha256),
+      execution: {
+        status: 'succeeded',
+        result: {
+          terminalEvidence: {
+            attestation: {
+              operationReceipts: receipts,
+            },
+          },
+        },
+      },
+    });
+    expect(coordinator.get(queued.requestId)).toMatchObject({
+      status: 'succeeded',
+      result: {
+        terminalEvidence: {
+          attestation: {
+            operationReceipts: receipts,
+          },
+        },
+      },
+    });
+  });
+
+  it('rejects Edit Subdivide skipped, extra, and cross-profile progress', () => {
+    const coordinator = createBlenderShortcutProofExecutionCoordinator({
+      database: createEventDatabase(),
+      now: dispatchNow,
+    });
+    const queued = queuedEditSubdivideProof();
+    const fingerprint = 'b'.repeat(64);
+    coordinator.queue(queued, fingerprint);
+    const delivery = coordinator.poll('blender', queued.target.instanceId, fingerprint)!;
+
+    expect(() => coordinator.progress(progressFor(delivery, 2), fingerprint)).toThrowError(
+      /next operation/,
+    );
+    expect(() =>
+      coordinator.progress(
+        {
+          ...progressFor(delivery, 9),
+          completedOperationIds: [
+            ...delivery.operationIds,
+            meshEditSubdivideShortcutProofOperationIds[8],
+          ],
+        },
+        fingerprint,
+      ),
+    ).toThrowError();
+    expect(() =>
+      coordinator.progress(
+        {
+          ...progressFor(delivery, 1),
+          executorId: 'blender.subdivision_surface_f9.event_simulate.v1',
+        },
+        fingerprint,
+      ),
+    ).toThrowError();
+    expect(() =>
+      coordinator.progress(
+        {
+          ...progressFor(delivery, 1),
+          targetProfile: 'factory_cube_8_12_6',
+        },
+        fingerprint,
+      ),
+    ).toThrowError();
+  });
+
+  it('recovers a generic Edit Subdivide progressed event as recovery_required after restart', () => {
+    const database = createEventDatabase();
+    const queued = queuedEditSubdivideProof();
+    const fingerprint = 'c'.repeat(64);
+    const first = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: dispatchNow,
+    });
+    first.queue(queued, fingerprint);
+    const delivery = first.poll('blender', queued.target.instanceId, fingerprint)!;
+    expect(first.progress(progressFor(delivery, 1), fingerprint)).toBe('accepted');
+    expect(database.events.at(-1)?.eventType).toBe('blender.shortcut-proof.progressed');
+
+    const restarted = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-20T10:01:00Z',
+    });
+    expect(restarted.get(queued.requestId)).toMatchObject({ status: 'recovery_required' });
+    expect(database.events.at(-1)?.eventType).toBe('blender.shortcut-proof.recovery-required');
+    expect(database.events.at(-1)?.payload).toMatchObject({
+      progressReceiptChainHeads: [progressFor(delivery, 1).receiptChainHeadSha256],
+    });
+  });
+
+  it('terminal-reconciles Edit Subdivide only when success extends the acknowledged prefix', () => {
+    const originalFingerprint = 'd'.repeat(64);
+    const replacementFingerprint = 'e'.repeat(64);
+    const database = createEventDatabase();
+    const queued = queuedEditSubdivideProof();
+    const first = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: dispatchNow,
+    });
+    first.queue(queued, originalFingerprint);
+    const delivery = first.poll('blender', queued.target.instanceId, originalFingerprint)!;
+    const result = successfulEditSubdivideResult(delivery);
+    const firstHead = result.terminalEvidence.attestation.operationReceipts[0]!.contentSha256;
+    first.progress(
+      { ...progressFor(delivery, 1), receiptChainHeadSha256: firstHead },
+      originalFingerprint,
+    );
+
+    const restarted = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      createId: randomUUID,
+      now: () => '2026-08-20T10:01:00Z',
+    });
+    const challenge = restarted.pollTerminalReconciliation(
+      'blender',
+      queued.target.instanceId,
+      replacementFingerprint,
+    )!;
+    expect(challenge.acknowledgedProgressReceiptChainHeads).toEqual([firstHead]);
+    const ack = {
+      kind: 'native_terminal_reconcile',
+      recoveryId: challenge.recoveryId,
+      result,
+      expectedMarkerContentSha256: computeCompanionShortcutProofTerminalMarkerContentSha256(result),
+      currentSceneFingerprintSha256: '8'.repeat(64),
+      occurredAt: '2026-08-20T10:01:01Z',
+    } as const;
+    expect(restarted.reconcileTerminal(ack, replacementFingerprint)).toBe('accepted');
+    expect(restarted.get(queued.requestId)).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('rejects an Edit Subdivide terminal chain that does not extend its acknowledged head', () => {
+    const originalFingerprint = 'f'.repeat(64);
+    const replacementFingerprint = '1'.repeat(64);
+    const database = createEventDatabase();
+    const queued = queuedEditSubdivideProof();
+    const coordinator = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      createId: randomUUID,
+      now: dispatchNow,
+    });
+    coordinator.queue(queued, originalFingerprint);
+    const delivery = coordinator.poll('blender', queued.target.instanceId, originalFingerprint)!;
+    coordinator.progress(progressFor(delivery, 1), originalFingerprint);
+    const restarted = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      createId: randomUUID,
+      now: () => '2026-08-20T10:01:00Z',
+    });
+    const challenge = restarted.pollTerminalReconciliation(
+      'blender',
+      queued.target.instanceId,
+      replacementFingerprint,
+    )!;
+    const result = successfulEditSubdivideResult(delivery);
+    expect(() =>
+      restarted.reconcileTerminal(
+        {
+          kind: 'native_terminal_reconcile',
+          recoveryId: challenge.recoveryId,
+          result,
+          expectedMarkerContentSha256:
+            computeCompanionShortcutProofTerminalMarkerContentSha256(result),
+          currentSceneFingerprintSha256: '8'.repeat(64),
+          occurredAt: '2026-08-20T10:01:01Z',
+        },
+        replacementFingerprint,
+      ),
+    ).toThrowError(/exact server-acknowledged prefix/);
+  });
+
   it('keeps success uncommitted when its single authoritative event cannot be stored', () => {
     const backing = createEventDatabase();
     let rejectCompletion = true;
@@ -733,7 +1349,7 @@ describe('Blender shortcut proof execution coordinator', () => {
       /next operation/,
     );
     const result = successfulResult(delivery);
-    expect(() => coordinator.complete(result, fingerprint)).toThrowError(/four progress receipts/);
+    expect(() => coordinator.complete(result, fingerprint)).toThrowError(/all 4 progress receipts/);
     coordinator.progress(
       {
         ...progressFor(delivery, 1),
@@ -1367,6 +1983,172 @@ describe('Blender shortcut proof execution coordinator', () => {
     expect(recovery.expectedMarkerContentSha256).toBe(
       computeCompanionShortcutProofTerminalMarkerContentSha256(terminal),
     );
+  });
+
+  it('rebinds Edit Subdivide v2 history before accepting Undo and Redo transitions', () => {
+    const { database, delivery, queued, terminal } = createLockedEditSubdivideHistory();
+    const replacementFingerprint = 'b'.repeat(64);
+    const restarted = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-20T10:01:00Z',
+    });
+    const recovery = restarted.pollHistoryRecovery(
+      'blender',
+      queued.target.instanceId,
+      replacementFingerprint,
+    )!;
+    expect(recovery).toMatchObject({
+      expectedStatus: 'succeeded',
+      nativeUndoDepth: 4,
+      nativeRedoDepth: 4,
+      history: {
+        checkpointKind: 'success',
+        terminalResultContentSha256: computeCompanionShortcutProofResultContentSha256(terminal),
+      },
+    });
+    expect(restarted.recoverHistory(historyRecoveryAck(recovery), replacementFingerprint)).toBe(
+      'accepted',
+    );
+
+    const checkpoint = terminal.terminalEvidence.attestation.nativeUndoCheckpoint;
+    const restored = restoredResult(delivery, checkpoint, '2026-08-20T10:01:02Z');
+    expect(restarted.complete(restored, replacementFingerprint)).toBe('accepted');
+    expect(restarted.get(queued.requestId)).toMatchObject({ status: 'restored' });
+
+    const reapplied = reappliedResult(delivery, checkpoint, '2026-08-20T10:01:03Z');
+    expect(restarted.complete(reapplied, replacementFingerprint)).toBe('accepted');
+    expect(restarted.get(queued.requestId)).toMatchObject({ status: 'reapplied_locked' });
+  });
+
+  it('rejects a persisted v1 marker downgrade for Edit Subdivide v2 history', () => {
+    const { database } = createLockedEditSubdivideHistory();
+    const completed = database.events.find(
+      (event) => event.eventType === 'blender.shortcut-proof.completed',
+    )!;
+    const payload = completed.payload as {
+      execution: {
+        result: {
+          terminalEvidence: {
+            attestation: { nativeUndoCheckpoint: { marker: { key: string } } };
+          };
+        };
+      };
+    };
+    payload.execution.result.terminalEvidence.attestation.nativeUndoCheckpoint.marker.key =
+      '_operating_line_shortcut_proof_history_v1';
+
+    expect(() => createBlenderShortcutProofExecutionCoordinator({ database })).toThrowError();
+  });
+
+  it('rejects Edit Subdivide history recovery depth values other than 4/4', () => {
+    for (const [field, value] of [
+      ['nativeUndoDepth', 3],
+      ['nativeRedoDepth', 5],
+    ] as const) {
+      const { database, queued } = createLockedEditSubdivideHistory();
+      const recovering = createBlenderShortcutProofExecutionCoordinator({
+        database,
+        now: () => '2026-08-20T10:01:00Z',
+      });
+      recovering.pollHistoryRecovery('blender', queued.target.instanceId, 'c'.repeat(64));
+      const offered = database.events.at(-1)!.payload as {
+        pendingRecovery: Record<string, unknown>;
+      };
+      offered.pendingRecovery[field] = value;
+
+      expect(() => createBlenderShortcutProofExecutionCoordinator({ database })).toThrowError();
+    }
+  });
+
+  it('rejects Edit Subdivide history recovery marker and terminal result hash tampering', () => {
+    const { database, queued } = createLockedEditSubdivideHistory();
+    const replacementFingerprint = 'd'.repeat(64);
+    const recovering = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-20T10:01:00Z',
+    });
+    const recovery = recovering.pollHistoryRecovery(
+      'blender',
+      queued.target.instanceId,
+      replacementFingerprint,
+    )!;
+    const ack = historyRecoveryAck(recovery);
+
+    expect(() =>
+      recovering.recoverHistory(
+        { ...ack, expectedMarkerContentSha256: 'e'.repeat(64) },
+        replacementFingerprint,
+      ),
+    ).toThrowError(/does not match its recovery delivery/);
+    expect(() =>
+      recovering.recoverHistory(
+        {
+          ...ack,
+          history: { ...ack.history, terminalResultContentSha256: 'f'.repeat(64) },
+        },
+        replacementFingerprint,
+      ),
+    ).toThrowError(/does not match its recovery delivery/);
+  });
+
+  it('rejects Edit Subdivide history recovery with the wrong checkpoint or Undo lock', () => {
+    const { database, queued } = createLockedEditSubdivideHistory();
+    const replacementFingerprint = '1'.repeat(64);
+    const recovering = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-20T10:01:00Z',
+    });
+    const recovery = recovering.pollHistoryRecovery(
+      'blender',
+      queued.target.instanceId,
+      replacementFingerprint,
+    )!;
+    const ack = historyRecoveryAck(recovery);
+
+    expect(() =>
+      recovering.recoverHistory(
+        { ...ack, history: { ...ack.history, checkpointId: randomUUID() } },
+        replacementFingerprint,
+      ),
+    ).toThrowError(/does not match its recovery delivery/);
+    expect(() =>
+      recovering.recoverHistory(
+        { ...ack, history: { ...ack.history, undoLockId: randomUUID() } },
+        replacementFingerprint,
+      ),
+    ).toThrowError(/does not match its recovery delivery/);
+  });
+
+  it('rejects a non-alternating Edit Subdivide Undo and Redo recovery suffix', () => {
+    const { database, delivery, queued, terminal } = createLockedEditSubdivideHistory();
+    const replacementFingerprint = '2'.repeat(64);
+    const recovering = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-20T10:01:00Z',
+    });
+    const recovery = recovering.pollHistoryRecovery(
+      'blender',
+      queued.target.instanceId,
+      replacementFingerprint,
+    )!;
+    const checkpoint = terminal.terminalEvidence.attestation.nativeUndoCheckpoint;
+    const firstRestore = restoredResult(delivery, checkpoint, '2026-08-20T10:01:01Z');
+    const duplicateRestore = restoredResult(delivery, checkpoint, '2026-08-20T10:01:02Z');
+
+    expect(() =>
+      recovering.reconcileHistoryTransitions(
+        {
+          kind: 'native_history_transition_reconcile',
+          recoveryId: recovery.recoveryId,
+          results: [firstRestore, duplicateRestore],
+          expectedResultContentSha256: recovery.expectedResultContentSha256,
+          expectedMarkerContentSha256: recovery.expectedMarkerContentSha256,
+          currentSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+          occurredAt: '2026-08-20T10:01:03Z',
+        },
+        replacementFingerprint,
+      ),
+    ).toThrowError(/strictly alternate native Undo and Redo/);
   });
 
   it('rebinds exact locked native history after coordinator and Companion restart', () => {

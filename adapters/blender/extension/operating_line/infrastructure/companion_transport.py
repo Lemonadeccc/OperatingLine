@@ -85,6 +85,18 @@ BLENDER_ADAPTER_CAPABILITIES = {
     },
 }
 MENU_CONTROL_PROOF_EXECUTOR_ID = "blender.uv_sphere_menu_controls.event_simulate.v1"
+EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID = "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS = [
+    "shortcut.enter_edit_mode",
+    "shortcut.select_all_mesh_elements",
+    "shortcut.search_subdivide",
+    "shortcut.execute_subdivide",
+    "shortcut.open_adjust_last_operation",
+    "shortcut.set_number_of_cuts",
+    "shortcut.set_smoothness",
+    "shortcut.close_adjust_last_operation",
+    "shortcut.return_to_object_mode",
+]
 MENU_CONTROL_PROOF_TARGET_PROFILE = "factory_layout_three_object_ui_scale_2"
 MENU_CONTROL_PROOF_OPERATION_IDS = (
     "workspace.layout",
@@ -1466,6 +1478,11 @@ class CompanionTransport:
         ):
             self._validated_required_uuid(binding[field], f"Menu-control proof binding {field}")
         target = binding["target"]
+        if not isinstance(target, dict):
+            raise ValueError("Edit Subdivide binding target must be an object")
+        self._validate_exact_keys(
+            target, {"adapterId", "instanceId"}, "Edit Subdivide binding target"
+        )
         if target != {"adapterId": "blender", "instanceId": self._instance_id}:
             raise ValueError("Menu-control proof binding targets another Companion")
         self._validate_exact_keys(target, {"adapterId", "instanceId"}, "Menu-control proof target")
@@ -2761,7 +2778,114 @@ class CompanionTransport:
         message = {"kind": "menu_control_proof_execute_request", "request": dict(validated)}
         self.incoming.put(message)
 
+    def _validate_edit_subdivide_shortcut_binding(self, binding: Any) -> dict[str, Any]:
+        if not isinstance(binding, dict):
+            raise ValueError("Edit Subdivide shortcut binding must be an object")
+        self._validate_exact_keys(
+            binding,
+            {
+                "formatVersion", "bindingId", "proposalRecordContentSha256", "proofId",
+                "requestId", "replayId", "target", "proposalId", "plan", "executionId",
+                "leafId", "recipeId", "actionName", "acceptedAction", "targetProfile",
+                "acceptedDecision", "proofScope", "materialization", "executorId",
+                "executionBoundary", "authorization", "transport", "operationIds",
+                "nativeUndoDepth", "nativeRedoDepth", "startState", "createdAt", "integrity",
+            },
+            "Edit Subdivide shortcut binding",
+        )
+        if binding["formatVersion"] != "1.0.0":
+            raise ValueError("Edit Subdivide shortcut binding format is unsupported")
+        for field in ("bindingId", "proofId", "requestId", "replayId", "proposalId", "executionId"):
+            self._validated_required_uuid(binding[field], f"Edit Subdivide binding {field}")
+        target = binding["target"]
+        if target != {"adapterId": "blender", "instanceId": self._instance_id}:
+            raise ValueError("Edit Subdivide shortcut binding targets a different Companion")
+        action = binding["acceptedAction"]
+        if not isinstance(action, dict):
+            raise ValueError("Edit Subdivide accepted action must be an object")
+        self._validate_exact_keys(action, {"adapterId", "name", "arguments"}, "Edit Subdivide accepted action")
+        arguments = action.get("arguments")
+        if not isinstance(arguments, dict):
+            raise ValueError("Edit Subdivide accepted arguments must be an object")
+        self._validate_exact_keys(arguments, {"targetId", "resultMeshId", "resultMeshName", "cuts", "smooth"}, "Edit Subdivide accepted arguments")
+        if (
+            action.get("adapterId") != "blender"
+            or action.get("name") != "blender.mesh.edit_subdivide"
+            or binding["recipeId"] != "blender.mesh.edit_subdivide.semantic"
+            or binding["actionName"] != "blender.mesh.edit_subdivide"
+            or arguments["targetId"] != "tutorial.cube"
+            or any(not isinstance(arguments[field], str) or not arguments[field] for field in ("resultMeshId", "resultMeshName"))
+            or isinstance(arguments["cuts"], bool)
+            or not isinstance(arguments["cuts"], int)
+            or not 1 <= arguments["cuts"] <= 8
+            or isinstance(arguments["smooth"], bool)
+            or not isinstance(arguments["smooth"], (int, float))
+            or not 0 <= arguments["smooth"] <= 1
+        ):
+            raise ValueError("Edit Subdivide accepted action is invalid")
+        if binding["targetProfile"] != "factory_cube_single_user_mesh_8_12_6":
+            raise ValueError("Edit Subdivide target profile is unsupported")
+        if binding["proofScope"] != {
+            "managedActionResult": "not_executed",
+            "managedIdentityVerified": False,
+            "managedReceiptCreated": False,
+            "managedReplacementMeshCreated": False,
+            "nativeMutationKind": "in_place_edit_mesh_subdivide",
+            "omittedAcceptedArguments": ["targetId", "resultMeshId", "resultMeshName"],
+        }:
+            raise ValueError("Edit Subdivide proof scope is invalid")
+        if (
+            binding["executorId"] != EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID
+            or binding["executionBoundary"] != "blender_window_event_simulate"
+            or binding["authorization"] != "accepted_replay_next_step"
+            or binding["transport"] != "event_simulate"
+            or binding["operationIds"] != EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS
+            or binding["nativeUndoDepth"] != 4
+            or binding["nativeRedoDepth"] != 4
+        ):
+            raise ValueError("Edit Subdivide executor authority is invalid")
+        decision = binding["acceptedDecision"]
+        if not isinstance(decision, dict):
+            raise ValueError("Edit Subdivide accepted decision must be an object")
+        self._validate_exact_keys(
+            decision,
+            {"decisionId", "proposalId", "instanceId", "adapterId", "decision", "decidedAt"},
+            "Edit Subdivide accepted decision",
+        )
+        if decision.get("proposalId") != binding["proposalId"] or decision.get("instanceId") != self._instance_id or decision.get("adapterId") != "blender" or decision.get("decision") != "accepted":
+            raise ValueError("Edit Subdivide accepted decision is invalid")
+        self._validated_required_uuid(decision.get("decisionId"), "Edit Subdivide decision id")
+        self._validate_expiry(decision.get("decidedAt"), "Edit Subdivide decision time")
+        for nested, keys, label in (
+            (binding["plan"], {"id", "revision", "contentSha256"}, "plan"),
+            (binding["startState"], {"reportId", "sequence"}, "start state"),
+            (binding["materialization"], {"actionCatalogVersion", "interactionCatalogVersion", "interactionCatalogContentSha256", "shortcutTrackContentSha256"}, "materialization"),
+            (binding["integrity"], {"algorithm", "canonicalization", "contentSha256"}, "integrity"),
+        ):
+            if not isinstance(nested, dict):
+                raise ValueError(f"Edit Subdivide binding {label} must be an object")
+            self._validate_exact_keys(nested, keys, f"Edit Subdivide binding {label}")
+        plan = binding["plan"]
+        if not isinstance(plan["id"], str) or not plan["id"] or isinstance(plan["revision"], bool) or not isinstance(plan["revision"], int) or plan["revision"] <= 0 or CONTENT_SHA256_PATTERN.fullmatch(str(plan["contentSha256"])) is None:
+            raise ValueError("Edit Subdivide binding plan is invalid")
+        self._validated_required_uuid(binding["startState"]["reportId"], "Edit Subdivide start report id")
+        if isinstance(binding["startState"]["sequence"], bool) or not isinstance(binding["startState"]["sequence"], int) or binding["startState"]["sequence"] <= 0:
+            raise ValueError("Edit Subdivide start sequence must be positive")
+        for field in ("proposalRecordContentSha256",):
+            if CONTENT_SHA256_PATTERN.fullmatch(str(binding[field])) is None:
+                raise ValueError(f"Edit Subdivide binding {field} is invalid")
+        for field in ("interactionCatalogContentSha256", "shortcutTrackContentSha256"):
+            if CONTENT_SHA256_PATTERN.fullmatch(str(binding["materialization"][field])) is None:
+                raise ValueError(f"Edit Subdivide materialization {field} is invalid")
+        integrity = binding["integrity"]
+        if integrity.get("algorithm") != "sha256" or integrity.get("canonicalization") != "operatingline-json-value-v1" or integrity.get("contentSha256") != self._canonical_sha256({key: value for key, value in binding.items() if key != "integrity"}):
+            raise ValueError("Edit Subdivide binding content hash does not match")
+        self._validate_expiry(binding["createdAt"], "Edit Subdivide binding creation time")
+        return binding
+
     def _validate_shortcut_proof_binding(self, binding: Any) -> dict[str, Any]:
+        if isinstance(binding, dict) and binding.get("executorId") == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID:
+            return self._validate_edit_subdivide_shortcut_binding(binding)
         if not isinstance(binding, dict):
             raise ValueError("Shortcut proof binding must be an object")
         self._validate_exact_keys(
@@ -2880,7 +3004,58 @@ class CompanionTransport:
             raise ValueError("Shortcut proof binding content hash does not match")
         return binding
 
+    def _validate_edit_subdivide_shortcut_identity(self, payload: Any, label: str, *, terminal: bool = False) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError(f"{label} must be an object")
+        base = {
+            "formatVersion", "requestId", "replayId", "proofId", "deliveryId", "target",
+            "targetProfile", "proposalId", "plan", "executionId", "leafId",
+            "interactionCatalogVersion", "interactionCatalogContentSha256",
+            "shortcutTrackContentSha256", "bindingContentSha256", "binding", "executorId",
+            "executionBoundary", "authorization", "transport", "operationIds", "nativeUndoDepth",
+            "nativeRedoDepth", "expectedState", "requestedAt", "dispatchedAt",
+        }
+        extra = (
+            {"status", "managedActionResult", "managedIdentityVerified", "managedReceiptCreated", "managedReplacementMeshCreated", "nativeMutationKind", "requiresUndoToUnlock", "terminalEvidence", "error", "occurredAt"}
+            if terminal
+            else {"status", "completedOperationIds", "receiptChainHeadSha256", "occurredAt"}
+        )
+        self._validate_exact_keys(payload, base | extra, label)
+        binding = self._validate_edit_subdivide_shortcut_binding(payload["binding"])
+        if (
+            payload["formatVersion"] != "1.0.0"
+            or payload["target"] != {"adapterId": "blender", "instanceId": self._instance_id}
+            or payload["targetProfile"] != "factory_cube_single_user_mesh_8_12_6"
+            or payload["executorId"] != EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID
+            or payload["executionBoundary"] != "blender_window_event_simulate"
+            or payload["authorization"] != "accepted_replay_next_step"
+            or payload["transport"] != "event_simulate"
+            or payload["operationIds"] != EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS
+            or payload["nativeUndoDepth"] != 4
+            or payload["nativeRedoDepth"] != 4
+        ):
+            raise ValueError(f"{label} executor identity is invalid")
+        for field in ("requestId", "replayId", "proofId", "deliveryId", "proposalId", "executionId"):
+            self._validated_required_uuid(payload[field], f"{label} {field}")
+        mirror_fields = ("requestId", "replayId", "proofId", "target", "targetProfile", "proposalId", "plan", "executionId", "leafId", "executorId", "executionBoundary", "authorization", "transport", "operationIds", "nativeUndoDepth", "nativeRedoDepth")
+        if any(binding[field] != payload[field] for field in mirror_fields):
+            raise ValueError(f"{label} does not mirror its immutable binding")
+        materialization = binding["materialization"]
+        if (
+            payload["bindingContentSha256"] != binding["integrity"]["contentSha256"]
+            or payload["expectedState"] != binding["startState"]
+            or payload["interactionCatalogVersion"] != materialization["interactionCatalogVersion"]
+            or payload["interactionCatalogContentSha256"] != materialization["interactionCatalogContentSha256"]
+            or payload["shortcutTrackContentSha256"] != materialization["shortcutTrackContentSha256"]
+        ):
+            raise ValueError(f"{label} immutable delivery identity is inconsistent")
+        for field in ("requestedAt", "dispatchedAt", "occurredAt"):
+            self._validate_expiry(payload[field], f"{label} {field}")
+        return payload
+
     def _validate_shortcut_proof_identity(self, payload: Any, label: str, *, terminal: bool = False) -> dict[str, Any]:
+        if isinstance(payload, dict) and payload.get("executorId") == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID:
+            return self._validate_edit_subdivide_shortcut_identity(payload, label, terminal=terminal)
         if not isinstance(payload, dict):
             raise ValueError(f"{label} must be an object")
         identity_keys = {
@@ -3040,9 +3215,14 @@ class CompanionTransport:
             raise ValueError("Shortcut terminal reconciliation kind is unsupported")
         self._validated_required_uuid(delivery["recoveryId"], "Shortcut terminal recovery id")
         heads = delivery["acknowledgedProgressReceiptChainHeads"]
+        maximum_heads = (
+            len(EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS)
+            if delivery.get("executorId") == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID
+            else len(self._shortcut_operation_ids())
+        )
         if (
             not isinstance(heads, list)
-            or len(heads) > len(self._shortcut_operation_ids())
+            or len(heads) > maximum_heads
             or len(set(heads)) != len(heads)
             or any(
                 not isinstance(value, str)
@@ -3246,7 +3426,8 @@ class CompanionTransport:
     def _validate_shortcut_proof_progress(self, progress: Any) -> dict[str, Any]:
         validated = self._validate_shortcut_proof_identity(progress, "Shortcut proof progress")
         completed = validated["completedOperationIds"]
-        if validated["status"] != "in_progress" or not isinstance(completed, list) or not 1 <= len(completed) <= 4 or completed != validated["operationIds"][:len(completed)]:
+        maximum = 9 if validated["executorId"] == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID else 4
+        if validated["status"] != "in_progress" or not isinstance(completed, list) or not 1 <= len(completed) <= maximum or completed != validated["operationIds"][:len(completed)]:
             raise ValueError("Shortcut proof progress must be an exact operation prefix")
         if not isinstance(validated["receiptChainHeadSha256"], str) or CONTENT_SHA256_PATTERN.fullmatch(validated["receiptChainHeadSha256"]) is None:
             raise ValueError("Shortcut proof progress receipt head is invalid")
@@ -3259,6 +3440,8 @@ class CompanionTransport:
         complete: bool,
         identity: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        if identity.get("executorId") == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID:
+            return self._validate_edit_subdivide_receipt_chain(receipts, complete=complete, identity=identity)
         if not isinstance(receipts, list) or len(receipts) > 4 or (complete and len(receipts) != 4):
             raise ValueError("Shortcut proof receipt chain has invalid length")
         previous = None
@@ -3376,6 +3559,111 @@ class CompanionTransport:
             previous = receipt["contentSha256"]
         return receipts
 
+    def _validate_edit_subdivide_receipt_chain(self, receipts: Any, *, complete: bool, identity: dict[str, Any]) -> list[dict[str, Any]]:
+        if not isinstance(receipts, list) or len(receipts) > 9 or (complete and len(receipts) != 9):
+            raise ValueError("Edit Subdivide receipt chain has invalid length")
+        previous = None
+        modes = ("OBJECT", "EDIT_MESH", "EDIT_MESH", "EDIT_MESH", "EDIT_MESH", "EDIT_MESH", "EDIT_MESH", "EDIT_MESH", "EDIT_MESH")
+        key_types = ("TAB", "A", "F3", "RET", "F9", None, None, "RET", "TAB")
+        for index, receipt in enumerate(receipts):
+            if not isinstance(receipt, dict):
+                raise ValueError("Edit Subdivide receipt must be an object")
+            common = {"receiptId", "proofId", "requestId", "deliveryId", "bindingContentSha256", "operationId", "order", "previousReceiptContentSha256", "outcome", "occurredAt", "contentSha256", "kind", "context"}
+            if index in {5, 6}:
+                expected_keys = common | {"surfaceOperationId", "surfaceOperatorId", "controlId", "newValue", "enteredText", "activationEventEvidence", "selectAllEventEvidence", "textEventEvidence", "confirmEventEvidence"}
+            else:
+                extras = ({"modeBefore", "modeAfter"} if index in {0, 8} else {"allVisibleMeshElementsSelected"} if index == 1 else {"query", "selectedOperatorId", "queryEventEvidence"} if index == 2 else {"executedOperatorId"} if index == 3 else {"sourceOperationId", "sourceOperatorId"} if index == 4 else {"surfaceOperationId"})
+                expected_keys = common | {"eventEvidence", "operatorStackBeforeSha256", "operatorStackAfterSha256"} | extras
+            self._validate_exact_keys(receipt, expected_keys, "Edit Subdivide operation receipt")
+            if any(receipt.get(field) != identity[field] for field in ("proofId", "requestId", "deliveryId", "bindingContentSha256")):
+                raise ValueError("Edit Subdivide receipt delivery identity is invalid")
+            if receipt.get("operationId") != EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS[index] or receipt.get("order") != index + 1 or receipt.get("outcome") != "succeeded" or receipt.get("previousReceiptContentSha256") != previous:
+                raise ValueError("Edit Subdivide receipt order is invalid")
+            context = receipt.get("context")
+            if isinstance(context, dict):
+                self._validate_exact_keys(
+                    context,
+                    {"windowId", "areaType", "regionType", "mode"},
+                    "Edit Subdivide receipt context",
+                )
+            if not isinstance(context, dict) or context.get("areaType") != "VIEW_3D" or context.get("regionType") != "WINDOW" or context.get("mode") != modes[index] or not isinstance(context.get("windowId"), str) or not context["windowId"]:
+                raise ValueError("Edit Subdivide receipt context is invalid")
+            content = {key: value for key, value in receipt.items() if key != "contentSha256"}
+            if receipt.get("contentSha256") != self._canonical_sha256(content):
+                raise ValueError("Edit Subdivide receipt hash is invalid")
+            self._validated_required_uuid(receipt.get("receiptId"), "Edit Subdivide receipt id")
+            self._validate_expiry(receipt.get("occurredAt"), "Edit Subdivide receipt time")
+            if index in {5, 6}:
+                expected_control = ("mesh.subdivide.number_cuts", "mesh.subdivide.smoothness")[index - 5]
+                expected_role = ("number_cuts_control", "smoothness_control")[index - 5]
+                expected_text = str(receipt.get("newValue"))
+                if isinstance(receipt.get("newValue"), float) and receipt["newValue"].is_integer():
+                    expected_text = str(int(receipt["newValue"]))
+                if receipt.get("kind") != "operator_property_update" or receipt.get("surfaceOperationId") != EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS[4] or receipt.get("surfaceOperatorId") != "mesh.subdivide" or receipt.get("controlId") != expected_control or receipt.get("enteredText") != expected_text:
+                    raise ValueError("Edit Subdivide property receipt is invalid")
+                activation = receipt.get("activationEventEvidence")
+                select_all = receipt.get("selectAllEventEvidence")
+                text_events = receipt.get("textEventEvidence")
+                confirm = receipt.get("confirmEventEvidence")
+                if not isinstance(activation, list) or len(activation) != 5 or not isinstance(select_all, list) or len(select_all) != 1 or not isinstance(text_events, list) or not text_events or not isinstance(confirm, list) or len(confirm) != 2:
+                    raise ValueError("Edit Subdivide property event evidence is incomplete")
+                expected_activation = (("MOUSEMOVE", "NOTHING"), ("LEFTMOUSE", "PRESS"), ("LEFTMOUSE", "RELEASE"), ("LEFTMOUSE", "PRESS"), ("LEFTMOUSE", "RELEASE"))
+                for event, (event_type, value) in zip(activation, expected_activation):
+                    self._validate_edit_subdivide_event(event, event_type, value, expected_role)
+                self._validate_edit_subdivide_event(select_all[0], "A", "PRESS", "viewport_center", ctrl=True)
+                if "".join(str(event.get("unicode", "")) for event in text_events) != receipt["enteredText"]:
+                    raise ValueError("Edit Subdivide typed property text is invalid")
+                for event in text_events:
+                    expected_type = "PERIOD" if event.get("unicode") == "." else ("ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE")[int(event["unicode"])]
+                    self._validate_edit_subdivide_event(event, expected_type, "PRESS", "viewport_center", unicode=str(event["unicode"]))
+                self._validate_edit_subdivide_event(confirm[0], "RET", "PRESS", "viewport_center")
+                self._validate_edit_subdivide_event(confirm[1], "RET", "RELEASE", "viewport_center")
+            else:
+                if receipt.get("kind") != "key_input" or CONTENT_SHA256_PATTERN.fullmatch(str(receipt.get("operatorStackBeforeSha256"))) is None or CONTENT_SHA256_PATTERN.fullmatch(str(receipt.get("operatorStackAfterSha256"))) is None:
+                    raise ValueError("Edit Subdivide key receipt is invalid")
+                events = receipt.get("eventEvidence")
+                if not isinstance(events, list) or len(events) != 2:
+                    raise ValueError("Edit Subdivide key event evidence is invalid")
+                event_type = key_types[index]
+                assert event_type is not None
+                self._validate_edit_subdivide_event(events[0], event_type, "PRESS", "viewport_center")
+                self._validate_edit_subdivide_event(events[1], event_type, "RELEASE", "viewport_center")
+                if index == 2:
+                    query = receipt.get("queryEventEvidence")
+                    if receipt.get("query") != "subdivide" or receipt.get("selectedOperatorId") != "mesh.subdivide" or not isinstance(query, list) or len(query) != 9:
+                        raise ValueError("Edit Subdivide search receipt is invalid")
+                    for event, character in zip(query, "subdivide"):
+                        self._validate_edit_subdivide_event(event, character.upper(), "PRESS", "viewport_center", unicode=character)
+                expected_extra = (
+                    receipt.get("modeBefore") == "OBJECT" and receipt.get("modeAfter") == "EDIT_MESH"
+                    if index == 0 else receipt.get("allVisibleMeshElementsSelected") is True
+                    if index == 1 else receipt.get("executedOperatorId") == "mesh.subdivide"
+                    if index == 3 else receipt.get("sourceOperationId") == EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS[3] and receipt.get("sourceOperatorId") == "mesh.subdivide"
+                    if index == 4 else receipt.get("surfaceOperationId") == EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS[4]
+                    if index == 7 else receipt.get("modeBefore") == "EDIT_MESH" and receipt.get("modeAfter") == "OBJECT"
+                    if index == 8 else True
+                )
+                if not expected_extra:
+                    raise ValueError("Edit Subdivide key receipt semantic evidence is invalid")
+            previous = receipt["contentSha256"]
+        return receipts
+
+    def _validate_edit_subdivide_event(self, event: Any, event_type: str, value: str, role: str, *, ctrl: bool = False, unicode: str | None = None) -> None:
+        if isinstance(event, dict):
+            expected_keys = {"type", "value", "ctrl", "shift", "point"}
+            if unicode is not None:
+                expected_keys.add("unicode")
+            self._validate_exact_keys(event, expected_keys, "Edit Subdivide event evidence")
+        if not isinstance(event, dict) or event.get("type") != event_type or event.get("value") != value or event.get("ctrl") is not ctrl or event.get("shift") is not False or event.get("unicode") != unicode:
+            raise ValueError("Edit Subdivide event tuple is invalid")
+        point = event.get("point")
+        if isinstance(point, dict):
+            self._validate_exact_keys(
+                point, {"x", "y", "role"}, "Edit Subdivide event point"
+            )
+        if not isinstance(point, dict) or point.get("role") != role or isinstance(point.get("x"), bool) or not isinstance(point.get("x"), int) or isinstance(point.get("y"), bool) or not isinstance(point.get("y"), int):
+            raise ValueError("Edit Subdivide event point is invalid")
+
     @staticmethod
     def _shortcut_operation_ids() -> list[str]:
         return [
@@ -3386,6 +3674,8 @@ class CompanionTransport:
         ]
 
     def _validate_shortcut_checkpoint(self, checkpoint: Any, *, failure: bool) -> dict[str, Any]:
+        if isinstance(checkpoint, dict) and checkpoint.get("executorId") == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID:
+            return self._validate_edit_subdivide_checkpoint(checkpoint, failure=failure)
         if not isinstance(checkpoint, dict):
             raise ValueError("Shortcut proof checkpoint must be an object")
         success_keys = {
@@ -3453,6 +3743,36 @@ class CompanionTransport:
                 raise ValueError("Shortcut success checkpoint nested evidence is inconsistent")
         return checkpoint
 
+    def _validate_edit_subdivide_checkpoint(self, checkpoint: dict[str, Any], *, failure: bool) -> dict[str, Any]:
+        common = {"formatVersion", "evidenceClass", "checkpointId", "proofId", "replayId", "previousCheckpointId", "operation", "undoLockId", "targetId", "executorId", "nativeMutationKind", "nativeUndoDepth", "nativeRedoDepth", "marker", "journal", "baselineState", "committedAt"}
+        extra = {"currentState", "receiptPrefixRootSha256", "receiptPrefixHeadSha256", "lastCompletedOperationId"} if failure else {"finalState", "baselineSceneFingerprintSha256", "finalSceneFingerprintSha256", "receiptChainRootSha256", "receiptChainHeadSha256", "strongObservationContentSha256"}
+        self._validate_exact_keys(checkpoint, common | extra, "Edit Subdivide checkpoint")
+        if checkpoint["executorId"] != EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID or checkpoint["nativeMutationKind"] != "in_place_edit_mesh_subdivide" or checkpoint["nativeUndoDepth"] != 4 or checkpoint["nativeRedoDepth"] != 4 or checkpoint["marker"] != {"key": "_operating_line_shortcut_proof_history_v2", "matched": True}:
+            raise ValueError("Edit Subdivide checkpoint authority is invalid")
+        for field in ("checkpointId", "proofId", "replayId", "undoLockId"):
+            self._validated_required_uuid(checkpoint[field], f"Edit Subdivide checkpoint {field}")
+        self._validate_expiry(checkpoint["committedAt"], "Edit Subdivide checkpoint time")
+        baseline = checkpoint["baselineState"]
+        current = checkpoint["currentState"] if failure else checkpoint["finalState"]
+        success_state_keys = {"targetId", "objectName", "objectPointer", "meshPointer", "meshUsers", "meshDatablockCount", "modifierCount", "shapeKeyCount", "activeObjectMode", "selectedObjectCount", "topologySha256", "geometrySha256"}
+        failure_state_keys = {"targetId", "sceneFingerprintSha256", "objectName", "objectPointer", "meshPointer", "meshUsers", "meshDatablockCount", "modifierCount", "shapeKeyCount", "topologySha256", "geometrySha256"}
+        if isinstance(baseline, dict):
+            self._validate_exact_keys(baseline, failure_state_keys if failure else success_state_keys, "Edit Subdivide checkpoint baseline state")
+        if isinstance(current, dict):
+            self._validate_exact_keys(current, failure_state_keys if failure else success_state_keys | {"cuts", "smooth"}, "Edit Subdivide checkpoint final state")
+        if not isinstance(baseline, dict) or not isinstance(current, dict) or baseline.get("targetId") != checkpoint["targetId"] or current.get("targetId") != checkpoint["targetId"] or baseline.get("objectName") != "Cube" or current.get("objectName") != "Cube" or baseline.get("meshUsers") != 1 or current.get("meshUsers") != 1 or baseline.get("meshDatablockCount") != 1 or current.get("meshDatablockCount") != 1 or baseline.get("modifierCount") != 0 or current.get("modifierCount") != 0 or baseline.get("shapeKeyCount") != 0 or current.get("shapeKeyCount") != 0:
+            raise ValueError("Edit Subdivide checkpoint state identity is invalid")
+        continuity_fields = ("objectPointer", "meshPointer", "meshDatablockCount")
+        if any(baseline.get(field) != current.get(field) for field in continuity_fields):
+            raise ValueError("Edit Subdivide checkpoint identity continuity is invalid")
+        if failure:
+            if checkpoint["evidenceClass"] != "companion_reported_shortcut_proof_failure_checkpoint" or checkpoint["operation"] != "shortcut_proof_failure" or checkpoint["journal"] != {"entryPresent": True, "baselineSnapshotPresent": True, "currentSnapshotPresent": True, "mutationLeaseHeld": True} or checkpoint["lastCompletedOperationId"] not in EDIT_SUBDIVIDE_SHORTCUT_OPERATION_IDS + [None]:
+                raise ValueError("Edit Subdivide failure checkpoint is invalid")
+        else:
+            if checkpoint["evidenceClass"] != "companion_reported_shortcut_proof_native_undo_checkpoint" or checkpoint["operation"] != "shortcut_proof" or checkpoint["journal"] != {"entryPresent": True, "baselineSnapshotPresent": True, "finalSnapshotPresent": True, "undoRedoRoundTripVerified": True, "mutationLeaseHeld": True} or current.get("activeObjectMode") != "OBJECT" or current.get("selectedObjectCount") != 1:
+                raise ValueError("Edit Subdivide success checkpoint is invalid")
+        return checkpoint
+
     def _validate_shortcut_native_observation(
         self,
         observation: Any,
@@ -3489,6 +3809,8 @@ class CompanionTransport:
         *,
         binding: dict[str, Any],
     ) -> dict[str, Any]:
+        if binding.get("executorId") == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID:
+            return self._validate_edit_subdivide_strong_observation(observation, binding=binding)
         if not isinstance(observation, dict):
             raise ValueError("Shortcut proof strong observation must be an object")
         self._validate_exact_keys(
@@ -3534,11 +3856,42 @@ class CompanionTransport:
             raise ValueError("Shortcut proof strong observation content hash is invalid")
         return observation
 
+    def _validate_edit_subdivide_strong_observation(self, observation: Any, *, binding: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(observation, dict):
+            raise ValueError("Edit Subdivide strong observation must be an object")
+        keys = {"kind", "satisfied", "observationId", "observedAt", "contentSha256", "targetId", "objectName", "objectPointer", "meshName", "meshPointer", "meshUsers", "meshDatablockCount", "sameObjectIdentity", "sameMeshIdentity", "managedReplacementMeshCreated", "modifierCount", "shapeKeyCount", "activeObjectMode", "selectedObjectCount", "operatorId", "cuts", "smooth", "topology", "topologySha256", "geometrySha256", "sceneFingerprintSha256"}
+        self._validate_exact_keys(observation, keys, "Edit Subdivide strong observation")
+        accepted = binding["acceptedAction"]["arguments"]
+        segments = accepted["cuts"] + 1
+        expected_topology = {"vertices": 6 * segments * segments + 2, "edges": 12 * segments * segments, "polygons": 6 * segments * segments}
+        topology = observation.get("topology")
+        if isinstance(topology, dict):
+            self._validate_exact_keys(
+                topology,
+                {"vertices", "edges", "polygons"},
+                "Edit Subdivide observation topology",
+            )
+        if observation["kind"] != "mesh_edit_subdivide_shortcut_ready" or observation["satisfied"] is not True or observation["targetId"] != accepted["targetId"] or observation["objectName"] != "Cube" or observation["meshUsers"] != 1 or observation["sameObjectIdentity"] is not True or observation["sameMeshIdentity"] is not True or observation["managedReplacementMeshCreated"] is not False or observation["modifierCount"] != 0 or observation["shapeKeyCount"] != 0 or observation["activeObjectMode"] != "OBJECT" or observation["selectedObjectCount"] != 1 or observation["operatorId"] != "MESH_OT_subdivide" or observation["cuts"] != accepted["cuts"] or observation["smooth"] != accepted["smooth"] or observation["topology"] != expected_topology:
+            raise ValueError("Edit Subdivide strong observation is invalid")
+        self._validated_required_uuid(observation["observationId"], "Edit Subdivide observation id")
+        self._validate_expiry(observation["observedAt"], "Edit Subdivide observation time")
+        for field in ("topologySha256", "geometrySha256", "sceneFingerprintSha256"):
+            if CONTENT_SHA256_PATTERN.fullmatch(str(observation[field])) is None:
+                raise ValueError(f"Edit Subdivide observation {field} is invalid")
+        for field in ("objectPointer", "meshPointer", "meshDatablockCount"):
+            if isinstance(observation[field], bool) or not isinstance(observation[field], int) or observation[field] <= 0:
+                raise ValueError(f"Edit Subdivide observation {field} must be positive")
+        if observation["contentSha256"] != self._canonical_sha256({key: value for key, value in observation.items() if key != "contentSha256"}):
+            raise ValueError("Edit Subdivide strong observation hash is invalid")
+        return observation
+
     def _validate_shortcut_proof_result(self, result: Any) -> dict[str, Any]:
         validated = self._validate_shortcut_proof_identity(result, "Shortcut proof result", terminal=True)
         statuses = {"succeeded", "failed_checkpointed", "failed_restored", "rejected", "restored", "reapplied_locked"}
         if validated["status"] not in statuses or validated["managedActionResult"] != "not_executed" or validated["managedIdentityVerified"] is not False:
             raise ValueError("Shortcut proof result status or managed claims are invalid")
+        if validated["executorId"] == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID and (validated["managedReceiptCreated"] is not False or validated["managedReplacementMeshCreated"] is not False or validated["nativeMutationKind"] != "in_place_edit_mesh_subdivide"):
+            raise ValueError("Edit Subdivide result managed claims are invalid")
         if not isinstance(validated["terminalEvidence"], dict):
             raise ValueError("Shortcut proof terminal evidence must be an object")
         expected_kind = {
@@ -3582,7 +3935,10 @@ class CompanionTransport:
             attestation = evidence["attestation"]
             if not isinstance(attestation, dict):
                 raise ValueError("Shortcut proof attestation must be an object")
-            self._validate_exact_keys(attestation, {"formatVersion", "attestationId", "deliveryId", "binding", "bindingContentSha256", "managedActionResult", "managedIdentityVerified", "executor", "operationReceipts", "strongObservation", "nativeUndoCheckpoint", "attestedAt", "integrity"}, "Shortcut proof attestation")
+            attestation_keys = {"formatVersion", "attestationId", "deliveryId", "binding", "bindingContentSha256", "managedActionResult", "managedIdentityVerified", "executor", "operationReceipts", "strongObservation", "nativeUndoCheckpoint", "attestedAt", "integrity"}
+            if validated["executorId"] == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID:
+                attestation_keys |= {"managedReceiptCreated", "managedReplacementMeshCreated", "nativeMutationKind"}
+            self._validate_exact_keys(attestation, attestation_keys, "Shortcut proof attestation")
             self._validated_required_uuid(attestation["attestationId"], "Shortcut proof attestation id")
             self._validated_required_uuid(attestation["deliveryId"], "Shortcut proof attestation delivery id")
             if (
@@ -3599,6 +3955,8 @@ class CompanionTransport:
                 }
             ):
                 raise ValueError("Shortcut proof attestation binding is inconsistent")
+            if validated["executorId"] == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID and (attestation["managedReceiptCreated"] is not False or attestation["managedReplacementMeshCreated"] is not False or attestation["nativeMutationKind"] != "in_place_edit_mesh_subdivide"):
+                raise ValueError("Edit Subdivide attestation managed claims are invalid")
             receipts = self._validate_shortcut_receipt_chain(
                 attestation["operationReceipts"], complete=True, identity=validated
             )
@@ -3609,17 +3967,21 @@ class CompanionTransport:
                 attestation["nativeUndoCheckpoint"], failure=False
             )
             accepted = validated["binding"]["acceptedAction"]["arguments"]
-            if (
+            checkpoint_mismatch = (
                 checkpoint["proofId"] != validated["proofId"]
                 or checkpoint["replayId"] != validated["replayId"]
                 or checkpoint["targetId"] != accepted["targetId"]
-                or checkpoint["finalState"]["viewportLevel"] != accepted["viewportLevel"]
                 or checkpoint["receiptChainRootSha256"] != receipts[0]["contentSha256"]
                 or checkpoint["receiptChainHeadSha256"] != receipts[-1]["contentSha256"]
                 or checkpoint["strongObservationContentSha256"] != strong["contentSha256"]
                 or checkpoint["finalSceneFingerprintSha256"]
                 != strong["sceneFingerprintSha256"]
-            ):
+            )
+            if validated["executorId"] == EDIT_SUBDIVIDE_SHORTCUT_EXECUTOR_ID:
+                checkpoint_mismatch = checkpoint_mismatch or checkpoint["finalState"]["cuts"] != accepted["cuts"] or checkpoint["finalState"]["smooth"] != accepted["smooth"] or checkpoint["finalState"]["objectPointer"] != strong["objectPointer"] or checkpoint["finalState"]["meshPointer"] != strong["meshPointer"] or checkpoint["finalState"]["meshDatablockCount"] != strong["meshDatablockCount"] or checkpoint["finalState"]["topologySha256"] != strong["topologySha256"] or checkpoint["finalState"]["geometrySha256"] != strong["geometrySha256"]
+            else:
+                checkpoint_mismatch = checkpoint_mismatch or checkpoint["finalState"]["viewportLevel"] != accepted["viewportLevel"]
+            if checkpoint_mismatch:
                 raise ValueError("Shortcut proof checkpoint evidence is inconsistent")
             integrity = attestation["integrity"]
             if not isinstance(integrity, dict):

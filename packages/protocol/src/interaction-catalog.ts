@@ -428,7 +428,12 @@ export const shortcutLedOperationSchema = z.union([
 ]);
 export type ShortcutLedOperation = z.infer<typeof shortcutLedOperationSchema>;
 
-export const shortcutProofExecutionSchema = z.strictObject({
+const shortcutProofHostVersionsSchema = z
+  .array(z.enum(['4.5.3', '5.1.1']))
+  .length(2)
+  .refine((versions) => versions[0] === '4.5.3' && versions[1] === '5.1.1');
+
+const subdivisionSurfaceShortcutProofExecutionSchema = z.strictObject({
   executorId: z.literal('blender.subdivision_surface_f9.event_simulate.v1'),
   targetProfile: z.literal('factory_cube_8_12_6'),
   executionBoundary: z.literal('blender_window_event_simulate'),
@@ -437,10 +442,7 @@ export const shortcutProofExecutionSchema = z.strictObject({
   managedReceiptCreated: z.literal(false),
   authorization: z.literal('accepted_replay_next_step'),
   transport: z.literal('event_simulate'),
-  hostVersions: z
-    .array(z.enum(['4.5.3', '5.1.1']))
-    .length(2)
-    .refine((versions) => versions[0] === '4.5.3' && versions[1] === '5.1.1'),
+  hostVersions: shortcutProofHostVersionsSchema,
   operationIds: z
     .array(
       z.enum([
@@ -461,6 +463,56 @@ export const shortcutProofExecutionSchema = z.strictObject({
   strongObservationKind: z.literal('subdivision_surface_shortcut_ready'),
   nativeUndoCheckpointRequired: z.literal(true),
 });
+
+const meshEditSubdivideShortcutProofExecutionSchema = z.strictObject({
+  executorId: z.literal('blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'),
+  targetProfile: z.literal('factory_cube_single_user_mesh_8_12_6'),
+  executionBoundary: z.literal('blender_window_event_simulate'),
+  osHidInput: z.literal(false),
+  managedActionExecuted: z.literal(false),
+  managedReceiptCreated: z.literal(false),
+  managedReplacementMeshCreated: z.literal(false),
+  nativeMutationKind: z.literal('in_place_edit_mesh_subdivide'),
+  authorization: z.literal('accepted_replay_next_step'),
+  transport: z.literal('event_simulate'),
+  hostVersions: shortcutProofHostVersionsSchema,
+  operationIds: z
+    .array(
+      z.enum([
+        'shortcut.enter_edit_mode',
+        'shortcut.select_all_mesh_elements',
+        'shortcut.search_subdivide',
+        'shortcut.execute_subdivide',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_number_of_cuts',
+        'shortcut.set_smoothness',
+        'shortcut.close_adjust_last_operation',
+        'shortcut.return_to_object_mode',
+      ]),
+    )
+    .length(9)
+    .refine(
+      (ids) =>
+        ids[0] === 'shortcut.enter_edit_mode' &&
+        ids[1] === 'shortcut.select_all_mesh_elements' &&
+        ids[2] === 'shortcut.search_subdivide' &&
+        ids[3] === 'shortcut.execute_subdivide' &&
+        ids[4] === 'shortcut.open_adjust_last_operation' &&
+        ids[5] === 'shortcut.set_number_of_cuts' &&
+        ids[6] === 'shortcut.set_smoothness' &&
+        ids[7] === 'shortcut.close_adjust_last_operation' &&
+        ids[8] === 'shortcut.return_to_object_mode',
+    ),
+  strongObservationKind: z.literal('mesh_edit_subdivide_shortcut_ready'),
+  nativeUndoCheckpointRequired: z.literal(true),
+  nativeUndoDepth: z.literal(4),
+  nativeRedoDepth: z.literal(4),
+});
+
+export const shortcutProofExecutionSchema = z.discriminatedUnion('executorId', [
+  subdivisionSurfaceShortcutProofExecutionSchema,
+  meshEditSubdivideShortcutProofExecutionSchema,
+]);
 export type ShortcutProofExecution = z.infer<typeof shortcutProofExecutionSchema>;
 
 export const availableShortcutProcedureMaterializationSchema = z.strictObject({
@@ -1280,13 +1332,60 @@ function validateRecipe(recipe: InteractionRecipe): void {
       );
     }
     if (shortcut.proofExecution !== undefined) {
-      if (
-        recipe.id !== 'blender.modifier.add_subdivision_surface.semantic' ||
-        recipe.actionName !== 'blender.modifier.add_subdivision_surface'
-      ) {
+      const expectedRecipe =
+        shortcut.proofExecution.executorId === 'blender.subdivision_surface_f9.event_simulate.v1'
+          ? {
+              id: 'blender.modifier.add_subdivision_surface.semantic',
+              actionName: 'blender.modifier.add_subdivision_surface',
+            }
+          : {
+              id: 'blender.mesh.edit_subdivide.semantic',
+              actionName: 'blender.mesh.edit_subdivide',
+            };
+      if (recipe.id !== expectedRecipe.id || recipe.actionName !== expectedRecipe.actionName) {
+        const restrictedRecipeLabel =
+          shortcut.proofExecution.executorId === 'blender.subdivision_surface_f9.event_simulate.v1'
+            ? 'the exact Subdivision Surface recipe'
+            : 'the exact blender.mesh.edit_subdivide recipe';
         throw new Error(
-          `Interaction recipe ${recipe.id} shortcut proof execution is restricted to the exact Subdivision Surface recipe`,
+          `Interaction recipe ${recipe.id} shortcut proof execution is restricted to ${restrictedRecipeLabel}`,
         );
+      }
+      if (
+        shortcut.proofExecution.executorId === 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'
+      ) {
+        const expectedPreconditions = [
+          ['workspace', 'Workspace', 'Layout'],
+          ['editor', 'Editor', 'VIEW_3D'],
+          ['mode', 'Mode', 'OBJECT'],
+          ['selection', 'Active Target', 'Exactly the factory Cube is active and selected'],
+          ['keymap', 'Keymap', 'Blender'],
+          ['modal_state', 'Modal UI', 'None'],
+          ['scene_state', 'Object Identity', 'Cube'],
+          ['scene_state', 'Initial Topology', '8 vertices, 12 edges, 6 polygons'],
+          ['scene_state', 'Mesh Elements', 'All target mesh elements are visible'],
+          ['scene_state', 'Mesh Data Users', '1'],
+          ['scene_state', 'Scene Mesh Datablocks', '1'],
+          ['scene_state', 'Modifiers', 'None'],
+          ['scene_state', 'Shape Keys', 'None'],
+          ['scene_state', 'UI Language', 'English'],
+        ] as const;
+        const hasExactPreconditions =
+          shortcut.preconditions.length === expectedPreconditions.length &&
+          shortcut.preconditions.every((precondition, index) => {
+            const expected = expectedPreconditions[index];
+            return (
+              expected !== undefined &&
+              precondition.kind === expected[0] &&
+              precondition.label === expected[1] &&
+              precondition.value === expected[2]
+            );
+          });
+        if (!hasExactPreconditions) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut proof execution requires the exact factory Cube preconditions`,
+          );
+        }
       }
       const actualOperationIds = shortcut.operations.map((operation) => operation.id);
       if (

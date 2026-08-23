@@ -382,7 +382,14 @@ describe('OperatingLine runtime', () => {
         .find((line) => line.startsWith('data: '));
       expect(dataLine).toBeDefined();
       const toolsPayload = JSON.parse(dataLine!.slice('data: '.length)) as {
-        result?: { tools?: Array<{ name?: string; description?: string; inputSchema?: unknown }> };
+        result?: {
+          tools?: Array<{
+            name?: string;
+            description?: string;
+            inputSchema?: unknown;
+            outputSchema?: unknown;
+          }>;
+        };
       };
       expect(toolsPayload).toMatchObject({
         result: {
@@ -610,6 +617,21 @@ describe('OperatingLine runtime', () => {
         required: ['requestId'],
         additionalProperties: false,
       });
+      for (const toolName of [
+        'operatingline.blender.shortcut-proof.execute',
+        'operatingline.blender.shortcut-proof.status',
+      ]) {
+        const outputSchema = toolsPayload.result?.tools?.find(
+          (tool) => tool.name === toolName,
+        )?.outputSchema;
+        expect(outputSchema).toMatchObject({
+          type: 'object',
+          oneOf: expect.any(Array),
+        });
+        expect(outputSchema).not.toMatchObject({
+          properties: { result: expect.anything() },
+        });
+      }
       expect(
         toolsPayload.result?.tools?.find(
           (tool) => tool.name === 'operatingline.blender.menu-control-proof.execute',

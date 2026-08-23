@@ -47,7 +47,7 @@ export type ProcedureShortcutProofProposalRequest = z.infer<
   typeof procedureShortcutProofProposalRequestSchema
 >;
 
-const proposalRecordContentSchema = z.strictObject({
+const proposalRecordCommonShape = {
   formatVersion: procedureShortcutProofFormatVersionSchema,
   recordId: z.uuid(),
   replayId: z.uuid(),
@@ -56,10 +56,7 @@ const proposalRecordContentSchema = z.strictObject({
   proposal: guideProposalSchema,
   planContentSha256: sha256Schema,
   leafId: guideStepIdSchema,
-  recipeId: z.literal('blender.modifier.add_subdivision_surface.semantic'),
-  actionName: z.literal('blender.modifier.add_subdivision_surface'),
   shortcutTrackContentSha256: sha256Schema,
-  proofExecution: shortcutProofExecutionSchema,
   claims: z.strictObject({
     approval: z.literal('pending'),
     hostExecutionStarted: z.literal(false),
@@ -67,11 +64,27 @@ const proposalRecordContentSchema = z.strictObject({
     managedIdentityVerified: z.literal(false),
   }),
   createdAt: timestampSchema,
-});
+} as const;
 
-export const procedureShortcutProofProposalRecordSchema = proposalRecordContentSchema
-  .safeExtend({ integrity: integritySchema })
-  .superRefine((record, context) => {
+const proposalRecordContentSchema = z.discriminatedUnion('recipeId', [
+  z.strictObject({
+    ...proposalRecordCommonShape,
+    recipeId: z.literal('blender.modifier.add_subdivision_surface.semantic'),
+    actionName: z.literal('blender.modifier.add_subdivision_surface'),
+    proofExecution: shortcutProofExecutionSchema.options[0],
+    integrity: integritySchema,
+  }),
+  z.strictObject({
+    ...proposalRecordCommonShape,
+    recipeId: z.literal('blender.mesh.edit_subdivide.semantic'),
+    actionName: z.literal('blender.mesh.edit_subdivide'),
+    proofExecution: shortcutProofExecutionSchema.options[1],
+    integrity: integritySchema,
+  }),
+]);
+
+export const procedureShortcutProofProposalRecordSchema = proposalRecordContentSchema.superRefine(
+  (record, context) => {
     if (
       record.request.replayId !== record.replayId ||
       record.request.leafId !== record.leafId ||
@@ -97,6 +110,33 @@ export const procedureShortcutProofProposalRecordSchema = proposalRecordContentS
     const shortcutTrack = leaf?.kind === 'leaf' ? leaf.shortcutTracks[0] : undefined;
     const objectAnchors =
       leaf?.kind === 'leaf' ? leaf.anchors.filter((anchor) => anchor.kind === 'object') : [];
+    const operatorAnchors =
+      leaf?.kind === 'leaf' ? leaf.anchors.filter((anchor) => anchor.kind === 'operator') : [];
+    const isSubdivisionSurface =
+      record.recipeId === 'blender.modifier.add_subdivision_surface.semantic';
+    const actionArguments =
+      leaf?.kind === 'leaf' && leaf.action !== null ? leaf.action.arguments : undefined;
+    const actionProfileMatches = isSubdivisionSurface
+      ? actionArguments?.['targetId'] === shortcutTargetId &&
+        actionArguments['modifierId'] === shortcutModifierId &&
+        actionArguments['modifierName'] === shortcutModifierName &&
+        objectAnchors.length === 1 &&
+        objectAnchors[0]?.objectName === 'Cube' &&
+        operatorAnchors.length === 0
+      : actionArguments?.['targetId'] === shortcutTargetId &&
+        typeof actionArguments['resultMeshId'] === 'string' &&
+        typeof actionArguments['resultMeshName'] === 'string' &&
+        Number.isInteger(actionArguments['cuts']) &&
+        typeof actionArguments['cuts'] === 'number' &&
+        actionArguments['cuts'] >= 1 &&
+        actionArguments['cuts'] <= 8 &&
+        typeof actionArguments['smooth'] === 'number' &&
+        actionArguments['smooth'] >= 0 &&
+        actionArguments['smooth'] <= 1 &&
+        objectAnchors.length === 1 &&
+        objectAnchors[0]?.objectName === 'Cube' &&
+        operatorAnchors.length === 1 &&
+        operatorAnchors[0]?.operatorId === 'mesh.subdivide';
     if (
       leaves.length !== 1 ||
       record.materialization.coverage.length !== 1 ||
@@ -105,11 +145,7 @@ export const procedureShortcutProofProposalRecordSchema = proposalRecordContentS
       proposalSteps.length !== 1 ||
       leaf?.kind !== 'leaf' ||
       leaf.action === null ||
-      leaf.action.arguments['targetId'] !== shortcutTargetId ||
-      leaf.action.arguments['modifierId'] !== shortcutModifierId ||
-      leaf.action.arguments['modifierName'] !== shortcutModifierName ||
-      objectAnchors.length !== 1 ||
-      objectAnchors[0]?.objectName !== 'Cube' ||
+      !actionProfileMatches ||
       coverage?.recipeId !== record.recipeId ||
       coverage.shortcut !== 'materialized' ||
       proposalStep?.action === null ||
@@ -121,7 +157,7 @@ export const procedureShortcutProofProposalRecordSchema = proposalRecordContentS
       leaf.menuTracks.length !== 1 ||
       leaf.menuTracks[0]?.availability !== 'unavailable' ||
       leaf.mcpTracks.length !== 1 ||
-      leaf.mcpTracks[0]?.availability !== 'unavailable'
+      leaf.mcpTracks[0]?.availability !== (isSubdivisionSurface ? 'unavailable' : 'available')
     ) {
       context.addIssue({
         code: 'custom',
@@ -188,7 +224,8 @@ export const procedureShortcutProofProposalRecordSchema = proposalRecordContentS
         message: 'Shortcut proof proposal record integrity must match its canonical content',
       });
     }
-  });
+  },
+);
 export type ProcedureShortcutProofProposalRecord = z.infer<
   typeof procedureShortcutProofProposalRecordSchema
 >;
@@ -207,7 +244,31 @@ export const subdivisionSurfaceShortcutProofOperationIdsSchema = z.tuple([
   z.literal(subdivisionSurfaceShortcutProofOperationIds[3]),
 ]);
 
-const bindingContentSchema = z.strictObject({
+export const meshEditSubdivideShortcutProofOperationIds = [
+  'shortcut.enter_edit_mode',
+  'shortcut.select_all_mesh_elements',
+  'shortcut.search_subdivide',
+  'shortcut.execute_subdivide',
+  'shortcut.open_adjust_last_operation',
+  'shortcut.set_number_of_cuts',
+  'shortcut.set_smoothness',
+  'shortcut.close_adjust_last_operation',
+  'shortcut.return_to_object_mode',
+] as const;
+
+export const meshEditSubdivideShortcutProofOperationIdsSchema = z.tuple([
+  z.literal(meshEditSubdivideShortcutProofOperationIds[0]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[1]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[2]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[3]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[4]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[5]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[6]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[7]),
+  z.literal(meshEditSubdivideShortcutProofOperationIds[8]),
+]);
+
+const subdivisionSurfaceBindingContentSchema = z.strictObject({
   formatVersion: procedureShortcutProofFormatVersionSchema,
   bindingId: z.uuid(),
   proposalRecordContentSha256: sha256Schema,
@@ -265,8 +326,78 @@ const bindingContentSchema = z.strictObject({
   createdAt: timestampSchema,
 });
 
-export const procedureShortcutProofBindingSchema = bindingContentSchema
-  .safeExtend({ integrity: integritySchema })
+const meshEditSubdivideBindingContentSchema = z.strictObject({
+  formatVersion: procedureShortcutProofFormatVersionSchema,
+  bindingId: z.uuid(),
+  proposalRecordContentSha256: sha256Schema,
+  proofId: z.uuid(),
+  requestId: z.uuid(),
+  replayId: z.uuid(),
+  target: targetSchema,
+  proposalId: z.uuid(),
+  plan: z.strictObject({
+    id: z.string().min(1),
+    revision: z.number().int().positive(),
+    contentSha256: sha256Schema,
+  }),
+  executionId: z.uuid(),
+  leafId: guideStepIdSchema,
+  recipeId: z.literal('blender.mesh.edit_subdivide.semantic'),
+  actionName: z.literal('blender.mesh.edit_subdivide'),
+  acceptedAction: z.strictObject({
+    adapterId: z.literal('blender'),
+    name: z.literal('blender.mesh.edit_subdivide'),
+    arguments: z.strictObject({
+      targetId: z.literal(shortcutTargetId),
+      resultMeshId: z.string().min(1),
+      resultMeshName: z.string().min(1),
+      cuts: z.number().int().min(1).max(8),
+      smooth: z.number().min(0).max(1),
+    }),
+  }),
+  targetProfile: z.literal('factory_cube_single_user_mesh_8_12_6'),
+  acceptedDecision: z.strictObject({
+    decisionId: z.uuid(),
+    proposalId: z.uuid(),
+    instanceId: z.uuid(),
+    adapterId: z.literal('blender'),
+    decision: z.literal('accepted'),
+    decidedAt: timestampSchema,
+  }),
+  proofScope: z.strictObject({
+    managedActionResult: z.literal('not_executed'),
+    managedIdentityVerified: z.literal(false),
+    managedReceiptCreated: z.literal(false),
+    managedReplacementMeshCreated: z.literal(false),
+    nativeMutationKind: z.literal('in_place_edit_mesh_subdivide'),
+    omittedAcceptedArguments: z.tuple([
+      z.literal('targetId'),
+      z.literal('resultMeshId'),
+      z.literal('resultMeshName'),
+    ]),
+  }),
+  materialization: z.strictObject({
+    actionCatalogVersion: catalogVersionSchema,
+    interactionCatalogVersion: catalogVersionSchema,
+    interactionCatalogContentSha256: sha256Schema,
+    shortcutTrackContentSha256: sha256Schema,
+  }),
+  executorId: z.literal('blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'),
+  executionBoundary: z.literal('blender_window_event_simulate'),
+  authorization: z.literal('accepted_replay_next_step'),
+  transport: z.literal('event_simulate'),
+  operationIds: meshEditSubdivideShortcutProofOperationIdsSchema,
+  nativeUndoDepth: z.literal(4),
+  nativeRedoDepth: z.literal(4),
+  startState: expectedStateSchema,
+  createdAt: timestampSchema,
+});
+
+export const procedureShortcutProofBindingSchema = z
+  .discriminatedUnion('executorId', [
+    subdivisionSurfaceBindingContentSchema.safeExtend({ integrity: integritySchema }),
+    meshEditSubdivideBindingContentSchema.safeExtend({ integrity: integritySchema }),
+  ])
   .superRefine((binding, context) => {
     if (
       binding.acceptedDecision.proposalId !== binding.proposalId ||
@@ -358,7 +489,7 @@ const keyReceipt = (
         }
       : {}),
   });
-export const procedureShortcutProofOperationReceiptSchema = z.discriminatedUnion('operationId', [
+export const subdivisionSurfaceShortcutProofOperationReceiptSchemas = [
   keyReceipt(
     subdivisionSurfaceShortcutProofOperationIds[0],
     z.tuple([eventEvidence('ONE', 'PRESS', true), eventEvidence('ONE', 'RELEASE', true)]),
@@ -396,12 +527,211 @@ export const procedureShortcutProofOperationReceiptSchema = z.discriminatedUnion
     subdivisionSurfaceShortcutProofOperationIds[3],
     z.tuple([eventEvidence('RET', 'PRESS'), eventEvidence('RET', 'RELEASE')]),
   ),
+] as const;
+
+const editShortcutContextSchema = (mode: 'OBJECT' | 'EDIT_MESH') =>
+  z.strictObject({
+    windowId: z.string().min(1),
+    areaType: z.literal('VIEW_3D'),
+    regionType: z.literal('WINDOW'),
+    mode: z.literal(mode),
+  });
+const editEventEvidence = (
+  type: string,
+  value: 'PRESS' | 'RELEASE' | 'NOTHING' = 'PRESS',
+  pointRole: 'viewport_center' | 'number_cuts_control' | 'smoothness_control' = 'viewport_center',
+  ctrl = false,
+  unicode?: string,
+) =>
+  z.strictObject({
+    type: z.literal(type),
+    value: z.literal(value),
+    ctrl: z.literal(ctrl),
+    shift: z.literal(false),
+    point: z.strictObject({
+      x: z.number().int(),
+      y: z.number().int(),
+      role: z.literal(pointRole),
+    }),
+    ...(unicode === undefined ? {} : { unicode: z.literal(unicode) }),
+  });
+const editKeyReceipt = <OperationId extends string>(
+  operationId: OperationId,
+  mode: 'OBJECT' | 'EDIT_MESH',
+  events: z.ZodType,
+  extraShape: z.ZodRawShape = {},
+) =>
+  z.strictObject({
+    ...operationReceiptCommonShape,
+    operationId: z.literal(operationId),
+    kind: z.literal('key_input'),
+    context: editShortcutContextSchema(mode),
+    eventEvidence: events,
+    operatorStackBeforeSha256: sha256Schema,
+    operatorStackAfterSha256: sha256Schema,
+    ...extraShape,
+  });
+const editPropertyReceipt = (
+  operationId:
+    | (typeof meshEditSubdivideShortcutProofOperationIds)[5]
+    | (typeof meshEditSubdivideShortcutProofOperationIds)[6],
+  controlId: 'mesh.subdivide.number_cuts' | 'mesh.subdivide.smoothness',
+  pointRole: 'number_cuts_control' | 'smoothness_control',
+  valueSchema: z.ZodType,
+  enteredTextSchema: z.ZodType<string>,
+) =>
+  z
+    .strictObject({
+      ...operationReceiptCommonShape,
+      operationId: z.literal(operationId),
+      kind: z.literal('operator_property_update'),
+      context: editShortcutContextSchema('EDIT_MESH'),
+      surfaceOperationId: z.literal(meshEditSubdivideShortcutProofOperationIds[4]),
+      surfaceOperatorId: z.literal('mesh.subdivide'),
+      controlId: z.literal(controlId),
+      newValue: valueSchema,
+      enteredText: enteredTextSchema,
+      activationEventEvidence: z.tuple([
+        editEventEvidence('MOUSEMOVE', 'NOTHING', pointRole),
+        editEventEvidence('LEFTMOUSE', 'PRESS', pointRole),
+        editEventEvidence('LEFTMOUSE', 'RELEASE', pointRole),
+        editEventEvidence('LEFTMOUSE', 'PRESS', pointRole),
+        editEventEvidence('LEFTMOUSE', 'RELEASE', pointRole),
+      ]),
+      selectAllEventEvidence: z.tuple([editEventEvidence('A', 'PRESS', 'viewport_center', true)]),
+      textEventEvidence: z
+        .array(
+          z.strictObject({
+            type: z.enum([
+              'ZERO',
+              'ONE',
+              'TWO',
+              'THREE',
+              'FOUR',
+              'FIVE',
+              'SIX',
+              'SEVEN',
+              'EIGHT',
+              'NINE',
+              'PERIOD',
+            ]),
+            value: z.literal('PRESS'),
+            ctrl: z.literal(false),
+            shift: z.literal(false),
+            unicode: z.string().regex(/^[0-9.]$/),
+            point: z.strictObject({
+              x: z.number().int(),
+              y: z.number().int(),
+              role: z.literal('viewport_center'),
+            }),
+          }),
+        )
+        .min(1),
+      confirmEventEvidence: z.tuple([
+        editEventEvidence('RET'),
+        editEventEvidence('RET', 'RELEASE'),
+      ]),
+    })
+    .superRefine((receipt, context) => {
+      const typedText = receipt.textEventEvidence.map((event) => event.unicode).join('');
+      if (
+        typedText !== receipt.enteredText ||
+        Number(receipt.enteredText) !== receipt.newValue ||
+        receipt.enteredText !== String(receipt.newValue)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['textEventEvidence'],
+          message: 'Edit Subdivide property receipt must prove the canonical entered value text',
+        });
+      }
+    });
+
+export const meshEditSubdivideShortcutProofOperationReceiptSchemas = [
+  editKeyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[0],
+    'OBJECT',
+    z.tuple([editEventEvidence('TAB'), editEventEvidence('TAB', 'RELEASE')]),
+    { modeBefore: z.literal('OBJECT'), modeAfter: z.literal('EDIT_MESH') },
+  ),
+  editKeyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[1],
+    'EDIT_MESH',
+    z.tuple([editEventEvidence('A'), editEventEvidence('A', 'RELEASE')]),
+    { allVisibleMeshElementsSelected: z.literal(true) },
+  ),
+  editKeyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[2],
+    'EDIT_MESH',
+    z.tuple([editEventEvidence('F3'), editEventEvidence('F3', 'RELEASE')]),
+    {
+      query: z.literal('subdivide'),
+      selectedOperatorId: z.literal('mesh.subdivide'),
+      queryEventEvidence: z.tuple([
+        editEventEvidence('S', 'PRESS', 'viewport_center', false, 's'),
+        editEventEvidence('U', 'PRESS', 'viewport_center', false, 'u'),
+        editEventEvidence('B', 'PRESS', 'viewport_center', false, 'b'),
+        editEventEvidence('D', 'PRESS', 'viewport_center', false, 'd'),
+        editEventEvidence('I', 'PRESS', 'viewport_center', false, 'i'),
+        editEventEvidence('V', 'PRESS', 'viewport_center', false, 'v'),
+        editEventEvidence('I', 'PRESS', 'viewport_center', false, 'i'),
+        editEventEvidence('D', 'PRESS', 'viewport_center', false, 'd'),
+        editEventEvidence('E', 'PRESS', 'viewport_center', false, 'e'),
+      ]),
+    },
+  ),
+  editKeyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[3],
+    'EDIT_MESH',
+    z.tuple([editEventEvidence('RET'), editEventEvidence('RET', 'RELEASE')]),
+    { executedOperatorId: z.literal('mesh.subdivide') },
+  ),
+  editKeyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[4],
+    'EDIT_MESH',
+    z.tuple([editEventEvidence('F9'), editEventEvidence('F9', 'RELEASE')]),
+    {
+      sourceOperationId: z.literal(meshEditSubdivideShortcutProofOperationIds[3]),
+      sourceOperatorId: z.literal('mesh.subdivide'),
+    },
+  ),
+  editPropertyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[5],
+    'mesh.subdivide.number_cuts',
+    'number_cuts_control',
+    z.number().int().min(1).max(8),
+    z.string().regex(/^[1-8]$/),
+  ),
+  editPropertyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[6],
+    'mesh.subdivide.smoothness',
+    'smoothness_control',
+    z.number().min(0).max(1),
+    z.string().regex(/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/),
+  ),
+  editKeyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[7],
+    'EDIT_MESH',
+    z.tuple([editEventEvidence('RET'), editEventEvidence('RET', 'RELEASE')]),
+    { surfaceOperationId: z.literal(meshEditSubdivideShortcutProofOperationIds[4]) },
+  ),
+  editKeyReceipt(
+    meshEditSubdivideShortcutProofOperationIds[8],
+    'EDIT_MESH',
+    z.tuple([editEventEvidence('TAB'), editEventEvidence('TAB', 'RELEASE')]),
+    { modeBefore: z.literal('EDIT_MESH'), modeAfter: z.literal('OBJECT') },
+  ),
+] as const;
+
+export const procedureShortcutProofOperationReceiptSchema = z.union([
+  ...subdivisionSurfaceShortcutProofOperationReceiptSchemas,
+  ...meshEditSubdivideShortcutProofOperationReceiptSchemas,
 ]);
 export type ProcedureShortcutProofOperationReceipt = z.infer<
   typeof procedureShortcutProofOperationReceiptSchema
 >;
 
-export const procedureShortcutProofNativeUndoCheckpointSchema = z.strictObject({
+const subdivisionSurfaceNativeUndoCheckpointSchema = z.strictObject({
   formatVersion: procedureShortcutProofFormatVersionSchema,
   evidenceClass: z.literal('companion_reported_shortcut_proof_native_undo_checkpoint'),
   checkpointId: z.uuid(),
@@ -442,7 +772,75 @@ export const procedureShortcutProofNativeUndoCheckpointSchema = z.strictObject({
   committedAt: timestampSchema,
 });
 
-export const procedureShortcutProofFailureCheckpointSchema = z
+const meshEditSubdivideNativeUndoCheckpointSchema = z.strictObject({
+  formatVersion: procedureShortcutProofFormatVersionSchema,
+  evidenceClass: z.literal('companion_reported_shortcut_proof_native_undo_checkpoint'),
+  checkpointId: z.uuid(),
+  proofId: z.uuid(),
+  replayId: z.uuid(),
+  previousCheckpointId: z.uuid().nullable(),
+  operation: z.literal('shortcut_proof'),
+  undoLockId: z.uuid(),
+  targetId: z.string().min(1),
+  executorId: z.literal('blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'),
+  nativeMutationKind: z.literal('in_place_edit_mesh_subdivide'),
+  nativeUndoDepth: z.literal(4),
+  nativeRedoDepth: z.literal(4),
+  marker: z.strictObject({
+    key: z.literal('_operating_line_shortcut_proof_history_v2'),
+    matched: z.literal(true),
+  }),
+  journal: z.strictObject({
+    entryPresent: z.literal(true),
+    baselineSnapshotPresent: z.literal(true),
+    finalSnapshotPresent: z.literal(true),
+    undoRedoRoundTripVerified: z.literal(true),
+    mutationLeaseHeld: z.literal(true),
+  }),
+  baselineState: z.strictObject({
+    targetId: z.string().min(1),
+    objectName: z.literal('Cube'),
+    objectPointer: z.number().int().positive(),
+    meshPointer: z.number().int().positive(),
+    meshUsers: z.literal(1),
+    meshDatablockCount: z.literal(1),
+    modifierCount: z.literal(0),
+    shapeKeyCount: z.literal(0),
+    activeObjectMode: z.literal('OBJECT'),
+    selectedObjectCount: z.literal(1),
+    topologySha256: sha256Schema,
+    geometrySha256: sha256Schema,
+  }),
+  finalState: z.strictObject({
+    targetId: z.string().min(1),
+    objectName: z.literal('Cube'),
+    objectPointer: z.number().int().positive(),
+    meshPointer: z.number().int().positive(),
+    meshUsers: z.literal(1),
+    meshDatablockCount: z.literal(1),
+    modifierCount: z.literal(0),
+    shapeKeyCount: z.literal(0),
+    activeObjectMode: z.literal('OBJECT'),
+    selectedObjectCount: z.literal(1),
+    cuts: z.number().int().min(1).max(8),
+    smooth: z.number().min(0).max(1),
+    topologySha256: sha256Schema,
+    geometrySha256: sha256Schema,
+  }),
+  baselineSceneFingerprintSha256: sha256Schema,
+  finalSceneFingerprintSha256: sha256Schema,
+  receiptChainRootSha256: sha256Schema,
+  receiptChainHeadSha256: sha256Schema,
+  strongObservationContentSha256: sha256Schema,
+  committedAt: timestampSchema,
+});
+
+export const procedureShortcutProofNativeUndoCheckpointSchema = z.union([
+  subdivisionSurfaceNativeUndoCheckpointSchema,
+  meshEditSubdivideNativeUndoCheckpointSchema,
+]);
+
+export const subdivisionSurfaceShortcutProofFailureCheckpointSchema = z
   .strictObject({
     formatVersion: procedureShortcutProofFormatVersionSchema,
     evidenceClass: z.literal('companion_reported_shortcut_proof_failure_checkpoint'),
@@ -494,11 +892,90 @@ export const procedureShortcutProofFailureCheckpointSchema = z
     }
   });
 
-const attestationContentSchema = z.strictObject({
+export const meshEditSubdivideShortcutProofFailureCheckpointSchema = z
+  .strictObject({
+    formatVersion: procedureShortcutProofFormatVersionSchema,
+    evidenceClass: z.literal('companion_reported_shortcut_proof_failure_checkpoint'),
+    checkpointId: z.uuid(),
+    previousCheckpointId: z.uuid().nullable(),
+    operation: z.literal('shortcut_proof_failure'),
+    undoLockId: z.uuid(),
+    proofId: z.uuid(),
+    replayId: z.uuid(),
+    targetId: z.string().min(1),
+    executorId: z.literal('blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'),
+    nativeMutationKind: z.literal('in_place_edit_mesh_subdivide'),
+    nativeUndoDepth: z.literal(4),
+    nativeRedoDepth: z.literal(4),
+    marker: z.strictObject({
+      key: z.literal('_operating_line_shortcut_proof_history_v2'),
+      matched: z.literal(true),
+    }),
+    journal: z.strictObject({
+      entryPresent: z.literal(true),
+      baselineSnapshotPresent: z.literal(true),
+      currentSnapshotPresent: z.literal(true),
+      mutationLeaseHeld: z.literal(true),
+    }),
+    baselineState: z.strictObject({
+      targetId: z.string().min(1),
+      sceneFingerprintSha256: sha256Schema,
+      objectName: z.literal('Cube'),
+      objectPointer: z.number().int().positive(),
+      meshPointer: z.number().int().positive(),
+      meshUsers: z.literal(1),
+      meshDatablockCount: z.literal(1),
+      modifierCount: z.literal(0),
+      shapeKeyCount: z.literal(0),
+      topologySha256: sha256Schema,
+      geometrySha256: sha256Schema,
+    }),
+    currentState: z.strictObject({
+      targetId: z.string().min(1),
+      sceneFingerprintSha256: sha256Schema,
+      objectName: z.literal('Cube'),
+      objectPointer: z.number().int().positive(),
+      meshPointer: z.number().int().positive(),
+      meshUsers: z.literal(1),
+      meshDatablockCount: z.literal(1),
+      modifierCount: z.literal(0),
+      shapeKeyCount: z.literal(0),
+      topologySha256: sha256Schema,
+      geometrySha256: sha256Schema,
+    }),
+    receiptPrefixRootSha256: sha256Schema.nullable(),
+    receiptPrefixHeadSha256: sha256Schema.nullable(),
+    lastCompletedOperationId: z.enum(meshEditSubdivideShortcutProofOperationIds).nullable(),
+    committedAt: timestampSchema,
+  })
+  .superRefine((checkpoint, context) => {
+    const hasReceipts = checkpoint.lastCompletedOperationId !== null;
+    if (
+      hasReceipts !== (checkpoint.receiptPrefixRootSha256 !== null) ||
+      hasReceipts !== (checkpoint.receiptPrefixHeadSha256 !== null) ||
+      checkpoint.baselineState.targetId !== checkpoint.targetId ||
+      checkpoint.currentState.targetId !== checkpoint.targetId ||
+      checkpoint.baselineState.objectPointer !== checkpoint.currentState.objectPointer ||
+      checkpoint.baselineState.meshPointer !== checkpoint.currentState.meshPointer
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Edit Subdivide failure checkpoint must bind target state and nullable receipt-prefix evidence exactly',
+      });
+    }
+  });
+
+export const procedureShortcutProofFailureCheckpointSchema = z.union([
+  subdivisionSurfaceShortcutProofFailureCheckpointSchema,
+  meshEditSubdivideShortcutProofFailureCheckpointSchema,
+]);
+
+const subdivisionSurfaceAttestationContentSchema = z.strictObject({
   formatVersion: procedureShortcutProofFormatVersionSchema,
   attestationId: z.uuid(),
   deliveryId: z.uuid(),
-  binding: procedureShortcutProofBindingSchema,
+  binding: subdivisionSurfaceBindingContentSchema.safeExtend({ integrity: integritySchema }),
   bindingContentSha256: sha256Schema,
   managedActionResult: z.literal('not_executed'),
   managedIdentityVerified: z.literal(false),
@@ -508,7 +985,7 @@ const attestationContentSchema = z.strictObject({
     transport: z.literal('event_simulate'),
     osHidInput: z.literal(false),
   }),
-  operationReceipts: z.array(procedureShortcutProofOperationReceiptSchema).length(4),
+  operationReceipts: z.tuple(subdivisionSurfaceShortcutProofOperationReceiptSchemas),
   strongObservation: z.strictObject({
     kind: z.literal('subdivision_surface_shortcut_ready'),
     satisfied: z.literal(true),
@@ -526,120 +1003,291 @@ const attestationContentSchema = z.strictObject({
     evaluatedTopologyWithinBounds: z.literal(true),
     sceneFingerprintSha256: sha256Schema,
   }),
-  nativeUndoCheckpoint: procedureShortcutProofNativeUndoCheckpointSchema,
+  nativeUndoCheckpoint: subdivisionSurfaceNativeUndoCheckpointSchema,
   attestedAt: timestampSchema,
 });
 
-export const procedureShortcutProofAttestationSchema = attestationContentSchema
-  .safeExtend({ integrity: integritySchema })
-  .superRefine((attestation, context) => {
-    const { binding, operationReceipts, nativeUndoCheckpoint } = attestation;
-    if (attestation.bindingContentSha256 !== binding.integrity.contentSha256) {
-      context.addIssue({
-        code: 'custom',
-        path: ['bindingContentSha256'],
-        message: 'Shortcut proof attestation must bind the exact binding content',
-      });
-    }
-    if (
-      attestation.executor.executorId !== binding.executorId ||
-      attestation.executor.executionBoundary !== binding.executionBoundary ||
-      attestation.executor.transport !== binding.transport
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['executor'],
-        message: 'Shortcut proof executor must match the immutable binding',
-      });
-    }
-    let previous: string | null = null;
-    let previousOccurredAt = Number.NEGATIVE_INFINITY;
-    for (const [index, receipt] of operationReceipts.entries()) {
-      const occurredAt = Date.parse(receipt.occurredAt);
+export const subdivisionSurfaceShortcutProofAttestationSchema =
+  subdivisionSurfaceAttestationContentSchema
+    .safeExtend({ integrity: integritySchema })
+    .superRefine((attestation, context) => {
+      const { binding, operationReceipts, nativeUndoCheckpoint } = attestation;
+      if (attestation.bindingContentSha256 !== binding.integrity.contentSha256) {
+        context.addIssue({
+          code: 'custom',
+          path: ['bindingContentSha256'],
+          message: 'Shortcut proof attestation must bind the exact binding content',
+        });
+      }
       if (
-        receipt.proofId !== binding.proofId ||
-        receipt.requestId !== binding.requestId ||
-        receipt.deliveryId !== attestation.deliveryId ||
-        receipt.bindingContentSha256 !== attestation.bindingContentSha256 ||
-        receipt.operationId !== binding.operationIds[index] ||
-        receipt.order !== index + 1 ||
-        receipt.previousReceiptContentSha256 !== previous ||
-        occurredAt < previousOccurredAt ||
-        receipt.contentSha256 !==
-          computeProcedureShortcutProofOperationReceiptContentSha256(receipt)
+        attestation.executor.executorId !== binding.executorId ||
+        attestation.executor.executionBoundary !== binding.executionBoundary ||
+        attestation.executor.transport !== binding.transport
       ) {
         context.addIssue({
           code: 'custom',
-          path: ['operationReceipts', index],
-          message:
-            'Shortcut proof receipts must form the exact canonical catalog operation hash chain',
+          path: ['executor'],
+          message: 'Shortcut proof executor must match the immutable binding',
         });
       }
-      previous = receipt.contentSha256;
-      previousOccurredAt = occurredAt;
-    }
-    if (
-      nativeUndoCheckpoint.proofId !== binding.proofId ||
-      nativeUndoCheckpoint.replayId !== binding.replayId ||
-      nativeUndoCheckpoint.targetId !== binding.acceptedAction.arguments.targetId ||
-      nativeUndoCheckpoint.baselineState.targetId !== binding.acceptedAction.arguments.targetId ||
-      nativeUndoCheckpoint.finalState.targetId !== binding.acceptedAction.arguments.targetId ||
-      nativeUndoCheckpoint.finalState.viewportLevel !==
-        binding.acceptedAction.arguments.viewportLevel ||
-      nativeUndoCheckpoint.receiptChainRootSha256 !== operationReceipts[0]?.contentSha256 ||
-      nativeUndoCheckpoint.receiptChainHeadSha256 !== previous ||
-      nativeUndoCheckpoint.strongObservationContentSha256 !==
-        attestation.strongObservation.contentSha256 ||
-      nativeUndoCheckpoint.finalSceneFingerprintSha256 !==
-        attestation.strongObservation.sceneFingerprintSha256 ||
-      Date.parse(attestation.strongObservation.observedAt) < previousOccurredAt ||
-      Date.parse(nativeUndoCheckpoint.committedAt) <
-        Date.parse(attestation.strongObservation.observedAt) ||
-      Date.parse(nativeUndoCheckpoint.committedAt) > Date.parse(attestation.attestedAt)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['nativeUndoCheckpoint'],
-        message:
-          'Shortcut Undo checkpoint must bind the completed receipt chain and proof identity',
-      });
-    }
-    const propertyReceipt = operationReceipts[2];
-    if (
-      propertyReceipt?.operationId !== subdivisionSurfaceShortcutProofOperationIds[2] ||
-      propertyReceipt.newValue !== binding.acceptedAction.arguments.viewportLevel ||
-      attestation.strongObservation.viewportLevel !==
-        binding.acceptedAction.arguments.viewportLevel ||
-      attestation.strongObservation.targetId !== binding.acceptedAction.arguments.targetId
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['strongObservation'],
-        message:
-          'Shortcut proof property and strong observation must match the exact accepted action',
-      });
-    }
-    if (
-      attestation.strongObservation.contentSha256 !==
-      computeProcedureShortcutProofStrongObservationContentSha256(attestation.strongObservation)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['strongObservation', 'contentSha256'],
-        message: 'Strong shortcut observation hash must match its strict evidence summary',
-      });
-    }
-    if (
-      computeProcedureShortcutProofAttestationContentSha256(attestation) !==
-      attestation.integrity.contentSha256
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['integrity', 'contentSha256'],
-        message: 'Shortcut proof attestation integrity must match its canonical content',
-      });
-    }
-  });
+      let previous: string | null = null;
+      let previousOccurredAt = Number.NEGATIVE_INFINITY;
+      for (const [index, receipt] of operationReceipts.entries()) {
+        const occurredAt = Date.parse(receipt.occurredAt);
+        if (
+          receipt.proofId !== binding.proofId ||
+          receipt.requestId !== binding.requestId ||
+          receipt.deliveryId !== attestation.deliveryId ||
+          receipt.bindingContentSha256 !== attestation.bindingContentSha256 ||
+          receipt.operationId !== binding.operationIds[index] ||
+          receipt.order !== index + 1 ||
+          receipt.previousReceiptContentSha256 !== previous ||
+          occurredAt < previousOccurredAt ||
+          receipt.contentSha256 !==
+            computeProcedureShortcutProofOperationReceiptContentSha256(receipt)
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['operationReceipts', index],
+            message:
+              'Shortcut proof receipts must form the exact canonical catalog operation hash chain',
+          });
+        }
+        previous = receipt.contentSha256;
+        previousOccurredAt = occurredAt;
+      }
+      if (
+        nativeUndoCheckpoint.proofId !== binding.proofId ||
+        nativeUndoCheckpoint.replayId !== binding.replayId ||
+        nativeUndoCheckpoint.targetId !== binding.acceptedAction.arguments.targetId ||
+        nativeUndoCheckpoint.baselineState.targetId !== binding.acceptedAction.arguments.targetId ||
+        nativeUndoCheckpoint.finalState.targetId !== binding.acceptedAction.arguments.targetId ||
+        nativeUndoCheckpoint.finalState.viewportLevel !==
+          binding.acceptedAction.arguments.viewportLevel ||
+        nativeUndoCheckpoint.receiptChainRootSha256 !== operationReceipts[0]?.contentSha256 ||
+        nativeUndoCheckpoint.receiptChainHeadSha256 !== previous ||
+        nativeUndoCheckpoint.strongObservationContentSha256 !==
+          attestation.strongObservation.contentSha256 ||
+        nativeUndoCheckpoint.finalSceneFingerprintSha256 !==
+          attestation.strongObservation.sceneFingerprintSha256 ||
+        Date.parse(attestation.strongObservation.observedAt) < previousOccurredAt ||
+        Date.parse(nativeUndoCheckpoint.committedAt) <
+          Date.parse(attestation.strongObservation.observedAt) ||
+        Date.parse(nativeUndoCheckpoint.committedAt) > Date.parse(attestation.attestedAt)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nativeUndoCheckpoint'],
+          message:
+            'Shortcut Undo checkpoint must bind the completed receipt chain and proof identity',
+        });
+      }
+      const propertyReceipt = operationReceipts[2];
+      if (
+        propertyReceipt?.operationId !== subdivisionSurfaceShortcutProofOperationIds[2] ||
+        propertyReceipt.newValue !== binding.acceptedAction.arguments.viewportLevel ||
+        attestation.strongObservation.viewportLevel !==
+          binding.acceptedAction.arguments.viewportLevel ||
+        attestation.strongObservation.targetId !== binding.acceptedAction.arguments.targetId
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['strongObservation'],
+          message:
+            'Shortcut proof property and strong observation must match the exact accepted action',
+        });
+      }
+      if (
+        attestation.strongObservation.contentSha256 !==
+        computeProcedureShortcutProofStrongObservationContentSha256(attestation.strongObservation)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['strongObservation', 'contentSha256'],
+          message: 'Strong shortcut observation hash must match its strict evidence summary',
+        });
+      }
+      if (
+        computeProcedureShortcutProofAttestationContentSha256(attestation) !==
+        attestation.integrity.contentSha256
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['integrity', 'contentSha256'],
+          message: 'Shortcut proof attestation integrity must match its canonical content',
+        });
+      }
+    });
+
+const meshEditSubdivideStrongObservationSchema = z.strictObject({
+  kind: z.literal('mesh_edit_subdivide_shortcut_ready'),
+  satisfied: z.literal(true),
+  observationId: z.uuid(),
+  observedAt: timestampSchema,
+  contentSha256: sha256Schema,
+  targetId: z.string().min(1),
+  objectName: z.literal('Cube'),
+  objectPointer: z.number().int().positive(),
+  meshName: z.string().min(1),
+  meshPointer: z.number().int().positive(),
+  meshUsers: z.literal(1),
+  meshDatablockCount: z.literal(1),
+  sameObjectIdentity: z.literal(true),
+  sameMeshIdentity: z.literal(true),
+  managedReplacementMeshCreated: z.literal(false),
+  modifierCount: z.literal(0),
+  shapeKeyCount: z.literal(0),
+  activeObjectMode: z.literal('OBJECT'),
+  selectedObjectCount: z.literal(1),
+  operatorId: z.literal('MESH_OT_subdivide'),
+  cuts: z.number().int().min(1).max(8),
+  smooth: z.number().min(0).max(1),
+  topology: z.strictObject({
+    vertices: z.number().int().positive(),
+    edges: z.number().int().positive(),
+    polygons: z.number().int().positive(),
+  }),
+  topologySha256: sha256Schema,
+  geometrySha256: sha256Schema,
+  sceneFingerprintSha256: sha256Schema,
+});
+
+const meshEditSubdivideAttestationContentSchema = z.strictObject({
+  formatVersion: procedureShortcutProofFormatVersionSchema,
+  attestationId: z.uuid(),
+  deliveryId: z.uuid(),
+  binding: meshEditSubdivideBindingContentSchema.safeExtend({ integrity: integritySchema }),
+  bindingContentSha256: sha256Schema,
+  managedActionResult: z.literal('not_executed'),
+  managedIdentityVerified: z.literal(false),
+  managedReceiptCreated: z.literal(false),
+  managedReplacementMeshCreated: z.literal(false),
+  nativeMutationKind: z.literal('in_place_edit_mesh_subdivide'),
+  executor: z.strictObject({
+    executorId: z.literal('blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'),
+    executionBoundary: z.literal('blender_window_event_simulate'),
+    transport: z.literal('event_simulate'),
+    osHidInput: z.literal(false),
+  }),
+  operationReceipts: z.tuple(meshEditSubdivideShortcutProofOperationReceiptSchemas),
+  strongObservation: meshEditSubdivideStrongObservationSchema,
+  nativeUndoCheckpoint: meshEditSubdivideNativeUndoCheckpointSchema,
+  attestedAt: timestampSchema,
+});
+
+export const meshEditSubdivideShortcutProofAttestationSchema =
+  meshEditSubdivideAttestationContentSchema
+    .safeExtend({ integrity: integritySchema })
+    .superRefine((attestation, context) => {
+      const { binding, operationReceipts, nativeUndoCheckpoint, strongObservation } = attestation;
+      let previous: string | null = null;
+      let previousOccurredAt = Number.NEGATIVE_INFINITY;
+      for (const [index, receipt] of operationReceipts.entries()) {
+        const occurredAt = Date.parse(receipt.occurredAt);
+        if (
+          receipt.proofId !== binding.proofId ||
+          receipt.requestId !== binding.requestId ||
+          receipt.deliveryId !== attestation.deliveryId ||
+          receipt.bindingContentSha256 !== attestation.bindingContentSha256 ||
+          receipt.operationId !== binding.operationIds[index] ||
+          receipt.order !== index + 1 ||
+          receipt.previousReceiptContentSha256 !== previous ||
+          occurredAt < previousOccurredAt ||
+          receipt.contentSha256 !==
+            computeProcedureShortcutProofOperationReceiptContentSha256(receipt)
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['operationReceipts', index],
+            message: 'Edit Subdivide receipts must form the exact canonical nine-operation chain',
+          });
+        }
+        previous = receipt.contentSha256;
+        previousOccurredAt = occurredAt;
+      }
+      const cutsReceipt = operationReceipts[5];
+      const smoothReceipt = operationReceipts[6];
+      const segmentCount = binding.acceptedAction.arguments.cuts + 1;
+      const expectedTopology = {
+        vertices: 6 * segmentCount * segmentCount + 2,
+        edges: 12 * segmentCount * segmentCount,
+        polygons: 6 * segmentCount * segmentCount,
+      };
+      if (
+        attestation.bindingContentSha256 !== binding.integrity.contentSha256 ||
+        nativeUndoCheckpoint.proofId !== binding.proofId ||
+        nativeUndoCheckpoint.replayId !== binding.replayId ||
+        nativeUndoCheckpoint.targetId !== binding.acceptedAction.arguments.targetId ||
+        nativeUndoCheckpoint.baselineState.targetId !== binding.acceptedAction.arguments.targetId ||
+        nativeUndoCheckpoint.finalState.targetId !== binding.acceptedAction.arguments.targetId ||
+        nativeUndoCheckpoint.finalState.cuts !== binding.acceptedAction.arguments.cuts ||
+        nativeUndoCheckpoint.finalState.smooth !== binding.acceptedAction.arguments.smooth ||
+        nativeUndoCheckpoint.baselineState.objectPointer !==
+          nativeUndoCheckpoint.finalState.objectPointer ||
+        nativeUndoCheckpoint.baselineState.meshPointer !==
+          nativeUndoCheckpoint.finalState.meshPointer ||
+        nativeUndoCheckpoint.baselineState.meshDatablockCount !==
+          nativeUndoCheckpoint.finalState.meshDatablockCount ||
+        nativeUndoCheckpoint.finalState.meshDatablockCount !==
+          strongObservation.meshDatablockCount ||
+        nativeUndoCheckpoint.finalState.objectPointer !== strongObservation.objectPointer ||
+        nativeUndoCheckpoint.finalState.meshPointer !== strongObservation.meshPointer ||
+        nativeUndoCheckpoint.finalState.topologySha256 !== strongObservation.topologySha256 ||
+        nativeUndoCheckpoint.finalState.geometrySha256 !== strongObservation.geometrySha256 ||
+        nativeUndoCheckpoint.receiptChainRootSha256 !== operationReceipts[0]?.contentSha256 ||
+        nativeUndoCheckpoint.receiptChainHeadSha256 !== previous ||
+        nativeUndoCheckpoint.strongObservationContentSha256 !== strongObservation.contentSha256 ||
+        nativeUndoCheckpoint.finalSceneFingerprintSha256 !==
+          strongObservation.sceneFingerprintSha256 ||
+        cutsReceipt?.operationId !== meshEditSubdivideShortcutProofOperationIds[5] ||
+        !('newValue' in cutsReceipt) ||
+        cutsReceipt.newValue !== binding.acceptedAction.arguments.cuts ||
+        smoothReceipt?.operationId !== meshEditSubdivideShortcutProofOperationIds[6] ||
+        !('newValue' in smoothReceipt) ||
+        smoothReceipt.newValue !== binding.acceptedAction.arguments.smooth ||
+        strongObservation.targetId !== binding.acceptedAction.arguments.targetId ||
+        strongObservation.cuts !== binding.acceptedAction.arguments.cuts ||
+        strongObservation.smooth !== binding.acceptedAction.arguments.smooth ||
+        strongObservation.topology.vertices !== expectedTopology.vertices ||
+        strongObservation.topology.edges !== expectedTopology.edges ||
+        strongObservation.topology.polygons !== expectedTopology.polygons ||
+        Date.parse(strongObservation.observedAt) < previousOccurredAt ||
+        Date.parse(nativeUndoCheckpoint.committedAt) < Date.parse(strongObservation.observedAt) ||
+        Date.parse(nativeUndoCheckpoint.committedAt) > Date.parse(attestation.attestedAt)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['strongObservation'],
+          message:
+            'Edit Subdivide proof evidence must match its exact binding, receipts, and history',
+        });
+      }
+      if (
+        strongObservation.contentSha256 !==
+        computeProcedureShortcutProofStrongObservationContentSha256(strongObservation)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['strongObservation', 'contentSha256'],
+          message: 'Edit Subdivide strong observation hash must match its strict evidence summary',
+        });
+      }
+      if (
+        computeProcedureShortcutProofAttestationContentSha256(attestation) !==
+        attestation.integrity.contentSha256
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['integrity', 'contentSha256'],
+          message: 'Edit Subdivide attestation integrity must match its canonical content',
+        });
+      }
+    });
+
+export const procedureShortcutProofAttestationSchema = z.union([
+  subdivisionSurfaceShortcutProofAttestationSchema,
+  meshEditSubdivideShortcutProofAttestationSchema,
+]);
 export type ProcedureShortcutProofAttestation = z.infer<
   typeof procedureShortcutProofAttestationSchema
 >;

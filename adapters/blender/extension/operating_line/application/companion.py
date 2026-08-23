@@ -156,12 +156,16 @@ class CompanionController:
 
     @property
     def shortcut_mutation_blocked(self) -> bool:
+        from ..infrastructure.edit_subdivide_shortcut_history import (
+            edit_subdivide_shortcut_history_mutation_locked,
+        )
         from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
 
         return (
             self._shortcut_proof_driver is not None
             or self._menu_control_proof_driver is not None
             or shortcut_history_mutation_locked()
+            or edit_subdivide_shortcut_history_mutation_locked()
             or self._menu_control_history.mutation_locked
             or self._menu_control_recovery_locked
         )
@@ -205,9 +209,17 @@ class CompanionController:
         return self._timer_callback
 
     def register_timer(self) -> None:
+        from ..infrastructure.edit_subdivide_shortcut_history import (
+            register_edit_subdivide_shortcut_history,
+        )
         from ..infrastructure.shortcut_history import register_shortcut_history
 
         register_shortcut_history(
+            restored_result_builder=self._shortcut_history_restored,
+            reapplied_result_builder=self._shortcut_history_reapplied,
+            transition_result_callback=self._submit_shortcut_transition_result,
+        )
+        register_edit_subdivide_shortcut_history(
             restored_result_builder=self._shortcut_history_restored,
             reapplied_result_builder=self._shortcut_history_reapplied,
             transition_result_callback=self._submit_shortcut_transition_result,
@@ -233,6 +245,11 @@ class CompanionController:
         if self._timer_registered and bpy.app.timers.is_registered(self._timer_callback):
             bpy.app.timers.unregister(self._timer_callback)
         self._timer_registered = False
+        from ..infrastructure.edit_subdivide_shortcut_history import (
+            unregister_edit_subdivide_shortcut_history,
+        )
+
+        unregister_edit_subdivide_shortcut_history()
         self._menu_control_history.retire(keep_handlers=document_replaced)
 
     def connect(self, base_url: str, token: str) -> None:
@@ -351,14 +368,17 @@ class CompanionController:
 
     def _cancel_active_shortcut_proof(self, reason: str) -> None:
         """Stop an active native-input driver before transport/history teardown."""
-
-        from ..infrastructure.shortcut_history import (
-            lock_shortcut_history_indeterminate,
-        )
-
         driver = self._shortcut_proof_driver
         if driver is None:
             return
+        if getattr(driver, "executor_id", None) == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            from ..infrastructure.edit_subdivide_shortcut_history import (
+                lock_edit_subdivide_shortcut_history_indeterminate as lock_shortcut_history_indeterminate,
+            )
+        else:
+            from ..infrastructure.shortcut_history import (
+                lock_shortcut_history_indeterminate,
+            )
         cancel = getattr(driver, "cancel", None)
         try:
             if callable(cancel):
@@ -2913,7 +2933,7 @@ class CompanionController:
 
     @staticmethod
     def _shortcut_result_identity(delivery: dict[str, Any]) -> dict[str, Any]:
-        return {
+        identity = {
             key: deepcopy(delivery[key])
             for key in (
                 "formatVersion", "requestId", "replayId", "proofId", "deliveryId",
@@ -2925,12 +2945,19 @@ class CompanionController:
                 "expectedState", "requestedAt", "dispatchedAt",
             )
         }
+        if delivery.get("executorId") == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            identity["nativeUndoDepth"] = delivery["nativeUndoDepth"]
+            identity["nativeRedoDepth"] = delivery["nativeRedoDepth"]
+        return identity
 
     def _validate_shortcut_proof_authority(
         self, delivery: dict[str, Any], *, require_idle_driver: bool
     ) -> tuple[DemoSession, dict[str, Any]]:
         """Re-check immutable accepted authority immediately before native input."""
         from .. import get_session
+        from ..infrastructure.edit_subdivide_shortcut_history import (
+            edit_subdivide_shortcut_history_mutation_locked,
+        )
         from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
 
         if require_idle_driver and (
@@ -2944,6 +2971,8 @@ class CompanionController:
             raise ValueError("A menu-control recovery lock requires explicit document recovery")
         if shortcut_history_mutation_locked():
             raise ValueError("A shortcut proof mutation remains locked pending native Undo")
+        if edit_subdivide_shortcut_history_mutation_locked():
+            raise ValueError("An Edit Subdivide mutation remains locked pending native Undo")
         transport = self._transport
         if transport is None or not transport.running:
             raise ValueError("Shortcut proof requires the live Companion lease")
@@ -2951,7 +2980,10 @@ class CompanionController:
         binding = delivery["binding"]
         if delivery["target"] != {"adapterId": "blender", "instanceId": self.instance_id}:
             raise ValueError("Shortcut proof targets a different Companion")
-        if delivery["targetProfile"] != "factory_cube_8_12_6":
+        if delivery["targetProfile"] not in {
+            "factory_cube_8_12_6",
+            "factory_cube_single_user_mesh_8_12_6",
+        }:
             raise ValueError("Shortcut proof target profile is unsupported")
         if self._last_accepted_proposal_id != delivery["proposalId"]:
             raise ValueError("Shortcut proof proposal was not accepted locally")
@@ -3025,6 +3057,16 @@ class CompanionController:
             or proof.managed_receipt_created is not False
         ):
             raise ValueError("Shortcut proof executor is not authorized by the bundled catalog")
+        if delivery["executorId"] == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            if (
+                delivery.get("nativeUndoDepth") != 4
+                or delivery.get("nativeRedoDepth") != 4
+                or binding.get("nativeUndoDepth") != 4
+                or binding.get("nativeRedoDepth") != 4
+                or binding.get("proofScope", {}).get("managedReplacementMeshCreated") is not False
+                or binding.get("proofScope", {}).get("nativeMutationKind") != "in_place_edit_mesh_subdivide"
+            ):
+                raise ValueError("Edit Subdivide executor requires its exact 4/4 in-place authority")
         return session, source_step
 
     def _shortcut_progress_payloads(
@@ -3052,7 +3094,7 @@ class CompanionController:
         error: str | None,
         occurred_at: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        result = {
             **self._shortcut_result_identity(delivery),
             "status": status,
             "managedActionResult": "not_executed",
@@ -3062,11 +3104,30 @@ class CompanionController:
             "error": error,
             "occurredAt": occurred_at or self._shortcut_now(),
         }
+        if delivery["executorId"] == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            result.update(
+                {
+                    "managedReceiptCreated": False,
+                    "managedReplacementMeshCreated": False,
+                    "nativeMutationKind": "in_place_edit_mesh_subdivide",
+                }
+            )
+        return result
 
     def _shortcut_strong_observation(
         self, delivery: dict[str, Any], evidence: dict[str, Any]
     ) -> dict[str, Any]:
         observation = evidence["observation"]
+        if delivery["executorId"] == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            strong = {
+                "kind": "mesh_edit_subdivide_shortcut_ready",
+                "satisfied": True,
+                "observationId": str(uuid.uuid4()),
+                "targetId": delivery["binding"]["acceptedAction"]["arguments"]["targetId"],
+                **deepcopy(observation),
+            }
+            strong["contentSha256"] = self._shortcut_canonical_sha256(strong)
+            return strong
         flags = observation["modifierFlags"]
         strong = {
             "kind": "subdivision_surface_shortcut_ready",
@@ -3113,6 +3174,14 @@ class CompanionController:
             "nativeUndoCheckpoint": deepcopy(checkpoint),
             "attestedAt": self._shortcut_now(),
         }
+        if delivery["executorId"] == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            attestation.update(
+                {
+                    "managedReceiptCreated": False,
+                    "managedReplacementMeshCreated": False,
+                    "nativeMutationKind": "in_place_edit_mesh_subdivide",
+                }
+            )
         attestation["integrity"] = {
             "algorithm": "sha256",
             "canonicalization": "operatingline-json-value-v1",
@@ -3123,7 +3192,12 @@ class CompanionController:
     def _handle_shortcut_proof_complete(
         self, delivery: dict[str, Any], evidence: dict[str, Any]
     ) -> None:
-        from ..infrastructure.shortcut_history import arm_shortcut_history
+        if delivery["executorId"] == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+            from ..infrastructure.edit_subdivide_shortcut_history import (
+                arm_edit_subdivide_shortcut_history as arm_shortcut_history,
+            )
+        else:
+            from ..infrastructure.shortcut_history import arm_shortcut_history
 
         transport = self._transport
         receipts = list(evidence["operationReceipts"])
@@ -3243,7 +3317,12 @@ class CompanionController:
             }
             requires_undo = False
         else:
-            from ..infrastructure.shortcut_history import arm_failed_shortcut_history
+            if delivery.get("executorId", "blender.subdivision_surface_f9.event_simulate.v1") == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+                from ..infrastructure.edit_subdivide_shortcut_history import (
+                    arm_failed_edit_subdivide_shortcut_history as arm_failed_shortcut_history,
+                )
+            else:
+                from ..infrastructure.shortcut_history import arm_failed_shortcut_history
 
             try:
                 target_id = delivery["binding"]["acceptedAction"]["arguments"]["targetId"]
@@ -3277,9 +3356,14 @@ class CompanionController:
                     terminal_result_builder=build_failure_terminal_result,
                 )
             except (KeyError, OSError, RuntimeError, TypeError, ValueError) as checkpoint_error:
-                from ..infrastructure.shortcut_history import (
-                    lock_shortcut_history_indeterminate,
-                )
+                if delivery["executorId"] == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+                    from ..infrastructure.edit_subdivide_shortcut_history import (
+                        lock_edit_subdivide_shortcut_history_indeterminate as lock_shortcut_history_indeterminate,
+                    )
+                else:
+                    from ..infrastructure.shortcut_history import (
+                        lock_shortcut_history_indeterminate,
+                    )
 
                 lock_shortcut_history_indeterminate(
                     f"Failure checkpoint could not arm: {checkpoint_error}"
@@ -3318,8 +3402,6 @@ class CompanionController:
         }[status]
 
     def _handle_shortcut_proof_execute_request(self, delivery: Any) -> None:
-        from ..infrastructure.shortcut_proof import SubdivisionSurfaceF9ShortcutProof
-
         transport = self._transport
         if transport is None or not isinstance(delivery, dict):
             return
@@ -3334,14 +3416,32 @@ class CompanionController:
             self._seen_shortcut_proof_request_ids.add(request_id)
         try:
             self._validate_shortcut_proof_authority(delivery, require_idle_driver=True)
-            target_level = delivery["binding"]["acceptedAction"]["arguments"]["viewportLevel"]
-            driver = SubdivisionSurfaceF9ShortcutProof(
-                target_level,
-                proof_id=delivery["proofId"],
-                request_id=delivery["requestId"],
-                delivery_id=delivery["deliveryId"],
-                binding_content_sha256=delivery["bindingContentSha256"],
-            )
+            arguments = delivery["binding"]["acceptedAction"]["arguments"]
+            driver_identity = {
+                "proof_id": delivery["proofId"],
+                "request_id": delivery["requestId"],
+                "delivery_id": delivery["deliveryId"],
+                "binding_content_sha256": delivery["bindingContentSha256"],
+            }
+            if delivery.get(
+                "executorId",
+                "blender.subdivision_surface_f9.event_simulate.v1",
+            ) == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+                from ..infrastructure.edit_subdivide_shortcut_proof import (
+                    EditSubdivideF3F9ShortcutProof,
+                )
+
+                driver = EditSubdivideF3F9ShortcutProof(
+                    arguments["cuts"], arguments["smooth"], **driver_identity
+                )
+            else:
+                from ..infrastructure.shortcut_proof import (
+                    SubdivisionSurfaceF9ShortcutProof,
+                )
+
+                driver = SubdivisionSurfaceF9ShortcutProof(
+                    arguments["viewportLevel"], **driver_identity
+                )
             self._shortcut_proof_driver = driver
             self._shortcut_proof_delivery = deepcopy(delivery)
 
@@ -3351,7 +3451,9 @@ class CompanionController:
 
             driver.start(
                 preflight_hook=preflight_hook,
-                pre_mutation_hook=self._supersede_restored_menu_history,
+                pre_mutation_hook=lambda: (
+                    self._supersede_restored_menu_history() or True
+                ),
                 on_complete=lambda evidence: self._handle_shortcut_proof_complete(delivery, evidence),
                 on_failure=lambda evidence: self._handle_shortcut_proof_failure(delivery, evidence),
             )
@@ -3368,22 +3470,32 @@ class CompanionController:
             })
 
     def _handle_shortcut_proof_recovery_request(self, delivery: Any) -> None:
-        from ..infrastructure.shortcut_history import (
-            reconcile_shortcut_transition_outbox,
-            rebind_shortcut_history,
-            shortcut_history_has_transition_outbox,
-            shortcut_history_transition_checkpoint,
-        )
-
         transport = self._transport
         if transport is None or not isinstance(delivery, dict):
             return
         try:
-            ack = (
-                reconcile_shortcut_transition_outbox(bpy.context.scene, delivery)
-                if shortcut_history_has_transition_outbox()
-                else rebind_shortcut_history(bpy.context.scene, delivery)
-            )
+            if delivery.get("executorId") == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+                from ..infrastructure.edit_subdivide_shortcut_history import (
+                    edit_subdivide_shortcut_history_current_checkpoint,
+                    rebind_edit_subdivide_shortcut_history,
+                )
+
+                ack = rebind_edit_subdivide_shortcut_history(bpy.context.scene, delivery)
+                checkpoint = edit_subdivide_shortcut_history_current_checkpoint()
+            else:
+                from ..infrastructure.shortcut_history import (
+                    reconcile_shortcut_transition_outbox,
+                    rebind_shortcut_history,
+                    shortcut_history_has_transition_outbox,
+                    shortcut_history_transition_checkpoint,
+                )
+
+                ack = (
+                    reconcile_shortcut_transition_outbox(bpy.context.scene, delivery)
+                    if shortcut_history_has_transition_outbox()
+                    else rebind_shortcut_history(bpy.context.scene, delivery)
+                )
+                checkpoint = shortcut_history_transition_checkpoint()
             history = delivery["history"]
             base_delivery = {
                 key: deepcopy(value)
@@ -3396,7 +3508,6 @@ class CompanionController:
                 }
             }
             self._shortcut_proof_delivery = base_delivery
-            checkpoint = shortcut_history_transition_checkpoint()
             if checkpoint is None:
                 raise RuntimeError("Shortcut proof rebound checkpoint is unavailable")
             self._shortcut_proof_checkpoint = deepcopy(checkpoint)
@@ -3408,16 +3519,28 @@ class CompanionController:
             self.status = "Shortcut proof recovery required"
 
     def _handle_shortcut_terminal_reconcile_request(self, delivery: Any) -> None:
-        from ..infrastructure.shortcut_history import (
-            reconcile_shortcut_terminal_outbox,
-            shortcut_history_current_attestation,
-        )
-
         transport = self._transport
         if transport is None or not isinstance(delivery, dict):
             return
         try:
-            ack = reconcile_shortcut_terminal_outbox(bpy.context.scene, delivery)
+            if delivery.get("executorId") == "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1":
+                from ..infrastructure.edit_subdivide_shortcut_history import (
+                    edit_subdivide_shortcut_history_current_checkpoint,
+                    reconcile_edit_subdivide_shortcut_terminal_outbox,
+                )
+
+                ack = reconcile_edit_subdivide_shortcut_terminal_outbox(
+                    bpy.context.scene, delivery
+                )
+                checkpoint = edit_subdivide_shortcut_history_current_checkpoint()
+            else:
+                from ..infrastructure.shortcut_history import (
+                    reconcile_shortcut_terminal_outbox,
+                    shortcut_history_current_attestation,
+                )
+
+                ack = reconcile_shortcut_terminal_outbox(bpy.context.scene, delivery)
+                checkpoint = shortcut_history_current_attestation()
             base_delivery = {
                 key: deepcopy(value)
                 for key, value in delivery.items()
@@ -3426,7 +3549,6 @@ class CompanionController:
                     "recoveryRequestedAt",
                 }
             }
-            checkpoint = shortcut_history_current_attestation()
             if checkpoint is None:
                 raise RuntimeError("Shortcut terminal reconciliation checkpoint is unavailable")
             self._shortcut_proof_delivery = base_delivery
@@ -4841,6 +4963,9 @@ class CompanionController:
                     self.error = str(message.get("message") or "Runtime rejected shortcut proof evidence")
                     self.status = "Shortcut proof reporting failed closed"
                 elif message.get("kind") == "shortcut_proof_result_acknowledged":
+                    from ..infrastructure.edit_subdivide_shortcut_history import (
+                        acknowledge_edit_subdivide_shortcut_transition_results,
+                    )
                     from ..infrastructure.shortcut_history import (
                         acknowledge_shortcut_transition_results,
                     )
@@ -4848,6 +4973,9 @@ class CompanionController:
                     result_sha256 = message.get("resultContentSha256")
                     if isinstance(result_sha256, str):
                         acknowledge_shortcut_transition_results([result_sha256])
+                        acknowledge_edit_subdivide_shortcut_transition_results(
+                            [result_sha256]
+                        )
                     if not self.error:
                         self.status = "Shortcut proof evidence acknowledged"
                 elif message.get("kind") == "shortcut_proof_recovery_acknowledged":

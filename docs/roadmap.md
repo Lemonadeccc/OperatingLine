@@ -24,10 +24,10 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.39.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.38.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.44.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.43.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他二十个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
-      其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate shortcut，但 menu 仍 unavailable；只有 Subdivision Surface 的精确
-      accepted-replay/F9 轨迹另带独立 `proofExecution`，不会把其它 candidate 轨迹升级为可执行。活动叶节点不再依赖 Python
+      其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate shortcut，但 menu 仍 unavailable；只有 Subdivision Surface 与 Edit Mode Subdivide 的精确
+      factory-Cube accepted-replay/F9 轨迹各带独立 `proofExecution`，不会把其它 candidate 轨迹升级为可执行。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
       [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)、
@@ -658,6 +658,13 @@
           稀疏 FCurve/keyframe、唯一 receipt 和受管 ownership。原生菜单/快捷键轨迹继续保持 unavailable 或
           candidate-only，不冒充 managed execution。Blender 菜单/keymap/RNA 事实按 4.5.3/5.1.1 官方源码与
           运行时探针核对。见 [ADR 0106](adr/0106-expanded-edit-rig-action-level-mcp.md)。
+    - [x] Edit Mode Subdivide 原生 shortcut proof executor：冻结 InteractionCatalog `1.43.0`，由 `1.44.0`
+          只为 untouched、单用户 `8/12/6` factory Cube 声明九步 `TAB → A → F3/subdivide → ENTER → F9 →
+Cuts → Smoothness → ENTER → TAB` 前台事件执行。协议、Coordinator、Companion receipt、强 Observation
+          与 v2 history marker 均按 executor 严格判别；结果证明同一 object/Mesh 原地变异、参数化 topology/geometry、
+          四次 Undo baseline 和四次 Redo final，同时固定排除 managed action、ActionReceipt 与 replacement Mesh。
+          Blender 4.5.3/5.1.1 的三组参数矩阵通过；projection 仍为 candidate-only，不冒充受管 copy/swap action。
+          见 [ADR 0107](adr/0107-native-edit-subdivide-shortcut-proof.md)。
     - [ ] Poke Faces 隔离三叶 compound proof：Blender 4.5.3/5.1.1 前台已严格通过 Forward
           `Enter Edit→Poke→Exit Edit`、Back/Redo 各一次原生 history operation、逐叶 intent/receipt、
           middle-leaf-only checkpoint/history、完整 current-state integrity、每叶 crash/reconnect 分类、持久 lock、

@@ -4,13 +4,19 @@ import {
   computeProcedureShortcutProofCanonicalContentSha256,
   computeProcedureShortcutProofNativeObservationContentSha256,
   computeProcedureShortcutProofOperationReceiptContentSha256,
-  procedureShortcutProofAttestationSchema,
   procedureShortcutProofBindingSchema,
   procedureShortcutProofFormatVersionSchema,
-  procedureShortcutProofFailureCheckpointSchema,
   procedureShortcutProofOperationReceiptSchema,
+  meshEditSubdivideShortcutProofAttestationSchema,
+  meshEditSubdivideShortcutProofFailureCheckpointSchema,
+  meshEditSubdivideShortcutProofOperationIds,
+  meshEditSubdivideShortcutProofOperationIdsSchema,
+  meshEditSubdivideShortcutProofOperationReceiptSchemas,
   subdivisionSurfaceShortcutProofOperationIds,
   subdivisionSurfaceShortcutProofOperationIdsSchema,
+  subdivisionSurfaceShortcutProofOperationReceiptSchemas,
+  subdivisionSurfaceShortcutProofAttestationSchema,
+  subdivisionSurfaceShortcutProofFailureCheckpointSchema,
 } from './procedure-shortcut-proof.js';
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -21,7 +27,7 @@ const expectedStateSchema = z.strictObject({
 });
 const targetSchema = z.strictObject({ adapterId: z.literal('blender'), instanceId: z.uuid() });
 
-const deliveryIdentityShape = {
+const subdivisionSurfaceDeliveryIdentityShape = {
   formatVersion: procedureShortcutProofFormatVersionSchema,
   requestId: z.uuid(),
   replayId: z.uuid(),
@@ -52,6 +58,38 @@ const deliveryIdentityShape = {
   dispatchedAt: timestampSchema,
 } as const;
 
+const meshEditSubdivideDeliveryIdentityShape = {
+  ...subdivisionSurfaceDeliveryIdentityShape,
+  targetProfile: z.literal('factory_cube_single_user_mesh_8_12_6'),
+  executorId: z.literal('blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'),
+  operationIds: meshEditSubdivideShortcutProofOperationIdsSchema,
+  nativeUndoDepth: z.literal(4),
+  nativeRedoDepth: z.literal(4),
+} as const;
+
+const deliveryIdentitySchema = <ExtraShape extends z.ZodRawShape>(extraShape: ExtraShape) =>
+  z.discriminatedUnion('executorId', [
+    z.strictObject({ ...subdivisionSurfaceDeliveryIdentityShape, ...extraShape }),
+    z.strictObject({ ...meshEditSubdivideDeliveryIdentityShape, ...extraShape }),
+  ]);
+const deliveryIdentityProfileSchema = <
+  SubdivisionSurfaceExtraShape extends z.ZodRawShape,
+  MeshEditSubdivideExtraShape extends z.ZodRawShape,
+>(
+  subdivisionSurfaceExtraShape: SubdivisionSurfaceExtraShape,
+  meshEditSubdivideExtraShape: MeshEditSubdivideExtraShape,
+) =>
+  z.discriminatedUnion('executorId', [
+    z.strictObject({
+      ...subdivisionSurfaceDeliveryIdentityShape,
+      ...subdivisionSurfaceExtraShape,
+    }),
+    z.strictObject({
+      ...meshEditSubdivideDeliveryIdentityShape,
+      ...meshEditSubdivideExtraShape,
+    }),
+  ]);
+
 export const companionShortcutProofCreateRequestSchema = z.strictObject({
   formatVersion: procedureShortcutProofFormatVersionSchema,
   requestId: z.uuid(),
@@ -72,7 +110,7 @@ function bindingIdentityMatches(value: {
   replayId: string;
   proofId: string;
   target: { instanceId: string };
-  targetProfile: 'factory_cube_8_12_6';
+  targetProfile: 'factory_cube_8_12_6' | 'factory_cube_single_user_mesh_8_12_6';
   proposalId: string;
   plan: { id: string; revision: number; contentSha256: string };
   executionId: string;
@@ -81,6 +119,11 @@ function bindingIdentityMatches(value: {
   interactionCatalogContentSha256: string;
   shortcutTrackContentSha256: string;
   bindingContentSha256: string;
+  executorId: string;
+  executionBoundary: string;
+  authorization: string;
+  transport: string;
+  operationIds: readonly string[];
   expectedState: { reportId: string; sequence: number };
   binding: z.infer<typeof procedureShortcutProofBindingSchema>;
 }): boolean {
@@ -103,7 +146,13 @@ function bindingIdentityMatches(value: {
       value.interactionCatalogContentSha256 &&
     binding.materialization.shortcutTrackContentSha256 === value.shortcutTrackContentSha256 &&
     binding.startState.reportId === value.expectedState.reportId &&
-    binding.startState.sequence === value.expectedState.sequence
+    binding.startState.sequence === value.expectedState.sequence &&
+    binding.executorId === value.executorId &&
+    binding.executionBoundary === value.executionBoundary &&
+    binding.authorization === value.authorization &&
+    binding.transport === value.transport &&
+    binding.operationIds.length === value.operationIds.length &&
+    binding.operationIds.every((operationId, index) => operationId === value.operationIds[index])
   );
 }
 
@@ -116,18 +165,25 @@ function receiptPrefixIsCanonical(
     requestId: string;
     deliveryId: string;
     bindingContentSha256: string;
+    operationIds: readonly string[];
+    executorId: string;
   },
 ): boolean {
   let previous: string | null = null;
   let previousOccurredAt = Number.NEGATIVE_INFINITY;
   for (const [index, receipt] of receipts.entries()) {
     const occurredAt = Date.parse(receipt.occurredAt);
+    const expectedReceiptSchema =
+      identity.executorId === 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'
+        ? meshEditSubdivideShortcutProofOperationReceiptSchemas[index]
+        : subdivisionSurfaceShortcutProofOperationReceiptSchemas[index];
     if (
+      expectedReceiptSchema?.safeParse(receipt).success !== true ||
       receipt.proofId !== identity.proofId ||
       receipt.requestId !== identity.requestId ||
       receipt.deliveryId !== identity.deliveryId ||
       receipt.bindingContentSha256 !== identity.bindingContentSha256 ||
-      receipt.operationId !== subdivisionSurfaceShortcutProofOperationIds[index] ||
+      receipt.operationId !== identity.operationIds[index] ||
       receipt.order !== index + 1 ||
       receipt.previousReceiptContentSha256 !== previous ||
       occurredAt < previousOccurredAt ||
@@ -141,9 +197,8 @@ function receiptPrefixIsCanonical(
   return true;
 }
 
-export const companionShortcutProofDeliverySchema = z
-  .strictObject(deliveryIdentityShape)
-  .superRefine((delivery, context) => {
+export const companionShortcutProofDeliverySchema = deliveryIdentitySchema({}).superRefine(
+  (delivery, context) => {
     if (!bindingIdentityMatches(delivery)) {
       context.addIssue({
         code: 'custom',
@@ -151,7 +206,8 @@ export const companionShortcutProofDeliverySchema = z
         message: 'Shortcut proof authority binding must mirror immutable delivery identity',
       });
     }
-  });
+  },
+);
 export type CompanionShortcutProofDelivery = z.infer<typeof companionShortcutProofDeliverySchema>;
 
 export const companionShortcutProofHistoryIdentitySchema = z.strictObject({
@@ -176,46 +232,49 @@ export type CompanionShortcutProofHistoryStatus = z.infer<
   typeof companionShortcutProofHistoryStatusSchema
 >;
 
-export const companionShortcutProofRecoveryDeliverySchema = z
-  .strictObject({
-    ...deliveryIdentityShape,
-    kind: z.literal('native_history_rebind'),
-    recoveryId: z.uuid(),
-    history: companionShortcutProofHistoryIdentitySchema,
-    expectedStatus: companionShortcutProofHistoryStatusSchema,
-    expectedResultContentSha256: sha256Schema,
-    expectedMarkerContentSha256: sha256Schema,
-    recoveryRequestedAt: timestampSchema,
-  })
-  .superRefine((delivery, context) => {
-    if (!bindingIdentityMatches(delivery)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['binding'],
-        message: 'Shortcut proof recovery must preserve the exact immutable delivery identity',
-      });
-    }
-    if (Date.parse(delivery.recoveryRequestedAt) < Date.parse(delivery.dispatchedAt)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['recoveryRequestedAt'],
-        message: 'Shortcut proof recovery must be requested after its original delivery',
-      });
-    }
-  });
+export const companionShortcutProofRecoveryDeliverySchema = deliveryIdentitySchema({
+  kind: z.literal('native_history_rebind'),
+  recoveryId: z.uuid(),
+  history: companionShortcutProofHistoryIdentitySchema,
+  expectedStatus: companionShortcutProofHistoryStatusSchema,
+  expectedResultContentSha256: sha256Schema,
+  expectedMarkerContentSha256: sha256Schema,
+  recoveryRequestedAt: timestampSchema,
+}).superRefine((delivery, context) => {
+  if (!bindingIdentityMatches(delivery)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['binding'],
+      message: 'Shortcut proof recovery must preserve the exact immutable delivery identity',
+    });
+  }
+  if (Date.parse(delivery.recoveryRequestedAt) < Date.parse(delivery.dispatchedAt)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['recoveryRequestedAt'],
+      message: 'Shortcut proof recovery must be requested after its original delivery',
+    });
+  }
+});
 export type CompanionShortcutProofRecoveryDelivery = z.infer<
   typeof companionShortcutProofRecoveryDeliverySchema
 >;
 
-export const companionShortcutProofTerminalReconciliationDeliverySchema = z
-  .strictObject({
-    ...deliveryIdentityShape,
-    kind: z.literal('native_terminal_reconcile'),
-    recoveryId: z.uuid(),
-    acknowledgedProgressReceiptChainHeads: z.array(sha256Schema).max(4),
-    recoveryRequestedAt: timestampSchema,
-  })
-  .superRefine((delivery, context) => {
+export const companionShortcutProofTerminalReconciliationDeliverySchema =
+  deliveryIdentityProfileSchema(
+    {
+      kind: z.literal('native_terminal_reconcile'),
+      recoveryId: z.uuid(),
+      acknowledgedProgressReceiptChainHeads: z.array(sha256Schema).max(4),
+      recoveryRequestedAt: timestampSchema,
+    },
+    {
+      kind: z.literal('native_terminal_reconcile'),
+      recoveryId: z.uuid(),
+      acknowledgedProgressReceiptChainHeads: z.array(sha256Schema).max(9),
+      recoveryRequestedAt: timestampSchema,
+    },
+  ).superRefine((delivery, context) => {
     if (!bindingIdentityMatches(delivery)) {
       context.addIssue({
         code: 'custom',
@@ -315,9 +374,8 @@ export function companionShortcutProofRecoveryAckMatchesDelivery(
   );
 }
 
-export const companionShortcutProofProgressSchema = z
-  .strictObject({
-    ...deliveryIdentityShape,
+export const companionShortcutProofProgressSchema = deliveryIdentityProfileSchema(
+  {
     status: z.literal('in_progress'),
     completedOperationIds: z
       .array(z.enum(subdivisionSurfaceShortcutProofOperationIds))
@@ -325,23 +383,32 @@ export const companionShortcutProofProgressSchema = z
       .max(4),
     receiptChainHeadSha256: sha256Schema,
     occurredAt: timestampSchema,
-  })
-  .superRefine((progress, context) => {
-    if (!bindingIdentityMatches(progress)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['binding'],
-        message: 'Shortcut proof progress must preserve the exact authority binding',
-      });
-    }
-    if (progress.completedOperationIds.some((id, index) => id !== progress.operationIds[index])) {
-      context.addIssue({
-        code: 'custom',
-        path: ['completedOperationIds'],
-        message: 'Shortcut proof progress must report an exact operation prefix',
-      });
-    }
-  });
+  },
+  {
+    status: z.literal('in_progress'),
+    completedOperationIds: z
+      .array(z.enum(meshEditSubdivideShortcutProofOperationIds))
+      .min(1)
+      .max(9),
+    receiptChainHeadSha256: sha256Schema,
+    occurredAt: timestampSchema,
+  },
+).superRefine((progress, context) => {
+  if (!bindingIdentityMatches(progress)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['binding'],
+      message: 'Shortcut proof progress must preserve the exact authority binding',
+    });
+  }
+  if (progress.completedOperationIds.some((id, index) => id !== progress.operationIds[index])) {
+    context.addIssue({
+      code: 'custom',
+      path: ['completedOperationIds'],
+      message: 'Shortcut proof progress must report an exact operation prefix',
+    });
+  }
+});
 export type CompanionShortcutProofProgress = z.infer<typeof companionShortcutProofProgressSchema>;
 
 const resultStatusSchema = z.enum([
@@ -352,14 +419,14 @@ const resultStatusSchema = z.enum([
   'restored',
   'reapplied_locked',
 ]);
-const terminalEvidenceSchema = z.discriminatedUnion('kind', [
+const subdivisionSurfaceTerminalEvidenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('succeeded_locked'),
-    attestation: procedureShortcutProofAttestationSchema,
+    attestation: subdivisionSurfaceShortcutProofAttestationSchema,
   }),
   z.strictObject({
     kind: z.literal('failed_checkpointed'),
-    checkpoint: procedureShortcutProofFailureCheckpointSchema,
+    checkpoint: subdivisionSurfaceShortcutProofFailureCheckpointSchema,
     receiptPrefix: z.array(procedureShortcutProofOperationReceiptSchema).max(4),
     lastCompletedOperationId: z.enum(subdivisionSurfaceShortcutProofOperationIds).nullable(),
     baselineSceneFingerprintSha256: sha256Schema,
@@ -415,187 +482,263 @@ const terminalEvidenceSchema = z.discriminatedUnion('kind', [
     reappliedAt: timestampSchema,
   }),
 ]);
-export const companionShortcutProofResultSchema = z
-  .strictObject({
-    ...deliveryIdentityShape,
+
+const meshEditSubdivideTerminalEvidenceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('succeeded_locked'),
+    attestation: meshEditSubdivideShortcutProofAttestationSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('failed_checkpointed'),
+    checkpoint: meshEditSubdivideShortcutProofFailureCheckpointSchema,
+    receiptPrefix: z.array(procedureShortcutProofOperationReceiptSchema).max(9),
+    lastCompletedOperationId: z.enum(meshEditSubdivideShortcutProofOperationIds).nullable(),
+    baselineSceneFingerprintSha256: sha256Schema,
+    currentSceneFingerprintSha256: sha256Schema,
+    mutationStarted: z.literal(true),
+  }),
+  z.strictObject({
+    kind: z.literal('rejected_before_mutation'),
+    mutationStarted: z.literal(false),
+  }),
+  z.strictObject({
+    kind: z.literal('failed_restored'),
+    receiptPrefix: z.array(procedureShortcutProofOperationReceiptSchema).max(9),
+    lastCompletedOperationId: z.enum(meshEditSubdivideShortcutProofOperationIds).nullable(),
+    baselineSceneFingerprintSha256: sha256Schema,
+    currentSceneFingerprintSha256: sha256Schema,
+    nativeUndoObservation: z.strictObject({
+      satisfied: z.literal(true),
+      restorationObservationId: z.uuid(),
+      sceneFingerprintSha256: sha256Schema,
+      contentSha256: sha256Schema,
+    }),
+    mutationStarted: z.literal(true),
+  }),
+  z.strictObject({
+    kind: z.literal('restored'),
+    sourceCheckpointId: z.uuid(),
+    undoLockId: z.uuid(),
+    baselineSceneFingerprintSha256: sha256Schema,
+    lockedSceneFingerprintSha256: sha256Schema,
+    currentSceneFingerprintSha256: sha256Schema,
+    nativeUndoObservation: z.strictObject({
+      satisfied: z.literal(true),
+      restorationObservationId: z.uuid(),
+      sceneFingerprintSha256: sha256Schema,
+      contentSha256: sha256Schema,
+    }),
+    restoredAt: timestampSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('reapplied_locked'),
+    sourceCheckpointId: z.uuid(),
+    undoLockId: z.uuid(),
+    baselineSceneFingerprintSha256: sha256Schema,
+    lockedSceneFingerprintSha256: sha256Schema,
+    currentSceneFingerprintSha256: sha256Schema,
+    nativeRedoObservation: z.strictObject({
+      satisfied: z.literal(true),
+      redoObservationId: z.uuid(),
+      sceneFingerprintSha256: sha256Schema,
+      contentSha256: sha256Schema,
+    }),
+    reappliedAt: timestampSchema,
+  }),
+]);
+
+export const companionShortcutProofResultSchema = deliveryIdentityProfileSchema(
+  {
     status: resultStatusSchema,
     managedActionResult: z.literal('not_executed'),
     managedIdentityVerified: z.literal(false),
     requiresUndoToUnlock: z.boolean(),
-    terminalEvidence: terminalEvidenceSchema,
+    terminalEvidence: subdivisionSurfaceTerminalEvidenceSchema,
     error: z.string().min(1).nullable(),
     occurredAt: timestampSchema,
-  })
-  .superRefine((result, context) => {
-    if (!bindingIdentityMatches(result)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['binding'],
-        message: 'Shortcut proof result must preserve the exact authority binding',
-      });
-    }
-    const evidenceMatches =
-      (result.status === 'succeeded' &&
-        result.terminalEvidence.kind === 'succeeded_locked' &&
-        result.error === null) ||
-      (result.status === 'failed_checkpointed' &&
-        result.terminalEvidence.kind === 'failed_checkpointed' &&
-        result.error !== null) ||
-      (result.status === 'failed_restored' &&
-        result.terminalEvidence.kind === 'failed_restored' &&
-        result.error !== null) ||
-      (result.status === 'rejected' &&
-        result.terminalEvidence.kind === 'rejected_before_mutation' &&
-        result.error !== null) ||
-      (result.status === 'restored' &&
-        result.terminalEvidence.kind === 'restored' &&
-        result.error === null) ||
-      (result.status === 'reapplied_locked' &&
-        result.terminalEvidence.kind === 'reapplied_locked' &&
-        result.error === null);
-    if (!evidenceMatches) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Shortcut proof result status must match attestation and error evidence',
-      });
-    }
-    if (
-      result.requiresUndoToUnlock !==
-      (result.status === 'succeeded' ||
-        result.status === 'failed_checkpointed' ||
-        result.status === 'reapplied_locked')
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['requiresUndoToUnlock'],
-        message: 'Mutated shortcut proof results must retain the Undo lock until restored',
-      });
-    }
-    const attestation =
-      result.terminalEvidence.kind === 'succeeded_locked'
-        ? result.terminalEvidence.attestation
-        : null;
-    if (
-      attestation !== null &&
-      (attestation.binding.requestId !== result.requestId ||
-        attestation.binding.replayId !== result.replayId ||
-        attestation.binding.proofId !== result.proofId ||
-        attestation.deliveryId !== result.deliveryId ||
-        attestation.binding.target.instanceId !== result.target.instanceId ||
-        attestation.bindingContentSha256 !== result.bindingContentSha256)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['attestation'],
-        message: 'Shortcut proof result attestation must mirror immutable delivery identity',
-      });
-    }
-    if (result.terminalEvidence.kind === 'failed_checkpointed') {
-      const evidence = result.terminalEvidence;
-      const lastReceipt = evidence.receiptPrefix.at(-1);
-      if (
-        evidence.checkpoint.proofId !== result.proofId ||
-        evidence.checkpoint.replayId !== result.replayId ||
-        evidence.checkpoint.targetId !== result.binding.acceptedAction.arguments.targetId ||
-        !receiptPrefixIsCanonical(evidence.receiptPrefix, result) ||
-        evidence.checkpoint.baselineState.sceneFingerprintSha256 !==
-          evidence.baselineSceneFingerprintSha256 ||
-        evidence.checkpoint.currentState.sceneFingerprintSha256 !==
-          evidence.currentSceneFingerprintSha256 ||
-        (lastReceipt?.operationId ?? null) !== evidence.lastCompletedOperationId ||
-        evidence.checkpoint.lastCompletedOperationId !== evidence.lastCompletedOperationId ||
-        (evidence.receiptPrefix[0]?.contentSha256 ?? null) !==
-          evidence.checkpoint.receiptPrefixRootSha256 ||
-        (lastReceipt?.contentSha256 ?? null) !== evidence.checkpoint.receiptPrefixHeadSha256 ||
-        Date.parse(evidence.checkpoint.committedAt) <
-          Date.parse(lastReceipt?.occurredAt ?? result.dispatchedAt) ||
-        Date.parse(evidence.checkpoint.committedAt) > Date.parse(result.occurredAt)
-      ) {
-        context.addIssue({
-          code: 'custom',
-          path: ['terminalEvidence'],
-          message:
-            'Failed shortcut proof evidence must bind its checkpoint, receipt prefix, and mutated state',
-        });
-      }
-    }
-    if (
+  },
+  {
+    status: resultStatusSchema,
+    managedActionResult: z.literal('not_executed'),
+    managedIdentityVerified: z.literal(false),
+    managedReceiptCreated: z.literal(false),
+    managedReplacementMeshCreated: z.literal(false),
+    nativeMutationKind: z.literal('in_place_edit_mesh_subdivide'),
+    requiresUndoToUnlock: z.boolean(),
+    terminalEvidence: meshEditSubdivideTerminalEvidenceSchema,
+    error: z.string().min(1).nullable(),
+    occurredAt: timestampSchema,
+  },
+).superRefine((result, context) => {
+  if (!bindingIdentityMatches(result)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['binding'],
+      message: 'Shortcut proof result must preserve the exact authority binding',
+    });
+  }
+  const evidenceMatches =
+    (result.status === 'succeeded' &&
+      result.terminalEvidence.kind === 'succeeded_locked' &&
+      result.error === null) ||
+    (result.status === 'failed_checkpointed' &&
+      result.terminalEvidence.kind === 'failed_checkpointed' &&
+      result.error !== null) ||
+    (result.status === 'failed_restored' &&
+      result.terminalEvidence.kind === 'failed_restored' &&
+      result.error !== null) ||
+    (result.status === 'rejected' &&
+      result.terminalEvidence.kind === 'rejected_before_mutation' &&
+      result.error !== null) ||
+    (result.status === 'restored' &&
       result.terminalEvidence.kind === 'restored' &&
-      (result.terminalEvidence.baselineSceneFingerprintSha256 !==
-        result.terminalEvidence.currentSceneFingerprintSha256 ||
-        result.terminalEvidence.nativeUndoObservation.sceneFingerprintSha256 !==
-          result.terminalEvidence.currentSceneFingerprintSha256 ||
-        result.terminalEvidence.nativeUndoObservation.contentSha256 !==
-          computeProcedureShortcutProofNativeObservationContentSha256(
-            result.terminalEvidence.nativeUndoObservation,
-          ))
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['terminalEvidence'],
-        message: 'Restored shortcut proof must prove return to the baseline fingerprint',
-      });
-    }
-    if (result.terminalEvidence.kind === 'failed_restored') {
-      const evidence = result.terminalEvidence;
-      const lastReceipt = evidence.receiptPrefix.at(-1);
-      if (
-        evidence.baselineSceneFingerprintSha256 !== evidence.currentSceneFingerprintSha256 ||
-        !receiptPrefixIsCanonical(evidence.receiptPrefix, result) ||
-        evidence.nativeUndoObservation.sceneFingerprintSha256 !==
-          evidence.currentSceneFingerprintSha256 ||
-        evidence.nativeUndoObservation.contentSha256 !==
-          computeProcedureShortcutProofNativeObservationContentSha256(
-            evidence.nativeUndoObservation,
-          ) ||
-        (lastReceipt?.operationId ?? null) !== evidence.lastCompletedOperationId ||
-        Date.parse(lastReceipt?.occurredAt ?? result.dispatchedAt) > Date.parse(result.occurredAt)
-      ) {
-        context.addIssue({
-          code: 'custom',
-          path: ['terminalEvidence'],
-          message:
-            'Failed-restored shortcut proof must prove baseline restoration and receipt prefix',
-        });
-      }
-    }
-    if (
+      result.error === null) ||
+    (result.status === 'reapplied_locked' &&
       result.terminalEvidence.kind === 'reapplied_locked' &&
-      (result.terminalEvidence.lockedSceneFingerprintSha256 !==
-        result.terminalEvidence.currentSceneFingerprintSha256 ||
-        result.terminalEvidence.nativeRedoObservation.sceneFingerprintSha256 !==
-          result.terminalEvidence.currentSceneFingerprintSha256 ||
-        result.terminalEvidence.nativeRedoObservation.contentSha256 !==
-          computeProcedureShortcutProofNativeObservationContentSha256(
-            result.terminalEvidence.nativeRedoObservation,
-          ))
+      result.error === null);
+  if (!evidenceMatches) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Shortcut proof result status must match attestation and error evidence',
+    });
+  }
+  if (
+    result.requiresUndoToUnlock !==
+    (result.status === 'succeeded' ||
+      result.status === 'failed_checkpointed' ||
+      result.status === 'reapplied_locked')
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['requiresUndoToUnlock'],
+      message: 'Mutated shortcut proof results must retain the Undo lock until restored',
+    });
+  }
+  const attestation =
+    result.terminalEvidence.kind === 'succeeded_locked'
+      ? result.terminalEvidence.attestation
+      : null;
+  if (
+    attestation !== null &&
+    (attestation.binding.requestId !== result.requestId ||
+      attestation.binding.replayId !== result.replayId ||
+      attestation.binding.proofId !== result.proofId ||
+      attestation.deliveryId !== result.deliveryId ||
+      attestation.binding.target.instanceId !== result.target.instanceId ||
+      attestation.bindingContentSha256 !== result.bindingContentSha256)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['attestation'],
+      message: 'Shortcut proof result attestation must mirror immutable delivery identity',
+    });
+  }
+  if (result.terminalEvidence.kind === 'failed_checkpointed') {
+    const evidence = result.terminalEvidence;
+    const lastReceipt = evidence.receiptPrefix.at(-1);
+    if (
+      evidence.checkpoint.proofId !== result.proofId ||
+      evidence.checkpoint.replayId !== result.replayId ||
+      evidence.checkpoint.targetId !== result.binding.acceptedAction.arguments.targetId ||
+      !receiptPrefixIsCanonical(evidence.receiptPrefix, result) ||
+      evidence.checkpoint.baselineState.sceneFingerprintSha256 !==
+        evidence.baselineSceneFingerprintSha256 ||
+      evidence.checkpoint.currentState.sceneFingerprintSha256 !==
+        evidence.currentSceneFingerprintSha256 ||
+      (lastReceipt?.operationId ?? null) !== evidence.lastCompletedOperationId ||
+      evidence.checkpoint.lastCompletedOperationId !== evidence.lastCompletedOperationId ||
+      (evidence.receiptPrefix[0]?.contentSha256 ?? null) !==
+        evidence.checkpoint.receiptPrefixRootSha256 ||
+      (lastReceipt?.contentSha256 ?? null) !== evidence.checkpoint.receiptPrefixHeadSha256 ||
+      Date.parse(evidence.checkpoint.committedAt) <
+        Date.parse(lastReceipt?.occurredAt ?? result.dispatchedAt) ||
+      Date.parse(evidence.checkpoint.committedAt) > Date.parse(result.occurredAt)
     ) {
       context.addIssue({
         code: 'custom',
         path: ['terminalEvidence'],
-        message: 'Reapplied shortcut proof must prove return to the locked final fingerprint',
+        message:
+          'Failed shortcut proof evidence must bind its checkpoint, receipt prefix, and mutated state',
       });
     }
-    const terminalBoundaryAt =
-      result.terminalEvidence.kind === 'succeeded_locked'
-        ? result.terminalEvidence.attestation.attestedAt
-        : result.terminalEvidence.kind === 'restored'
-          ? result.terminalEvidence.restoredAt
-          : result.terminalEvidence.kind === 'reapplied_locked'
-            ? result.terminalEvidence.reappliedAt
-            : result.occurredAt;
+  }
+  if (
+    result.terminalEvidence.kind === 'restored' &&
+    (result.terminalEvidence.baselineSceneFingerprintSha256 !==
+      result.terminalEvidence.currentSceneFingerprintSha256 ||
+      result.terminalEvidence.nativeUndoObservation.sceneFingerprintSha256 !==
+        result.terminalEvidence.currentSceneFingerprintSha256 ||
+      result.terminalEvidence.nativeUndoObservation.contentSha256 !==
+        computeProcedureShortcutProofNativeObservationContentSha256(
+          result.terminalEvidence.nativeUndoObservation,
+        ))
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['terminalEvidence'],
+      message: 'Restored shortcut proof must prove return to the baseline fingerprint',
+    });
+  }
+  if (result.terminalEvidence.kind === 'failed_restored') {
+    const evidence = result.terminalEvidence;
+    const lastReceipt = evidence.receiptPrefix.at(-1);
     if (
-      Date.parse(result.requestedAt) > Date.parse(result.dispatchedAt) ||
-      Date.parse(result.dispatchedAt) > Date.parse(terminalBoundaryAt) ||
-      Date.parse(terminalBoundaryAt) > Date.parse(result.occurredAt)
+      evidence.baselineSceneFingerprintSha256 !== evidence.currentSceneFingerprintSha256 ||
+      !receiptPrefixIsCanonical(evidence.receiptPrefix, result) ||
+      evidence.nativeUndoObservation.sceneFingerprintSha256 !==
+        evidence.currentSceneFingerprintSha256 ||
+      evidence.nativeUndoObservation.contentSha256 !==
+        computeProcedureShortcutProofNativeObservationContentSha256(
+          evidence.nativeUndoObservation,
+        ) ||
+      (lastReceipt?.operationId ?? null) !== evidence.lastCompletedOperationId ||
+      Date.parse(lastReceipt?.occurredAt ?? result.dispatchedAt) > Date.parse(result.occurredAt)
     ) {
       context.addIssue({
         code: 'custom',
-        path: ['occurredAt'],
-        message: 'Shortcut proof result chronology must follow request, dispatch, and evidence',
+        path: ['terminalEvidence'],
+        message:
+          'Failed-restored shortcut proof must prove baseline restoration and receipt prefix',
       });
     }
-  });
+  }
+  if (
+    result.terminalEvidence.kind === 'reapplied_locked' &&
+    (result.terminalEvidence.lockedSceneFingerprintSha256 !==
+      result.terminalEvidence.currentSceneFingerprintSha256 ||
+      result.terminalEvidence.nativeRedoObservation.sceneFingerprintSha256 !==
+        result.terminalEvidence.currentSceneFingerprintSha256 ||
+      result.terminalEvidence.nativeRedoObservation.contentSha256 !==
+        computeProcedureShortcutProofNativeObservationContentSha256(
+          result.terminalEvidence.nativeRedoObservation,
+        ))
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['terminalEvidence'],
+      message: 'Reapplied shortcut proof must prove return to the locked final fingerprint',
+    });
+  }
+  const terminalBoundaryAt =
+    result.terminalEvidence.kind === 'succeeded_locked'
+      ? result.terminalEvidence.attestation.attestedAt
+      : result.terminalEvidence.kind === 'restored'
+        ? result.terminalEvidence.restoredAt
+        : result.terminalEvidence.kind === 'reapplied_locked'
+          ? result.terminalEvidence.reappliedAt
+          : result.occurredAt;
+  if (
+    Date.parse(result.requestedAt) > Date.parse(result.dispatchedAt) ||
+    Date.parse(result.dispatchedAt) > Date.parse(terminalBoundaryAt) ||
+    Date.parse(terminalBoundaryAt) > Date.parse(result.occurredAt)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['occurredAt'],
+      message: 'Shortcut proof result chronology must follow request, dispatch, and evidence',
+    });
+  }
+});
 export type CompanionShortcutProofResult = z.infer<typeof companionShortcutProofResultSchema>;
 
 export function computeCompanionShortcutProofResultContentSha256(
@@ -630,6 +773,45 @@ function lockedHistoryFromTerminalResult(result: CompanionShortcutProofResult) {
   return null;
 }
 
+export function computeCompanionShortcutProofTerminalMarkerIdentityContentSha256(input: {
+  executorId:
+    | 'blender.subdivision_surface_f9.event_simulate.v1'
+    | 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1';
+  checkpointId: string;
+  undoLockId: string;
+  proofId: string;
+  replayId: string;
+  targetId: string;
+  checkpointKind: 'success' | 'failure';
+  baselineSceneFingerprintSha256: string;
+  finalSceneFingerprintSha256: string;
+  terminalResultContentSha256: string;
+}): string {
+  const marker = {
+    formatVersion: '1.0.0',
+    executorId: input.executorId,
+    ...(input.executorId === 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'
+      ? {
+          markerKey: '_operating_line_shortcut_proof_history_v2',
+          nativeMutationKind: 'in_place_edit_mesh_subdivide',
+          nativeUndoDepth: 4,
+          nativeRedoDepth: 4,
+        }
+      : {}),
+    checkpointId: input.checkpointId,
+    undoLockId: input.undoLockId,
+    proofId: input.proofId,
+    replayId: input.replayId,
+    targetId: input.targetId,
+    targetObjectName: 'Cube',
+    checkpointKind: input.checkpointKind,
+    baselineSceneFingerprintSha256: input.baselineSceneFingerprintSha256,
+    finalSceneFingerprintSha256: input.finalSceneFingerprintSha256,
+    terminalResultContentSha256: input.terminalResultContentSha256,
+  };
+  return computeProcedureShortcutProofCanonicalContentSha256(marker);
+}
+
 export function computeCompanionShortcutProofTerminalMarkerContentSha256(
   result: CompanionShortcutProofResult,
 ): string {
@@ -638,21 +820,18 @@ export function computeCompanionShortcutProofTerminalMarkerContentSha256(
   if (history === null) {
     throw new Error('Native terminal marker requires a locked shortcut proof result');
   }
-  const marker = {
-    formatVersion: '1.0.0',
+  return computeCompanionShortcutProofTerminalMarkerIdentityContentSha256({
     executorId: parsed.executorId,
     checkpointId: history.checkpointId,
     undoLockId: history.undoLockId,
     proofId: parsed.proofId,
     replayId: parsed.replayId,
     targetId: parsed.binding.acceptedAction.arguments.targetId,
-    targetObjectName: 'Cube',
     checkpointKind: history.checkpointKind,
     baselineSceneFingerprintSha256: history.baselineSceneFingerprintSha256,
     finalSceneFingerprintSha256: history.finalSceneFingerprintSha256,
     terminalResultContentSha256: computeCompanionShortcutProofResultContentSha256(parsed),
-  };
-  return computeProcedureShortcutProofCanonicalContentSha256(marker);
+  });
 }
 
 export const companionShortcutProofTerminalReconciliationAckSchema = z
@@ -865,7 +1044,7 @@ const statusValueSchema = z.enum([
   'restored',
   'reapplied_locked',
 ]);
-const statusIdentityShape = {
+const subdivisionSurfaceStatusIdentityShape = {
   formatVersion: procedureShortcutProofFormatVersionSchema,
   requestId: z.uuid(),
   replayId: z.uuid(),
@@ -895,14 +1074,33 @@ const statusIdentityShape = {
   requestedAt: timestampSchema,
   dispatchedAt: timestampSchema.optional(),
 } as const;
+
+const meshEditSubdivideStatusIdentityShape = {
+  ...subdivisionSurfaceStatusIdentityShape,
+  targetProfile: z.literal('factory_cube_single_user_mesh_8_12_6'),
+  executorId: z.literal('blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'),
+  operationIds: meshEditSubdivideShortcutProofOperationIdsSchema,
+  nativeUndoDepth: z.literal(4),
+  nativeRedoDepth: z.literal(4),
+} as const;
+
 export const companionShortcutProofStatusSchema = z
-  .strictObject({
-    ...statusIdentityShape,
-    status: statusValueSchema,
-    progress: companionShortcutProofProgressSchema.optional(),
-    result: companionShortcutProofResultSchema.optional(),
-    updatedAt: timestampSchema,
-  })
+  .discriminatedUnion('executorId', [
+    z.strictObject({
+      ...subdivisionSurfaceStatusIdentityShape,
+      status: statusValueSchema,
+      progress: companionShortcutProofProgressSchema.optional(),
+      result: companionShortcutProofResultSchema.optional(),
+      updatedAt: timestampSchema,
+    }),
+    z.strictObject({
+      ...meshEditSubdivideStatusIdentityShape,
+      status: statusValueSchema,
+      progress: companionShortcutProofProgressSchema.optional(),
+      result: companionShortcutProofResultSchema.optional(),
+      updatedAt: timestampSchema,
+    }),
+  ])
   .superRefine((status, context) => {
     if (!bindingIdentityMatches(status)) {
       context.addIssue({
@@ -973,6 +1171,7 @@ export const companionShortcutProofStatusSchema = z
         status.progress.deliveryId !== status.deliveryId ||
         status.progress.bindingContentSha256 !== status.bindingContentSha256 ||
         status.progress.target.instanceId !== status.target.instanceId ||
+        status.progress.executorId !== status.executorId ||
         status.progress.executionId !== status.executionId ||
         status.progress.leafId !== status.leafId ||
         status.progress.shortcutTrackContentSha256 !== status.shortcutTrackContentSha256)
@@ -1000,6 +1199,7 @@ export const companionShortcutProofStatusSchema = z
       result.deliveryId !== status.deliveryId ||
       result.bindingContentSha256 !== status.bindingContentSha256 ||
       result.target.instanceId !== status.target.instanceId ||
+      result.executorId !== status.executorId ||
       result.proposalId !== status.proposalId ||
       result.executionId !== status.executionId ||
       result.leafId !== status.leafId ||

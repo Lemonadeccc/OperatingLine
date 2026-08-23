@@ -261,7 +261,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.43.0');
+    expect(catalog.catalogVersion).toBe('1.44.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -330,6 +330,7 @@ describe('interaction catalog protocol', () => {
       '1.41.0',
       '1.42.0',
       '1.43.0',
+      '1.44.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
@@ -2196,7 +2197,7 @@ describe('interaction catalog protocol', () => {
     );
   });
 
-  it('authorizes native shortcut proof execution only through the exact catalog declaration', () => {
+  it('authorizes native shortcut proof execution only through the exact catalog declaration', async () => {
     const recipe = blenderInteractionCatalog.recipes.find(
       (candidate) => candidate.actionName === 'blender.modifier.add_subdivision_surface',
     );
@@ -2225,6 +2226,68 @@ describe('interaction catalog protocol', () => {
     cube.procedureMaterialization.shortcut.proofExecution = shortcut.proofExecution;
     expect(() => validateInteractionCatalog(wrongRecipe, blenderActionCatalog)).toThrow(
       'restricted to the exact Subdivision Surface recipe',
+    );
+
+    const subdivideRecipe = blenderInteractionCatalog.recipes.find(
+      (candidate) => candidate.actionName === 'blender.mesh.edit_subdivide',
+    );
+    const subdivideShortcut = subdivideRecipe?.procedureMaterialization?.shortcut;
+    if (subdivideShortcut?.availability !== 'available') {
+      throw new Error('Expected Edit Subdivide shortcut');
+    }
+    expect(subdivideShortcut.projection).toBe('candidate_only');
+    expect(subdivideShortcut.proofExecution?.operationIds).toEqual(
+      subdivideShortcut.operations.map(({ id }) => id),
+    );
+    expect(subdivideShortcut.proofExecution).toMatchObject({
+      executorId: 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1',
+      targetProfile: 'factory_cube_single_user_mesh_8_12_6',
+      executionBoundary: 'blender_window_event_simulate',
+      osHidInput: false,
+      managedActionExecuted: false,
+      managedReceiptCreated: false,
+      managedReplacementMeshCreated: false,
+      nativeMutationKind: 'in_place_edit_mesh_subdivide',
+      hostVersions: ['4.5.3', '5.1.1'],
+      strongObservationKind: 'mesh_edit_subdivide_shortcut_ready',
+      nativeUndoCheckpointRequired: true,
+      nativeUndoDepth: 4,
+      nativeRedoDepth: 4,
+    });
+    expect(subdivideRecipe?.procedureMaterialization?.mcp.availability).toBe('available');
+
+    const crossedProfile = structuredClone(blenderInteractionCatalog);
+    const crossedShortcut = recipeFor(crossedProfile, 'blender.mesh.edit_subdivide')
+      .procedureMaterialization?.shortcut;
+    if (
+      crossedShortcut?.availability !== 'available' ||
+      crossedShortcut.proofExecution === undefined
+    ) {
+      throw new Error('Expected Edit Subdivide proof');
+    }
+    Object.assign(crossedShortcut.proofExecution, { targetProfile: 'factory_cube_8_12_6' });
+    expect(interactionCatalogSchema.safeParse(crossedProfile).success).toBe(false);
+    await validatePublicJsonSchemaCases(
+      JSON.parse(
+        readFileSync(resolve('protocol/schemas/v1/interaction-catalog.schema.json'), 'utf8'),
+      ) as object,
+      [
+        { value: blenderInteractionCatalog, accepted: true },
+        { value: crossedProfile, accepted: false },
+      ],
+    );
+
+    const weakenedPreconditions = structuredClone(blenderInteractionCatalog);
+    const weakenedShortcut = recipeFor(weakenedPreconditions, 'blender.mesh.edit_subdivide')
+      .procedureMaterialization?.shortcut;
+    if (weakenedShortcut?.availability !== 'available') {
+      throw new Error('Expected Edit Subdivide shortcut');
+    }
+    weakenedShortcut.preconditions = weakenedShortcut.preconditions.filter(
+      ({ label }) => label !== 'Shape Keys',
+    );
+    expect(() => validateInteractionCatalog(weakenedPreconditions, blenderActionCatalog)).toThrow(
+      'requires the exact factory Cube preconditions',
     );
   });
 

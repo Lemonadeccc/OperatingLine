@@ -1,21 +1,190 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "formatVersion": {
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "$ref": "#/definitions/__schema0"
+        },
+        "evidenceClass": {
+          "$ref": "#/definitions/__schema1"
+        },
+        "checkpointId": {
+          "$ref": "#/definitions/__schema2"
+        },
+        "previousCheckpointId": {
+          "$ref": "#/definitions/__schema3"
+        },
+        "operation": {
+          "$ref": "#/definitions/__schema4"
+        },
+        "undoLockId": {
+          "$ref": "#/definitions/__schema5"
+        },
+        "proofId": {
+          "$ref": "#/definitions/__schema6"
+        },
+        "replayId": {
+          "$ref": "#/definitions/__schema7"
+        },
+        "targetId": {
+          "$ref": "#/definitions/__schema8"
+        },
+        "marker": {
+          "$ref": "#/definitions/__schema9"
+        },
+        "journal": {
+          "$ref": "#/definitions/__schema10"
+        },
+        "baselineState": {
+          "$ref": "#/definitions/__schema11"
+        },
+        "currentState": {
+          "$ref": "#/definitions/__schema13"
+        },
+        "receiptPrefixRootSha256": {
+          "$ref": "#/definitions/__schema14"
+        },
+        "receiptPrefixHeadSha256": {
+          "$ref": "#/definitions/__schema15"
+        },
+        "lastCompletedOperationId": {
+          "$ref": "#/definitions/__schema16"
+        },
+        "committedAt": {
+          "$ref": "#/definitions/__schema17"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "evidenceClass",
+        "checkpointId",
+        "previousCheckpointId",
+        "operation",
+        "undoLockId",
+        "proofId",
+        "replayId",
+        "targetId",
+        "marker",
+        "journal",
+        "baselineState",
+        "currentState",
+        "receiptPrefixRootSha256",
+        "receiptPrefixHeadSha256",
+        "lastCompletedOperationId",
+        "committedAt"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "$ref": "#/definitions/__schema0"
+        },
+        "evidenceClass": {
+          "$ref": "#/definitions/__schema18"
+        },
+        "checkpointId": {
+          "$ref": "#/definitions/__schema19"
+        },
+        "previousCheckpointId": {
+          "$ref": "#/definitions/__schema20"
+        },
+        "operation": {
+          "$ref": "#/definitions/__schema21"
+        },
+        "undoLockId": {
+          "$ref": "#/definitions/__schema22"
+        },
+        "proofId": {
+          "$ref": "#/definitions/__schema23"
+        },
+        "replayId": {
+          "$ref": "#/definitions/__schema24"
+        },
+        "targetId": {
+          "$ref": "#/definitions/__schema25"
+        },
+        "executorId": {
+          "$ref": "#/definitions/__schema26"
+        },
+        "nativeMutationKind": {
+          "$ref": "#/definitions/__schema27"
+        },
+        "nativeUndoDepth": {
+          "$ref": "#/definitions/__schema28"
+        },
+        "nativeRedoDepth": {
+          "$ref": "#/definitions/__schema29"
+        },
+        "marker": {
+          "$ref": "#/definitions/__schema30"
+        },
+        "journal": {
+          "$ref": "#/definitions/__schema31"
+        },
+        "baselineState": {
+          "$ref": "#/definitions/__schema32"
+        },
+        "currentState": {
+          "$ref": "#/definitions/__schema33"
+        },
+        "receiptPrefixRootSha256": {
+          "$ref": "#/definitions/__schema34"
+        },
+        "receiptPrefixHeadSha256": {
+          "$ref": "#/definitions/__schema35"
+        },
+        "lastCompletedOperationId": {
+          "$ref": "#/definitions/__schema36"
+        },
+        "committedAt": {
+          "$ref": "#/definitions/__schema17"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "evidenceClass",
+        "checkpointId",
+        "previousCheckpointId",
+        "operation",
+        "undoLockId",
+        "proofId",
+        "replayId",
+        "targetId",
+        "executorId",
+        "nativeMutationKind",
+        "nativeUndoDepth",
+        "nativeRedoDepth",
+        "marker",
+        "journal",
+        "baselineState",
+        "currentState",
+        "receiptPrefixRootSha256",
+        "receiptPrefixHeadSha256",
+        "lastCompletedOperationId",
+        "committedAt"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "__schema0": {
       "type": "string",
       "const": "1.0.0"
     },
-    "evidenceClass": {
+    "__schema1": {
       "type": "string",
       "const": "companion_reported_shortcut_proof_failure_checkpoint"
     },
-    "checkpointId": {
+    "__schema2": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "previousCheckpointId": {
+    "__schema3": {
       "anyOf": [
         {
           "type": "string",
@@ -27,30 +196,30 @@
         }
       ]
     },
-    "operation": {
+    "__schema4": {
       "type": "string",
       "const": "shortcut_proof_failure"
     },
-    "undoLockId": {
+    "__schema5": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "proofId": {
+    "__schema6": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "replayId": {
+    "__schema7": {
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
-    "targetId": {
+    "__schema8": {
       "type": "string",
       "minLength": 1
     },
-    "marker": {
+    "__schema9": {
       "type": "object",
       "properties": {
         "key": {
@@ -68,7 +237,7 @@
       ],
       "additionalProperties": false
     },
-    "journal": {
+    "__schema10": {
       "type": "object",
       "properties": {
         "entryPresent": {
@@ -96,7 +265,7 @@
       ],
       "additionalProperties": false
     },
-    "baselineState": {
+    "__schema11": {
       "type": "object",
       "properties": {
         "targetId": {
@@ -104,8 +273,7 @@
           "minLength": 1
         },
         "sceneFingerprintSha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/definitions/__schema12"
         },
         "modifierCount": {
           "type": "number",
@@ -119,7 +287,11 @@
       ],
       "additionalProperties": false
     },
-    "currentState": {
+    "__schema12": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "__schema13": {
       "type": "object",
       "properties": {
         "targetId": {
@@ -127,8 +299,7 @@
           "minLength": 1
         },
         "sceneFingerprintSha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/definitions/__schema12"
         },
         "modifierCount": {
           "type": "integer",
@@ -143,29 +314,27 @@
       ],
       "additionalProperties": false
     },
-    "receiptPrefixRootSha256": {
+    "__schema14": {
       "anyOf": [
         {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/definitions/__schema12"
         },
         {
           "type": "null"
         }
       ]
     },
-    "receiptPrefixHeadSha256": {
+    "__schema15": {
       "anyOf": [
         {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/definitions/__schema12"
         },
         {
           "type": "null"
         }
       ]
     },
-    "lastCompletedOperationId": {
+    "__schema16": {
       "anyOf": [
         {
           "type": "string",
@@ -181,31 +350,282 @@
         }
       ]
     },
-    "committedAt": {
+    "__schema17": {
       "type": "string",
       "format": "date-time",
       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "__schema18": {
+      "type": "string",
+      "const": "companion_reported_shortcut_proof_failure_checkpoint"
+    },
+    "__schema19": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "__schema20": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema21": {
+      "type": "string",
+      "const": "shortcut_proof_failure"
+    },
+    "__schema22": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "__schema23": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "__schema24": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "__schema25": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema26": {
+      "type": "string",
+      "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+    },
+    "__schema27": {
+      "type": "string",
+      "const": "in_place_edit_mesh_subdivide"
+    },
+    "__schema28": {
+      "type": "number",
+      "const": 4
+    },
+    "__schema29": {
+      "type": "number",
+      "const": 4
+    },
+    "__schema30": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "const": "_operating_line_shortcut_proof_history_v2"
+        },
+        "matched": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "key",
+        "matched"
+      ],
+      "additionalProperties": false
+    },
+    "__schema31": {
+      "type": "object",
+      "properties": {
+        "entryPresent": {
+          "type": "boolean",
+          "const": true
+        },
+        "baselineSnapshotPresent": {
+          "type": "boolean",
+          "const": true
+        },
+        "currentSnapshotPresent": {
+          "type": "boolean",
+          "const": true
+        },
+        "mutationLeaseHeld": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "entryPresent",
+        "baselineSnapshotPresent",
+        "currentSnapshotPresent",
+        "mutationLeaseHeld"
+      ],
+      "additionalProperties": false
+    },
+    "__schema32": {
+      "type": "object",
+      "properties": {
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sceneFingerprintSha256": {
+          "$ref": "#/definitions/__schema12"
+        },
+        "objectName": {
+          "type": "string",
+          "const": "Cube"
+        },
+        "objectPointer": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "meshPointer": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "meshUsers": {
+          "type": "number",
+          "const": 1
+        },
+        "meshDatablockCount": {
+          "type": "number",
+          "const": 1
+        },
+        "modifierCount": {
+          "type": "number",
+          "const": 0
+        },
+        "shapeKeyCount": {
+          "type": "number",
+          "const": 0
+        },
+        "topologySha256": {
+          "$ref": "#/definitions/__schema12"
+        },
+        "geometrySha256": {
+          "$ref": "#/definitions/__schema12"
+        }
+      },
+      "required": [
+        "targetId",
+        "sceneFingerprintSha256",
+        "objectName",
+        "objectPointer",
+        "meshPointer",
+        "meshUsers",
+        "meshDatablockCount",
+        "modifierCount",
+        "shapeKeyCount",
+        "topologySha256",
+        "geometrySha256"
+      ],
+      "additionalProperties": false
+    },
+    "__schema33": {
+      "type": "object",
+      "properties": {
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sceneFingerprintSha256": {
+          "$ref": "#/definitions/__schema12"
+        },
+        "objectName": {
+          "type": "string",
+          "const": "Cube"
+        },
+        "objectPointer": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "meshPointer": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "meshUsers": {
+          "type": "number",
+          "const": 1
+        },
+        "meshDatablockCount": {
+          "type": "number",
+          "const": 1
+        },
+        "modifierCount": {
+          "type": "number",
+          "const": 0
+        },
+        "shapeKeyCount": {
+          "type": "number",
+          "const": 0
+        },
+        "topologySha256": {
+          "$ref": "#/definitions/__schema12"
+        },
+        "geometrySha256": {
+          "$ref": "#/definitions/__schema12"
+        }
+      },
+      "required": [
+        "targetId",
+        "sceneFingerprintSha256",
+        "objectName",
+        "objectPointer",
+        "meshPointer",
+        "meshUsers",
+        "meshDatablockCount",
+        "modifierCount",
+        "shapeKeyCount",
+        "topologySha256",
+        "geometrySha256"
+      ],
+      "additionalProperties": false
+    },
+    "__schema34": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/__schema12"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema35": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/__schema12"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema36": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "shortcut.enter_edit_mode",
+            "shortcut.select_all_mesh_elements",
+            "shortcut.search_subdivide",
+            "shortcut.execute_subdivide",
+            "shortcut.open_adjust_last_operation",
+            "shortcut.set_number_of_cuts",
+            "shortcut.set_smoothness",
+            "shortcut.close_adjust_last_operation",
+            "shortcut.return_to_object_mode"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "required": [
-    "formatVersion",
-    "evidenceClass",
-    "checkpointId",
-    "previousCheckpointId",
-    "operation",
-    "undoLockId",
-    "proofId",
-    "replayId",
-    "targetId",
-    "marker",
-    "journal",
-    "baselineState",
-    "currentState",
-    "receiptPrefixRootSha256",
-    "receiptPrefixHeadSha256",
-    "lastCompletedOperationId",
-    "committedAt"
-  ],
-  "additionalProperties": false,
   "$id": "https://operatingline.dev/schema/v1/procedure-shortcut-proof-failure-checkpoint.json"
 }

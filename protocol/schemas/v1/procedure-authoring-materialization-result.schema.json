@@ -7833,90 +7833,205 @@
                                   }
                                 },
                                 "proofExecution": {
-                                  "type": "object",
-                                  "properties": {
-                                    "executorId": {
-                                      "type": "string",
-                                      "const": "blender.subdivision_surface_f9.event_simulate.v1"
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executorId": {
+                                          "type": "string",
+                                          "const": "blender.subdivision_surface_f9.event_simulate.v1"
+                                        },
+                                        "targetProfile": {
+                                          "type": "string",
+                                          "const": "factory_cube_8_12_6"
+                                        },
+                                        "executionBoundary": {
+                                          "type": "string",
+                                          "const": "blender_window_event_simulate"
+                                        },
+                                        "osHidInput": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedActionExecuted": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReceiptCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "authorization": {
+                                          "type": "string",
+                                          "const": "accepted_replay_next_step"
+                                        },
+                                        "transport": {
+                                          "type": "string",
+                                          "const": "event_simulate"
+                                        },
+                                        "hostVersions": {
+                                          "minItems": 2,
+                                          "maxItems": 2,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "4.5.3",
+                                              "5.1.1"
+                                            ]
+                                          }
+                                        },
+                                        "operationIds": {
+                                          "minItems": 4,
+                                          "maxItems": 4,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "shortcut.add_subdivision_surface_level_one",
+                                              "shortcut.open_adjust_last_operation",
+                                              "shortcut.set_viewport_level",
+                                              "shortcut.close_adjust_last_operation"
+                                            ]
+                                          }
+                                        },
+                                        "strongObservationKind": {
+                                          "type": "string",
+                                          "const": "subdivision_surface_shortcut_ready"
+                                        },
+                                        "nativeUndoCheckpointRequired": {
+                                          "type": "boolean",
+                                          "const": true
+                                        }
+                                      },
+                                      "required": [
+                                        "executorId",
+                                        "targetProfile",
+                                        "executionBoundary",
+                                        "osHidInput",
+                                        "managedActionExecuted",
+                                        "managedReceiptCreated",
+                                        "authorization",
+                                        "transport",
+                                        "hostVersions",
+                                        "operationIds",
+                                        "strongObservationKind",
+                                        "nativeUndoCheckpointRequired"
+                                      ],
+                                      "additionalProperties": false
                                     },
-                                    "targetProfile": {
-                                      "type": "string",
-                                      "const": "factory_cube_8_12_6"
-                                    },
-                                    "executionBoundary": {
-                                      "type": "string",
-                                      "const": "blender_window_event_simulate"
-                                    },
-                                    "osHidInput": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "managedActionExecuted": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "managedReceiptCreated": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "authorization": {
-                                      "type": "string",
-                                      "const": "accepted_replay_next_step"
-                                    },
-                                    "transport": {
-                                      "type": "string",
-                                      "const": "event_simulate"
-                                    },
-                                    "hostVersions": {
-                                      "minItems": 2,
-                                      "maxItems": 2,
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string",
-                                        "enum": [
-                                          "4.5.3",
-                                          "5.1.1"
-                                        ]
-                                      }
-                                    },
-                                    "operationIds": {
-                                      "minItems": 4,
-                                      "maxItems": 4,
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string",
-                                        "enum": [
-                                          "shortcut.add_subdivision_surface_level_one",
-                                          "shortcut.open_adjust_last_operation",
-                                          "shortcut.set_viewport_level",
-                                          "shortcut.close_adjust_last_operation"
-                                        ]
-                                      }
-                                    },
-                                    "strongObservationKind": {
-                                      "type": "string",
-                                      "const": "subdivision_surface_shortcut_ready"
-                                    },
-                                    "nativeUndoCheckpointRequired": {
-                                      "type": "boolean",
-                                      "const": true
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executorId": {
+                                          "type": "string",
+                                          "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+                                        },
+                                        "targetProfile": {
+                                          "type": "string",
+                                          "const": "factory_cube_single_user_mesh_8_12_6"
+                                        },
+                                        "executionBoundary": {
+                                          "type": "string",
+                                          "const": "blender_window_event_simulate"
+                                        },
+                                        "osHidInput": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedActionExecuted": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReceiptCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReplacementMeshCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "nativeMutationKind": {
+                                          "type": "string",
+                                          "const": "in_place_edit_mesh_subdivide"
+                                        },
+                                        "authorization": {
+                                          "type": "string",
+                                          "const": "accepted_replay_next_step"
+                                        },
+                                        "transport": {
+                                          "type": "string",
+                                          "const": "event_simulate"
+                                        },
+                                        "hostVersions": {
+                                          "minItems": 2,
+                                          "maxItems": 2,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "4.5.3",
+                                              "5.1.1"
+                                            ]
+                                          }
+                                        },
+                                        "operationIds": {
+                                          "minItems": 9,
+                                          "maxItems": 9,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "shortcut.enter_edit_mode",
+                                              "shortcut.select_all_mesh_elements",
+                                              "shortcut.search_subdivide",
+                                              "shortcut.execute_subdivide",
+                                              "shortcut.open_adjust_last_operation",
+                                              "shortcut.set_number_of_cuts",
+                                              "shortcut.set_smoothness",
+                                              "shortcut.close_adjust_last_operation",
+                                              "shortcut.return_to_object_mode"
+                                            ]
+                                          }
+                                        },
+                                        "strongObservationKind": {
+                                          "type": "string",
+                                          "const": "mesh_edit_subdivide_shortcut_ready"
+                                        },
+                                        "nativeUndoCheckpointRequired": {
+                                          "type": "boolean",
+                                          "const": true
+                                        },
+                                        "nativeUndoDepth": {
+                                          "type": "number",
+                                          "const": 4
+                                        },
+                                        "nativeRedoDepth": {
+                                          "type": "number",
+                                          "const": 4
+                                        }
+                                      },
+                                      "required": [
+                                        "executorId",
+                                        "targetProfile",
+                                        "executionBoundary",
+                                        "osHidInput",
+                                        "managedActionExecuted",
+                                        "managedReceiptCreated",
+                                        "managedReplacementMeshCreated",
+                                        "nativeMutationKind",
+                                        "authorization",
+                                        "transport",
+                                        "hostVersions",
+                                        "operationIds",
+                                        "strongObservationKind",
+                                        "nativeUndoCheckpointRequired",
+                                        "nativeUndoDepth",
+                                        "nativeRedoDepth"
+                                      ],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": [
-                                    "executorId",
-                                    "targetProfile",
-                                    "executionBoundary",
-                                    "osHidInput",
-                                    "managedActionExecuted",
-                                    "managedReceiptCreated",
-                                    "authorization",
-                                    "transport",
-                                    "hostVersions",
-                                    "operationIds",
-                                    "strongObservationKind",
-                                    "nativeUndoCheckpointRequired"
-                                  ],
-                                  "additionalProperties": false
+                                  ]
                                 }
                               },
                               "required": [
@@ -11077,90 +11192,205 @@
                                   }
                                 },
                                 "proofExecution": {
-                                  "type": "object",
-                                  "properties": {
-                                    "executorId": {
-                                      "type": "string",
-                                      "const": "blender.subdivision_surface_f9.event_simulate.v1"
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executorId": {
+                                          "type": "string",
+                                          "const": "blender.subdivision_surface_f9.event_simulate.v1"
+                                        },
+                                        "targetProfile": {
+                                          "type": "string",
+                                          "const": "factory_cube_8_12_6"
+                                        },
+                                        "executionBoundary": {
+                                          "type": "string",
+                                          "const": "blender_window_event_simulate"
+                                        },
+                                        "osHidInput": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedActionExecuted": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReceiptCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "authorization": {
+                                          "type": "string",
+                                          "const": "accepted_replay_next_step"
+                                        },
+                                        "transport": {
+                                          "type": "string",
+                                          "const": "event_simulate"
+                                        },
+                                        "hostVersions": {
+                                          "minItems": 2,
+                                          "maxItems": 2,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "4.5.3",
+                                              "5.1.1"
+                                            ]
+                                          }
+                                        },
+                                        "operationIds": {
+                                          "minItems": 4,
+                                          "maxItems": 4,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "shortcut.add_subdivision_surface_level_one",
+                                              "shortcut.open_adjust_last_operation",
+                                              "shortcut.set_viewport_level",
+                                              "shortcut.close_adjust_last_operation"
+                                            ]
+                                          }
+                                        },
+                                        "strongObservationKind": {
+                                          "type": "string",
+                                          "const": "subdivision_surface_shortcut_ready"
+                                        },
+                                        "nativeUndoCheckpointRequired": {
+                                          "type": "boolean",
+                                          "const": true
+                                        }
+                                      },
+                                      "required": [
+                                        "executorId",
+                                        "targetProfile",
+                                        "executionBoundary",
+                                        "osHidInput",
+                                        "managedActionExecuted",
+                                        "managedReceiptCreated",
+                                        "authorization",
+                                        "transport",
+                                        "hostVersions",
+                                        "operationIds",
+                                        "strongObservationKind",
+                                        "nativeUndoCheckpointRequired"
+                                      ],
+                                      "additionalProperties": false
                                     },
-                                    "targetProfile": {
-                                      "type": "string",
-                                      "const": "factory_cube_8_12_6"
-                                    },
-                                    "executionBoundary": {
-                                      "type": "string",
-                                      "const": "blender_window_event_simulate"
-                                    },
-                                    "osHidInput": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "managedActionExecuted": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "managedReceiptCreated": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "authorization": {
-                                      "type": "string",
-                                      "const": "accepted_replay_next_step"
-                                    },
-                                    "transport": {
-                                      "type": "string",
-                                      "const": "event_simulate"
-                                    },
-                                    "hostVersions": {
-                                      "minItems": 2,
-                                      "maxItems": 2,
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string",
-                                        "enum": [
-                                          "4.5.3",
-                                          "5.1.1"
-                                        ]
-                                      }
-                                    },
-                                    "operationIds": {
-                                      "minItems": 4,
-                                      "maxItems": 4,
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string",
-                                        "enum": [
-                                          "shortcut.add_subdivision_surface_level_one",
-                                          "shortcut.open_adjust_last_operation",
-                                          "shortcut.set_viewport_level",
-                                          "shortcut.close_adjust_last_operation"
-                                        ]
-                                      }
-                                    },
-                                    "strongObservationKind": {
-                                      "type": "string",
-                                      "const": "subdivision_surface_shortcut_ready"
-                                    },
-                                    "nativeUndoCheckpointRequired": {
-                                      "type": "boolean",
-                                      "const": true
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executorId": {
+                                          "type": "string",
+                                          "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+                                        },
+                                        "targetProfile": {
+                                          "type": "string",
+                                          "const": "factory_cube_single_user_mesh_8_12_6"
+                                        },
+                                        "executionBoundary": {
+                                          "type": "string",
+                                          "const": "blender_window_event_simulate"
+                                        },
+                                        "osHidInput": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedActionExecuted": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReceiptCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReplacementMeshCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "nativeMutationKind": {
+                                          "type": "string",
+                                          "const": "in_place_edit_mesh_subdivide"
+                                        },
+                                        "authorization": {
+                                          "type": "string",
+                                          "const": "accepted_replay_next_step"
+                                        },
+                                        "transport": {
+                                          "type": "string",
+                                          "const": "event_simulate"
+                                        },
+                                        "hostVersions": {
+                                          "minItems": 2,
+                                          "maxItems": 2,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "4.5.3",
+                                              "5.1.1"
+                                            ]
+                                          }
+                                        },
+                                        "operationIds": {
+                                          "minItems": 9,
+                                          "maxItems": 9,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "shortcut.enter_edit_mode",
+                                              "shortcut.select_all_mesh_elements",
+                                              "shortcut.search_subdivide",
+                                              "shortcut.execute_subdivide",
+                                              "shortcut.open_adjust_last_operation",
+                                              "shortcut.set_number_of_cuts",
+                                              "shortcut.set_smoothness",
+                                              "shortcut.close_adjust_last_operation",
+                                              "shortcut.return_to_object_mode"
+                                            ]
+                                          }
+                                        },
+                                        "strongObservationKind": {
+                                          "type": "string",
+                                          "const": "mesh_edit_subdivide_shortcut_ready"
+                                        },
+                                        "nativeUndoCheckpointRequired": {
+                                          "type": "boolean",
+                                          "const": true
+                                        },
+                                        "nativeUndoDepth": {
+                                          "type": "number",
+                                          "const": 4
+                                        },
+                                        "nativeRedoDepth": {
+                                          "type": "number",
+                                          "const": 4
+                                        }
+                                      },
+                                      "required": [
+                                        "executorId",
+                                        "targetProfile",
+                                        "executionBoundary",
+                                        "osHidInput",
+                                        "managedActionExecuted",
+                                        "managedReceiptCreated",
+                                        "managedReplacementMeshCreated",
+                                        "nativeMutationKind",
+                                        "authorization",
+                                        "transport",
+                                        "hostVersions",
+                                        "operationIds",
+                                        "strongObservationKind",
+                                        "nativeUndoCheckpointRequired",
+                                        "nativeUndoDepth",
+                                        "nativeRedoDepth"
+                                      ],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": [
-                                    "executorId",
-                                    "targetProfile",
-                                    "executionBoundary",
-                                    "osHidInput",
-                                    "managedActionExecuted",
-                                    "managedReceiptCreated",
-                                    "authorization",
-                                    "transport",
-                                    "hostVersions",
-                                    "operationIds",
-                                    "strongObservationKind",
-                                    "nativeUndoCheckpointRequired"
-                                  ],
-                                  "additionalProperties": false
+                                  ]
                                 }
                               },
                               "required": [
@@ -14441,90 +14671,205 @@
                                   }
                                 },
                                 "proofExecution": {
-                                  "type": "object",
-                                  "properties": {
-                                    "executorId": {
-                                      "type": "string",
-                                      "const": "blender.subdivision_surface_f9.event_simulate.v1"
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executorId": {
+                                          "type": "string",
+                                          "const": "blender.subdivision_surface_f9.event_simulate.v1"
+                                        },
+                                        "targetProfile": {
+                                          "type": "string",
+                                          "const": "factory_cube_8_12_6"
+                                        },
+                                        "executionBoundary": {
+                                          "type": "string",
+                                          "const": "blender_window_event_simulate"
+                                        },
+                                        "osHidInput": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedActionExecuted": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReceiptCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "authorization": {
+                                          "type": "string",
+                                          "const": "accepted_replay_next_step"
+                                        },
+                                        "transport": {
+                                          "type": "string",
+                                          "const": "event_simulate"
+                                        },
+                                        "hostVersions": {
+                                          "minItems": 2,
+                                          "maxItems": 2,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "4.5.3",
+                                              "5.1.1"
+                                            ]
+                                          }
+                                        },
+                                        "operationIds": {
+                                          "minItems": 4,
+                                          "maxItems": 4,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "shortcut.add_subdivision_surface_level_one",
+                                              "shortcut.open_adjust_last_operation",
+                                              "shortcut.set_viewport_level",
+                                              "shortcut.close_adjust_last_operation"
+                                            ]
+                                          }
+                                        },
+                                        "strongObservationKind": {
+                                          "type": "string",
+                                          "const": "subdivision_surface_shortcut_ready"
+                                        },
+                                        "nativeUndoCheckpointRequired": {
+                                          "type": "boolean",
+                                          "const": true
+                                        }
+                                      },
+                                      "required": [
+                                        "executorId",
+                                        "targetProfile",
+                                        "executionBoundary",
+                                        "osHidInput",
+                                        "managedActionExecuted",
+                                        "managedReceiptCreated",
+                                        "authorization",
+                                        "transport",
+                                        "hostVersions",
+                                        "operationIds",
+                                        "strongObservationKind",
+                                        "nativeUndoCheckpointRequired"
+                                      ],
+                                      "additionalProperties": false
                                     },
-                                    "targetProfile": {
-                                      "type": "string",
-                                      "const": "factory_cube_8_12_6"
-                                    },
-                                    "executionBoundary": {
-                                      "type": "string",
-                                      "const": "blender_window_event_simulate"
-                                    },
-                                    "osHidInput": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "managedActionExecuted": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "managedReceiptCreated": {
-                                      "type": "boolean",
-                                      "const": false
-                                    },
-                                    "authorization": {
-                                      "type": "string",
-                                      "const": "accepted_replay_next_step"
-                                    },
-                                    "transport": {
-                                      "type": "string",
-                                      "const": "event_simulate"
-                                    },
-                                    "hostVersions": {
-                                      "minItems": 2,
-                                      "maxItems": 2,
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string",
-                                        "enum": [
-                                          "4.5.3",
-                                          "5.1.1"
-                                        ]
-                                      }
-                                    },
-                                    "operationIds": {
-                                      "minItems": 4,
-                                      "maxItems": 4,
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string",
-                                        "enum": [
-                                          "shortcut.add_subdivision_surface_level_one",
-                                          "shortcut.open_adjust_last_operation",
-                                          "shortcut.set_viewport_level",
-                                          "shortcut.close_adjust_last_operation"
-                                        ]
-                                      }
-                                    },
-                                    "strongObservationKind": {
-                                      "type": "string",
-                                      "const": "subdivision_surface_shortcut_ready"
-                                    },
-                                    "nativeUndoCheckpointRequired": {
-                                      "type": "boolean",
-                                      "const": true
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executorId": {
+                                          "type": "string",
+                                          "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
+                                        },
+                                        "targetProfile": {
+                                          "type": "string",
+                                          "const": "factory_cube_single_user_mesh_8_12_6"
+                                        },
+                                        "executionBoundary": {
+                                          "type": "string",
+                                          "const": "blender_window_event_simulate"
+                                        },
+                                        "osHidInput": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedActionExecuted": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReceiptCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "managedReplacementMeshCreated": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "nativeMutationKind": {
+                                          "type": "string",
+                                          "const": "in_place_edit_mesh_subdivide"
+                                        },
+                                        "authorization": {
+                                          "type": "string",
+                                          "const": "accepted_replay_next_step"
+                                        },
+                                        "transport": {
+                                          "type": "string",
+                                          "const": "event_simulate"
+                                        },
+                                        "hostVersions": {
+                                          "minItems": 2,
+                                          "maxItems": 2,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "4.5.3",
+                                              "5.1.1"
+                                            ]
+                                          }
+                                        },
+                                        "operationIds": {
+                                          "minItems": 9,
+                                          "maxItems": 9,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "shortcut.enter_edit_mode",
+                                              "shortcut.select_all_mesh_elements",
+                                              "shortcut.search_subdivide",
+                                              "shortcut.execute_subdivide",
+                                              "shortcut.open_adjust_last_operation",
+                                              "shortcut.set_number_of_cuts",
+                                              "shortcut.set_smoothness",
+                                              "shortcut.close_adjust_last_operation",
+                                              "shortcut.return_to_object_mode"
+                                            ]
+                                          }
+                                        },
+                                        "strongObservationKind": {
+                                          "type": "string",
+                                          "const": "mesh_edit_subdivide_shortcut_ready"
+                                        },
+                                        "nativeUndoCheckpointRequired": {
+                                          "type": "boolean",
+                                          "const": true
+                                        },
+                                        "nativeUndoDepth": {
+                                          "type": "number",
+                                          "const": 4
+                                        },
+                                        "nativeRedoDepth": {
+                                          "type": "number",
+                                          "const": 4
+                                        }
+                                      },
+                                      "required": [
+                                        "executorId",
+                                        "targetProfile",
+                                        "executionBoundary",
+                                        "osHidInput",
+                                        "managedActionExecuted",
+                                        "managedReceiptCreated",
+                                        "managedReplacementMeshCreated",
+                                        "nativeMutationKind",
+                                        "authorization",
+                                        "transport",
+                                        "hostVersions",
+                                        "operationIds",
+                                        "strongObservationKind",
+                                        "nativeUndoCheckpointRequired",
+                                        "nativeUndoDepth",
+                                        "nativeRedoDepth"
+                                      ],
+                                      "additionalProperties": false
                                     }
-                                  },
-                                  "required": [
-                                    "executorId",
-                                    "targetProfile",
-                                    "executionBoundary",
-                                    "osHidInput",
-                                    "managedActionExecuted",
-                                    "managedReceiptCreated",
-                                    "authorization",
-                                    "transport",
-                                    "hostVersions",
-                                    "operationIds",
-                                    "strongObservationKind",
-                                    "nativeUndoCheckpointRequired"
-                                  ],
-                                  "additionalProperties": false
+                                  ]
                                 }
                               },
                               "required": [

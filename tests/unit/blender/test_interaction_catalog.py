@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.43.0")
+        self.assertEqual(catalog.catalog_version, "1.44.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -1007,6 +1007,11 @@ class InteractionCatalogTests(unittest.TestCase):
                 "selection",
                 "keymap",
                 "modal_state",
+                "scene_state",
+                "scene_state",
+                "scene_state",
+                "scene_state",
+                "scene_state",
                 "scene_state",
                 "scene_state",
                 "scene_state",
@@ -1801,6 +1806,68 @@ class InteractionCatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "restricted to Subdivision Surface"):
             self._load_raw(foreign)
 
+    def test_authorizes_exact_edit_subdivide_shortcut_proof_profile(self) -> None:
+        def shortcut(raw: dict) -> dict:
+            recipe = next(
+                item
+                for item in raw["recipes"]
+                if item["actionName"] == "blender.mesh.edit_subdivide"
+            )
+            return recipe["procedureMaterialization"]["shortcut"]
+
+        raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        declaration = shortcut(raw)["proofExecution"]
+        self.assertEqual(
+            declaration["executorId"],
+            "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1",
+        )
+        self.assertEqual(
+            declaration["targetProfile"],
+            "factory_cube_single_user_mesh_8_12_6",
+        )
+        self.assertFalse(declaration["managedActionExecuted"])
+        self.assertFalse(declaration["managedReceiptCreated"])
+        self.assertFalse(declaration["managedReplacementMeshCreated"])
+        self.assertEqual(
+            declaration["nativeMutationKind"],
+            "in_place_edit_mesh_subdivide",
+        )
+        self.assertEqual(declaration["nativeUndoDepth"], 4)
+        self.assertEqual(declaration["nativeRedoDepth"], 4)
+        self.assertEqual(
+            declaration["operationIds"],
+            [operation["id"] for operation in shortcut(raw)["operations"]],
+        )
+
+        crossed_profile = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        shortcut(crossed_profile)["proofExecution"]["targetProfile"] = (
+            "factory_cube_8_12_6"
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported targetProfile"):
+            self._load_raw(crossed_profile)
+
+        weakened = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        shortcut(weakened)["preconditions"] = [
+            item
+            for item in shortcut(weakened)["preconditions"]
+            if item["label"] != "Shape Keys"
+        ]
+        with self.assertRaisesRegex(ValueError, "exact factory Cube preconditions"):
+            self._load_raw(weakened)
+
+        foreign = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        declaration = shortcut(foreign).pop("proofExecution")
+        subdivision_surface = next(
+            item
+            for item in foreign["recipes"]
+            if item["actionName"] == "blender.modifier.add_subdivision_surface"
+        )
+        subdivision_surface["procedureMaterialization"]["shortcut"][
+            "proofExecution"
+        ] = declaration
+        with self.assertRaisesRegex(ValueError, "restricted to blender.mesh.edit_subdivide"):
+            self._load_raw(foreign)
+
     def test_exposes_candidate_only_bevel_edges_shortcut_with_exact_modal_source(self) -> None:
         recipe = next(
             recipe
@@ -2347,6 +2414,33 @@ class InteractionCatalogTests(unittest.TestCase):
             if recipe.action_name == "blender.modifier.add_solidify"
         )
         self.assertIsNone(solidify.procedure_materialization)
+
+    def test_loads_byte_frozen_pre_edit_subdivide_shortcut_proof_catalog(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.43.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "9dbf1a507b6bb2dc3f5b13fbc7fbe53acf3fdd8756908d5de6d2643f40964a72",
+        )
+        self.assertEqual(frozen.catalog_version, "1.43.0")
+        subdivide = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.edit_subdivide"
+        )
+        assert subdivide.procedure_materialization is not None
+        self.assertIsNone(
+            subdivide.procedure_materialization.shortcut.proof_execution
+        )
 
     def test_loads_byte_frozen_subdivision_surface_catalog_without_bevel_edges(
         self,

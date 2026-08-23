@@ -2482,6 +2482,10 @@ for (const [filename, id, schema] of schemas) {
     filename.includes('menu-control-proof');
   const jsonSchema = z.toJSONSchema(schema, {
     target: draft7TupleSchema ? 'draft-7' : 'draft-2020-12',
+    // Shortcut-proof schemas reuse large executor-specific bindings and results.
+    // Internal references keep those strict branches byte-for-byte identical
+    // without recursively inlining them at every lifecycle wrapper.
+    reused: filename.includes('shortcut-proof') ? 'ref' : 'inline',
   });
   if (draft7TupleSchema) hardenDraft7Tuples(jsonSchema);
   hardenProcedureTreeEditorSchema(filename, jsonSchema);

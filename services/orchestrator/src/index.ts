@@ -296,7 +296,7 @@ import { createGuideRevisionRequestService } from './guide-revision-requests.js'
 import { localReplanCoverageStepIds } from './local-replan-scope.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 import { createGuideRevisionBranchList } from './guide-revision-branches.js';
-import { deferMcpInputValidation } from './mcp-input-validation.js';
+import { deferMcpInputValidation, withMcpJsonSchemaReferences } from './mcp-input-validation.js';
 import { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
 import {
@@ -498,6 +498,18 @@ export interface RunningRuntime {
 }
 
 export const runtimeVersion = '0.1.0';
+const companionExecutionTrackExecutionStatusMcpSchema = withMcpJsonSchemaReferences(
+  companionExecutionTrackExecutionStatusSchema,
+);
+const companionShortcutProofStatusMcpSchema = withMcpJsonSchemaReferences(
+  companionShortcutProofStatusSchema,
+);
+const procedureShortcutProofProposalRequestMcpSchema = deferMcpInputValidation(
+  withMcpJsonSchemaReferences(procedureShortcutProofProposalRequestSchema),
+);
+const procedureShortcutProofProposalResultMcpSchema = withMcpJsonSchemaReferences(
+  procedureShortcutProofProposalResultSchema,
+);
 const companionDocumentSessionFingerprintEventType = 'companion.document-session-fingerprint.bound';
 const companionDocumentSessionFingerprintEventSchema = z.strictObject({
   formatVersion: z.literal('1.0.0'),
@@ -4627,7 +4639,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         !sameProcedureShortcutProofValue(step.action, leaf.action)
       ) {
         return shortcutProofExecutionRejected(
-          'Accepted shortcut proof plan does not contain its exact single Subdivision Surface leaf',
+          'Accepted shortcut proof plan does not contain its exact single catalog-authorized leaf',
         );
       }
 
@@ -4727,6 +4739,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           authorization: binding.authorization,
           transport: binding.transport,
           operationIds: binding.operationIds,
+          ...(binding.executorId === 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'
+            ? { nativeUndoDepth: binding.nativeUndoDepth, nativeRedoDepth: binding.nativeRedoDepth }
+            : {}),
           expectedState: request.expectedState,
           requestedAt,
           status: 'queued',
@@ -5457,7 +5472,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Queue the reviewed Blender execution-track capability path. The current Companion validates and attests the exact baseline, persists protocol outbox metadata in the Scene, then returns failed_no_mutation before any proof, target action, restoration, or managed commit because the native proof/restore driver is not yet connected.',
           inputSchema: companionExecutionTrackExecutionCreateRequestSchema,
-          outputSchema: companionExecutionTrackExecutionStatusSchema,
+          outputSchema: companionExecutionTrackExecutionStatusMcpSchema,
         },
         async (requestInput) => {
           const parsedRequest =
@@ -5522,7 +5537,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         {
           description: 'Return the durable status of one managed execution-track request.',
           inputSchema: companionExecutionTrackExecutionStatusRequestSchema,
-          outputSchema: companionExecutionTrackExecutionStatusSchema,
+          outputSchema: companionExecutionTrackExecutionStatusMcpSchema,
         },
         async (requestInput) => {
           const parsedRequest =
@@ -5691,9 +5706,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.shortcut-proof.execute',
         {
           description:
-            'Queue the exact accepted factory-Cube Subdivision Surface proof Ctrl+1, F9, viewport-level control, Enter through Blender window event simulation. Authority is derived only from an immutable native_shortcut_proof ProposalRecord, accepted in-host decision, active untouched next leaf, authenticated Companion receipt, and InteractionCatalog 1.39 proof track. It accepts no keys, coordinates, operators, Python, arbitrary actions, or parameters and does not create a managed ActionReceipt.',
+            'Queue one exact accepted factory-Cube native shortcut proof authorized by InteractionCatalog 1.44: either bounded Subdivision Surface adjustment or in-place Edit Mode Subdivide with accepted cuts and smoothness. Authority is derived only from the immutable native_shortcut_proof ProposalRecord, accepted in-host decision, active untouched next leaf, authenticated Companion receipt, and executor-discriminated proof track. It accepts no caller-supplied keys, coordinates, operators, Python, arbitrary actions, or parameters and creates no managed ActionReceipt or replacement mesh.',
           inputSchema: companionShortcutProofCreateRequestSchema,
-          outputSchema: companionShortcutProofStatusSchema,
+          outputSchema: companionShortcutProofStatusMcpSchema,
         },
         async (requestInput) => {
           const parsedRequest = companionShortcutProofCreateRequestSchema.safeParse(requestInput);
@@ -5779,7 +5794,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Return the durable native shortcut proof status, including receipt progress, success or failure evidence, retained Undo lock, verified restoration, Redo relock, or recovery_required after an indeterminate restart.',
           inputSchema: companionShortcutProofStatusRequestSchema,
-          outputSchema: companionShortcutProofStatusSchema,
+          outputSchema: companionShortcutProofStatusMcpSchema,
         },
         async (requestInput) => {
           const parsedRequest = companionShortcutProofStatusRequestSchema.safeParse(requestInput);
@@ -7203,9 +7218,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.shortcut-proof.propose',
         {
           description:
-            'Revalidate and materialize exactly one Subdivision Surface leaf with the InteractionCatalog 1.39 factory-Cube native shortcut proof track, create a pending human-reviewable instance-bound GuideProposal, and atomically store the full ProposalRecord. This does not accept, start, or execute the proposal and creates no managed ActionReceipt.',
-          inputSchema: deferMcpInputValidation(procedureShortcutProofProposalRequestSchema),
-          outputSchema: procedureShortcutProofProposalResultSchema,
+            'Revalidate and materialize exactly one catalog-authorized factory-Cube leaf with an InteractionCatalog 1.44 executor-discriminated native shortcut proof track, create a pending human-reviewable instance-bound GuideProposal, and atomically store the full ProposalRecord. Supported profiles are bounded Subdivision Surface adjustment and in-place Edit Mode Subdivide; this does not accept, start, or execute the proposal and creates no managed ActionReceipt or replacement mesh.',
+          inputSchema: procedureShortcutProofProposalRequestMcpSchema,
+          outputSchema: procedureShortcutProofProposalResultMcpSchema,
         },
         async (requestInput) => {
           const parsedRequest = procedureShortcutProofProposalRequestSchema.safeParse(requestInput);

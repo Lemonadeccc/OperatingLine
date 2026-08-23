@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.43.0",
+  "catalogVersion": "1.44.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.22.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -2211,7 +2211,7 @@
             {
               "kind": "selection",
               "label": "Active Target",
-              "value": "Exactly one accepted target Mesh object is active and selected"
+              "value": "Exactly the factory Cube is active and selected"
             },
             {
               "kind": "keymap",
@@ -2225,6 +2225,16 @@
             },
             {
               "kind": "scene_state",
+              "label": "Object Identity",
+              "value": "Cube"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Initial Topology",
+              "value": "8 vertices, 12 edges, 6 polygons"
+            },
+            {
+              "kind": "scene_state",
               "label": "Mesh Elements",
               "value": "All target mesh elements are visible"
             },
@@ -2232,6 +2242,21 @@
               "kind": "scene_state",
               "label": "Mesh Data Users",
               "value": "1"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Scene Mesh Datablocks",
+              "value": "1"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Modifiers",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Shape Keys",
+              "value": "None"
             },
             {
               "kind": "scene_state",
@@ -2368,7 +2393,35 @@
               "argumentName": "resultMeshName",
               "reason": "The native Edit Mode operator does not copy or rename a replacement mesh datablock."
             }
-          ]
+          ],
+          "proofExecution": {
+            "executorId": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1",
+            "targetProfile": "factory_cube_single_user_mesh_8_12_6",
+            "executionBoundary": "blender_window_event_simulate",
+            "osHidInput": false,
+            "managedActionExecuted": false,
+            "managedReceiptCreated": false,
+            "managedReplacementMeshCreated": false,
+            "nativeMutationKind": "in_place_edit_mesh_subdivide",
+            "authorization": "accepted_replay_next_step",
+            "transport": "event_simulate",
+            "hostVersions": ["4.5.3", "5.1.1"],
+            "operationIds": [
+              "shortcut.enter_edit_mode",
+              "shortcut.select_all_mesh_elements",
+              "shortcut.search_subdivide",
+              "shortcut.execute_subdivide",
+              "shortcut.open_adjust_last_operation",
+              "shortcut.set_number_of_cuts",
+              "shortcut.set_smoothness",
+              "shortcut.close_adjust_last_operation",
+              "shortcut.return_to_object_mode"
+            ],
+            "strongObservationKind": "mesh_edit_subdivide_shortcut_ready",
+            "nativeUndoCheckpointRequired": true,
+            "nativeUndoDepth": 4,
+            "nativeRedoDepth": 4
+          }
         },
         "mcp": {
           "availability": "available",

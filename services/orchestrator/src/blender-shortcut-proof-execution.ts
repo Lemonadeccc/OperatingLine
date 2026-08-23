@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { OperatingLineDatabase } from '@operatingline/persistence';
@@ -17,8 +17,8 @@ import {
   companionShortcutProofTerminalReconciliationAckMatchesDelivery,
   companionShortcutProofTerminalReconciliationAckSchema,
   companionShortcutProofTerminalReconciliationDeliverySchema,
-  canonicalizeProtocolJsonValue,
   computeCompanionShortcutProofResultContentSha256,
+  computeCompanionShortcutProofTerminalMarkerIdentityContentSha256,
   type CompanionShortcutProofCreateRequest,
   type CompanionShortcutProofDelivery,
   type CompanionShortcutProofProgress,
@@ -39,6 +39,7 @@ const shortcutProofEventTypes = [
   'blender.shortcut-proof.progress-1',
   'blender.shortcut-proof.progress-2',
   'blender.shortcut-proof.progress-3',
+  'blender.shortcut-proof.progressed',
   'blender.shortcut-proof.completed',
   'blender.shortcut-proof.failed-checkpointed',
   'blender.shortcut-proof.failed-restored',
@@ -61,6 +62,7 @@ const phaseSchema = z.enum([
   'progress_1',
   'progress_2',
   'progress_3',
+  'progressed',
   'succeeded',
   'failed_checkpointed',
   'failed_restored',
@@ -73,7 +75,7 @@ const storedShortcutProofEventSchema = z.strictObject({
   execution: companionShortcutProofStatusSchema,
   phase: phaseSchema,
   sessionFingerprintSha256: contentSha256Schema,
-  progressReceiptChainHeads: z.array(contentSha256Schema).max(4),
+  progressReceiptChainHeads: z.array(contentSha256Schema).max(9),
   history: companionShortcutProofHistoryIdentitySchema.nullable().default(null),
   pendingRecovery: companionShortcutProofRecoveryDeliverySchema.nullable().default(null),
   pendingRecoverySessionFingerprintSha256: contentSha256Schema.nullable().default(null),
@@ -100,6 +102,20 @@ type ShortcutProofDatabase = Pick<
 >;
 type StoredShortcutProof = z.infer<typeof storedShortcutProofEventSchema>;
 type ShortcutProofPhase = StoredShortcutProof['phase'];
+
+function isProgressPhase(phase: ShortcutProofPhase): boolean {
+  return phase === 'progressed' || phase.startsWith('progress_');
+}
+
+function completedOperationCount(stored: StoredShortcutProof): number {
+  if (stored.phase === 'progressed') {
+    return stored.execution.progress?.completedOperationIds.length ?? 0;
+  }
+  if (stored.phase.startsWith('progress_')) {
+    return Number(stored.phase.slice('progress_'.length)) + 1;
+  }
+  return 0;
+}
 
 function isLockedPhase(phase: ShortcutProofPhase): boolean {
   return phase === 'succeeded' || phase === 'failed_checkpointed' || phase === 'reapplied_locked';
@@ -141,21 +157,24 @@ function recoveryMarkerContentSha256(
   execution: CompanionShortcutProofStatus,
   history: NonNullable<StoredShortcutProof['history']>,
 ): string {
-  const marker = {
-    formatVersion: '1.0.0',
+  return computeCompanionShortcutProofTerminalMarkerIdentityContentSha256({
     executorId: execution.executorId,
     checkpointId: history.checkpointId,
     undoLockId: history.undoLockId,
     proofId: execution.proofId,
     replayId: execution.replayId,
     targetId: execution.binding.acceptedAction.arguments.targetId,
-    targetObjectName: 'Cube',
     checkpointKind: history.checkpointKind,
     baselineSceneFingerprintSha256: history.baselineSceneFingerprintSha256,
     finalSceneFingerprintSha256: history.lockedSceneFingerprintSha256,
     terminalResultContentSha256: history.terminalResultContentSha256,
-  };
-  return createHash('sha256').update(canonicalizeProtocolJsonValue(marker)).digest('hex');
+  });
+}
+
+function nativeHistoryDepthIdentity(execution: CompanionShortcutProofStatus) {
+  return execution.executorId === 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1'
+    ? { nativeUndoDepth: 4 as const, nativeRedoDepth: 4 as const }
+    : {};
 }
 
 function terminalReceiptChainHeads(result: CompanionShortcutProofResult): readonly string[] {
@@ -360,7 +379,13 @@ function undoIdentity(
 
 function expectedTransition(previous: ShortcutProofPhase, next: ShortcutProofPhase): boolean {
   if (next === 'recovery_required') {
-    return previous === 'queued' || previous === 'dispatched' || previous.startsWith('progress_');
+    return previous === 'queued' || previous === 'dispatched' || isProgressPhase(previous);
+  }
+  if (next === 'progressed') {
+    return previous === 'dispatched' || isProgressPhase(previous);
+  }
+  if (previous === 'progressed') {
+    return next === 'succeeded' || next === 'failed_checkpointed' || next === 'failed_restored';
   }
   const transitions: Readonly<Record<ShortcutProofPhase, readonly ShortcutProofPhase[]>> = {
     queued: ['dispatched'],
@@ -369,6 +394,7 @@ function expectedTransition(previous: ShortcutProofPhase, next: ShortcutProofPha
     progress_1: ['progress_2', 'failed_checkpointed', 'failed_restored'],
     progress_2: ['progress_3', 'failed_checkpointed', 'failed_restored'],
     progress_3: ['succeeded', 'failed_checkpointed', 'failed_restored'],
+    progressed: ['succeeded', 'failed_checkpointed', 'failed_restored'],
     succeeded: ['restored'],
     failed_checkpointed: ['restored'],
     failed_restored: [],
@@ -425,7 +451,7 @@ function assertPhaseEvidence(stored: StoredShortcutProof): void {
     phase,
     progressReceiptChainHeads,
   } = stored;
-  const expectedStatus = phase.startsWith('progress_')
+  const expectedStatus = isProgressPhase(phase)
     ? 'in_progress'
     : phase === 'failed_checkpointed'
       ? 'failed_checkpointed'
@@ -437,11 +463,13 @@ function assertPhaseEvidence(stored: StoredShortcutProof): void {
       `Shortcut proof ${execution.requestId} phase ${phase} does not match status ${execution.status}`,
     );
   }
-  if (phase.startsWith('progress_')) {
-    const progressIndex = Number(phase.slice('progress_'.length));
+  if (isProgressPhase(phase)) {
+    const progressCount = completedOperationCount(stored);
     if (
-      progressReceiptChainHeads.length !== progressIndex + 1 ||
-      execution.progress?.completedOperationIds.length !== progressIndex + 1 ||
+      progressCount < 1 ||
+      progressCount > execution.operationIds.length ||
+      progressReceiptChainHeads.length !== progressCount ||
+      execution.progress?.completedOperationIds.length !== progressCount ||
       execution.progress.receiptChainHeadSha256 !== progressReceiptChainHeads.at(-1)
     ) {
       throw new Error(`Shortcut proof ${execution.requestId} has inconsistent progress evidence`);
@@ -453,7 +481,7 @@ function assertPhaseEvidence(stored: StoredShortcutProof): void {
   ) {
     throw new Error(`Shortcut proof ${execution.requestId} has progress before mutation`);
   }
-  if (phase === 'succeeded' && progressReceiptChainHeads.length !== 4) {
+  if (phase === 'succeeded' && progressReceiptChainHeads.length !== execution.operationIds.length) {
     throw new Error(`Shortcut proof ${execution.requestId} lacks its complete receipt chain`);
   }
   if (
@@ -492,7 +520,7 @@ function assertPhaseEvidence(stored: StoredShortcutProof): void {
   const historyForbidden =
     phase === 'queued' ||
     phase === 'dispatched' ||
-    phase.startsWith('progress_') ||
+    isProgressPhase(phase) ||
     phase === 'failed_restored' ||
     phase === 'rejected';
   if ((historyRequired && history === null) || (historyForbidden && history !== null)) {
@@ -511,7 +539,7 @@ function assertPhaseEvidence(stored: StoredShortcutProof): void {
   if (
     pendingTerminalReconciliation !== null &&
     (execution.deliveryId === undefined ||
-      (!phase.startsWith('progress_') && phase !== 'dispatched' && phase !== 'recovery_required'))
+      (!isProgressPhase(phase) && phase !== 'dispatched' && phase !== 'recovery_required'))
   ) {
     throw new Error(
       `Shortcut proof ${execution.requestId} offered terminal reconciliation outside an indeterminate delivered phase`,
@@ -792,7 +820,9 @@ function assertStoredTransition(
       );
     }
   }
-  const addsProgress = next.phase.startsWith('progress_');
+  const addsProgress =
+    isProgressPhase(next.phase) &&
+    next.progressReceiptChainHeads.length === previous.progressReceiptChainHeads.length + 1;
   const expectedHeadCount = addsProgress
     ? previous.progressReceiptChainHeads.length + 1
     : previous.progressReceiptChainHeads.length;
@@ -844,9 +874,11 @@ export function createBlenderShortcutProofExecutionCoordinator(
       id:
         recoveryIdentity !== undefined
           ? `blender-shortcut-proof:${parsed.execution.requestId}:${eventType}:${recoveryIdentity}`
-          : parsed.phase === 'restored' || parsed.phase === 'reapplied_locked'
-            ? `blender-shortcut-proof:${parsed.execution.requestId}:${parsed.phase}:${parsed.execution.updatedAt}`
-            : `blender-shortcut-proof:${parsed.execution.requestId}:${parsed.phase}`,
+          : eventType === 'blender.shortcut-proof.progressed'
+            ? `blender-shortcut-proof:${parsed.execution.requestId}:${eventType}:${parsed.progressReceiptChainHeads.length}:${parsed.progressReceiptChainHeads.at(-1)}`
+            : parsed.phase === 'restored' || parsed.phase === 'reapplied_locked'
+              ? `blender-shortcut-proof:${parsed.execution.requestId}:${parsed.phase}:${parsed.execution.updatedAt}`
+              : `blender-shortcut-proof:${parsed.execution.requestId}:${parsed.phase}`,
       eventType,
       payload: parsed,
       createdAt: parsed.execution.updatedAt,
@@ -892,7 +924,7 @@ export function createBlenderShortcutProofExecutionCoordinator(
         execution.target.instanceId === instanceId &&
         (phase === 'queued' ||
           phase === 'dispatched' ||
-          phase.startsWith('progress_') ||
+          isProgressPhase(phase) ||
           phase === 'succeeded' ||
           phase === 'failed_checkpointed' ||
           phase === 'reapplied_locked' ||
@@ -948,7 +980,7 @@ export function createBlenderShortcutProofExecutionCoordinator(
         candidate.target.instanceId === execution.target.instanceId &&
         (phase === 'queued' ||
           phase === 'dispatched' ||
-          phase.startsWith('progress_') ||
+          isProgressPhase(phase) ||
           phase === 'succeeded' ||
           phase === 'failed_checkpointed' ||
           phase === 'reapplied_locked' ||
@@ -1033,6 +1065,7 @@ export function createBlenderShortcutProofExecutionCoordinator(
       authorization: pending.execution.authorization,
       transport: pending.execution.transport,
       operationIds: pending.execution.operationIds,
+      ...nativeHistoryDepthIdentity(pending.execution),
       expectedState: pending.execution.expectedState,
       requestedAt: pending.execution.requestedAt,
       dispatchedAt,
@@ -1099,15 +1132,13 @@ export function createBlenderShortcutProofExecutionCoordinator(
     const fingerprint = contentSha256Schema.parse(sessionFingerprintSha256);
     const stored = assertDelivery(evidence, fingerprint);
     const nextIndex = stored.progressReceiptChainHeads.length;
-    if (
-      stored.phase === `progress_${evidence.completedOperationIds.length - 1}` &&
-      isDeepStrictEqual(stored.execution.progress, evidence)
-    ) {
+    if (isProgressPhase(stored.phase) && isDeepStrictEqual(stored.execution.progress, evidence)) {
       return 'duplicate';
     }
     if (
-      (stored.phase !== 'dispatched' && !stored.phase.startsWith('progress_')) ||
-      evidence.completedOperationIds.length !== nextIndex + 1
+      (stored.phase !== 'dispatched' && !isProgressPhase(stored.phase)) ||
+      evidence.completedOperationIds.length !== nextIndex + 1 ||
+      evidence.completedOperationIds.length > stored.execution.operationIds.length
     ) {
       throw new BlenderShortcutProofExecutionError(
         'shortcut_proof_progress_conflict',
@@ -1122,10 +1153,16 @@ export function createBlenderShortcutProofExecutionCoordinator(
         'Shortcut proof progress must advance to a new receipt chain head',
       );
     }
-    const phase = `progress_${nextIndex}` as ShortcutProofPhase;
+    const legacyProgress =
+      stored.execution.executorId === 'blender.subdivision_surface_f9.event_simulate.v1';
+    const phase = legacyProgress
+      ? (`progress_${nextIndex}` as Extract<ShortcutProofPhase, `progress_${number}`>)
+      : ('progressed' as const);
     const occurredAt = evidence.occurredAt;
     append(
-      `blender.shortcut-proof.progress-${nextIndex}` as (typeof shortcutProofEventTypes)[number],
+      legacyProgress
+        ? (`blender.shortcut-proof.progress-${nextIndex}` as (typeof shortcutProofEventTypes)[number])
+        : 'blender.shortcut-proof.progressed',
       {
         ...stored,
         phase,
@@ -1277,7 +1314,7 @@ export function createBlenderShortcutProofExecutionCoordinator(
       return 'accepted';
     }
     if (result.status === 'failed_checkpointed' || result.status === 'failed_restored') {
-      if (stored.phase !== 'dispatched' && !stored.phase.startsWith('progress_')) {
+      if (stored.phase !== 'dispatched' && !isProgressPhase(stored.phase)) {
         throw new BlenderShortcutProofExecutionError(
           'shortcut_proof_failure_without_mutation',
           409,
@@ -1325,11 +1362,15 @@ export function createBlenderShortcutProofExecutionCoordinator(
       );
       return 'accepted';
     }
-    if (stored.phase !== 'progress_3' || stored.progressReceiptChainHeads.length !== 4) {
+    const expectedReceiptCount = stored.execution.operationIds.length;
+    if (
+      !isProgressPhase(stored.phase) ||
+      stored.progressReceiptChainHeads.length !== expectedReceiptCount
+    ) {
       throw new BlenderShortcutProofExecutionError(
         'shortcut_proof_progress_incomplete',
         409,
-        'A successful shortcut proof requires all four progress receipts',
+        `A successful shortcut proof requires all ${expectedReceiptCount} progress receipts`,
       );
     }
     if (result.terminalEvidence.kind !== 'succeeded_locked') {
@@ -1415,6 +1456,7 @@ export function createBlenderShortcutProofExecutionCoordinator(
       authorization: locked.execution.authorization,
       transport: locked.execution.transport,
       operationIds: locked.execution.operationIds,
+      ...nativeHistoryDepthIdentity(locked.execution),
       expectedState: locked.execution.expectedState,
       requestedAt: locked.execution.requestedAt,
       dispatchedAt: locked.execution.dispatchedAt,
@@ -1454,9 +1496,7 @@ export function createBlenderShortcutProofExecutionCoordinator(
           execution.target.adapterId === adapterId &&
           execution.target.instanceId === instanceId &&
           acceptedFingerprint !== fingerprint &&
-          (phase === 'dispatched' ||
-            phase.startsWith('progress_') ||
-            phase === 'recovery_required'),
+          (phase === 'dispatched' || isProgressPhase(phase) || phase === 'recovery_required'),
       )
       .sort(
         (left, right) =>
@@ -1493,6 +1533,7 @@ export function createBlenderShortcutProofExecutionCoordinator(
       authorization: indeterminate.execution.authorization,
       transport: indeterminate.execution.transport,
       operationIds: indeterminate.execution.operationIds,
+      ...nativeHistoryDepthIdentity(indeterminate.execution),
       expectedState: indeterminate.execution.expectedState,
       requestedAt: indeterminate.execution.requestedAt,
       dispatchedAt: indeterminate.execution.dispatchedAt,

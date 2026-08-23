@@ -13,6 +13,7 @@ import {
   computeProcedureShortcutProofProposalRecordContentSha256,
   guideProposalDecisionSchema,
   guideProposalSchema,
+  meshEditSubdivideShortcutProofOperationIds,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureShortcutProofBindingSchema,
@@ -128,14 +129,63 @@ function candidate(): ProcedureAuthoringCandidateTree {
   return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
-function fixture() {
-  const tree = candidate();
+function editSubdivideCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = structuredClone(candidate()) as unknown as {
+    id: string;
+    rootNodeId: string;
+    nodes: Array<Record<string, unknown>>;
+  };
+  tree.id = 'tutorial.mesh.edit_subdivide';
+  const leaf = tree.nodes[0];
+  if (leaf?.['kind'] !== 'leaf') throw new Error('expected fixture leaf');
+  leaf['id'] = 'tutorial.mesh.edit_subdivide';
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_subdivide',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.subdivided_mesh',
+      resultMeshName: 'OperatingLine.Cube.Subdivided',
+      cuts: 2,
+      smooth: 0.25,
+    },
+  };
+  leaf['semanticOperations'] = [
+    {
+      id: 'semantic.edit_subdivide',
+      order: 1,
+      semanticAction: 'subdivide_owned_mesh',
+      description: 'Subdivide the factory Cube with two cuts and 0.25 smoothing.',
+      parameters: { cuts: 2, smooth: 0.25 },
+      evidenceRefs: ['evidence.prompt'],
+    },
+  ];
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'Cube' },
+    { kind: 'operator', operatorId: 'mesh.subdivide' },
+  ];
+  leaf['expectedObservations'] = [
+    {
+      kind: 'mesh_topology_matches',
+      parameters: { targetId: 'tutorial.cube', vertices: 56, edges: 108, polygons: 54 },
+    },
+  ];
+  tree.rootNodeId = leaf['id'] as string;
+  return procedureAuthoringCandidateTreeSchema.parse(tree);
+}
+
+function fixture(profile: 'subdivision_surface' | 'edit_subdivide' = 'subdivision_surface') {
+  const tree = profile === 'edit_subdivide' ? editSubdivideCandidate() : candidate();
+  const goal =
+    profile === 'edit_subdivide'
+      ? 'Subdivide the factory Cube with two cuts and 0.25 smoothing.'
+      : 'Add a Subdivision Surface modifier to the factory Cube at viewport level three.';
   const packet = buildProcedureAuthoringPromptPacket(
     {
       targetAdapterId: 'blender',
       actionCatalogVersion: blenderActionCatalog.catalogVersion,
       interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
-      goal: 'Add a Subdivision Surface modifier to the factory Cube at viewport level three.',
+      goal,
       treeId: tree.id,
       revision: tree.revision,
       locale: 'en',
@@ -190,7 +240,7 @@ function fixture() {
     formatVersion: '1.0.0',
     replayId: ids.replay,
     targetInstanceId: ids.instance,
-    leafId: 'tutorial.modifier.subdivision',
+    leafId: tree.rootNodeId,
     replayMode: 'native_shortcut_proof',
     packet,
     tree,
@@ -261,6 +311,14 @@ function mutateMaterialization(
   return value;
 }
 
+function mutateEditSubdivideMaterialization(
+  mutation: (value: ProcedureAuthoringMaterializationResult) => void,
+): ProcedureAuthoringMaterializationResult {
+  const value = structuredClone(fixture('edit_subdivide').materialization);
+  mutation(value);
+  return value;
+}
+
 describe('procedure shortcut proof service', () => {
   it('prepares the exact catalog-authorized Subdivision Surface shortcut proof', () => {
     const value = fixture();
@@ -306,7 +364,7 @@ describe('procedure shortcut proof service', () => {
         shortcutTrackContentSha256: base.prepared.shortcutTrackContentSha256,
         createdAt: '2026-08-20T10:00:01Z',
       }),
-    ).toThrowError(/exact factory Cube catalog authority/);
+    ).toThrowError(/mismatched action and executor profiles/);
   });
 
   it('builds an accepted binding while declaring the managed arguments omitted by native input', () => {
@@ -335,6 +393,211 @@ describe('procedure shortcut proof service', () => {
     );
   });
 
+  it('prepares Edit Subdivide from materialized MCP and exact operator authority', () => {
+    const value = fixture('edit_subdivide');
+    const leaf = value.materialization.tree.nodes[0];
+    if (leaf?.kind !== 'leaf') throw new Error('expected Edit Subdivide leaf');
+
+    expect(value.materialization.coverage).toEqual([
+      expect.objectContaining({
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_subdivide.semantic',
+        menu: 'unavailable',
+        shortcut: 'materialized',
+        mcp: 'materialized',
+      }),
+    ]);
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'available',
+        operations: [
+          expect.objectContaining({
+            serverName: 'operating-line',
+            toolName: 'operatingline.blender.action.execute',
+            actionArguments: {
+              targetId: 'tutorial.cube',
+              resultMeshId: 'tutorial.cube.subdivided_mesh',
+              resultMeshName: 'OperatingLine.Cube.Subdivided',
+              cuts: 2,
+              smooth: 0.25,
+            },
+          }),
+        ],
+      }),
+    ]);
+    expect(leaf.anchors).toEqual([
+      { kind: 'object', objectName: 'Cube' },
+      { kind: 'operator', operatorId: 'mesh.subdivide' },
+    ]);
+    expect(value.prepared).toEqual({
+      actionName: 'blender.mesh.edit_subdivide',
+      recipeId: 'blender.mesh.edit_subdivide.semantic',
+      targetId: 'tutorial.cube',
+      shortcutTrackContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      planning: {
+        goal: value.request.packet.context.goalProvenance.source.text,
+        requiredPhaseIds: expect.any(Array),
+        capabilityCoverage: expect.objectContaining({
+          policyVersion: 'catalog_capability_coverage_v1',
+        }),
+      },
+    });
+  });
+
+  it('builds the integrity-bound Edit Subdivide proposal record', () => {
+    const { record } = fixture('edit_subdivide');
+
+    expect(procedureShortcutProofProposalRecordSchema.parse(record)).toEqual(record);
+    expect(record).toMatchObject({
+      recipeId: 'blender.mesh.edit_subdivide.semantic',
+      actionName: 'blender.mesh.edit_subdivide',
+      proofExecution: {
+        executorId: 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1',
+        targetProfile: 'factory_cube_single_user_mesh_8_12_6',
+        managedReceiptCreated: false,
+        managedReplacementMeshCreated: false,
+        nativeUndoDepth: 4,
+        nativeRedoDepth: 4,
+        operationIds: [...meshEditSubdivideShortcutProofOperationIds],
+      },
+    });
+    expect(record.integrity.contentSha256).toBe(
+      computeProcedureShortcutProofProposalRecordContentSha256(record),
+    );
+  });
+
+  it('binds Edit Subdivide arguments while denying managed receipt and replacement claims', () => {
+    const { record, decision, currentState } = fixture('edit_subdivide');
+    const binding = buildProcedureShortcutProofBinding({
+      bindingId: ids.binding,
+      proofId: ids.proof,
+      requestId: ids.request,
+      record,
+      decision,
+      currentState,
+      createdAt: '2026-08-20T10:00:04Z',
+    });
+
+    expect(procedureShortcutProofBindingSchema.parse(binding)).toEqual(binding);
+    expect(binding).toMatchObject({
+      recipeId: 'blender.mesh.edit_subdivide.semantic',
+      actionName: 'blender.mesh.edit_subdivide',
+      executorId: 'blender.mesh_edit_subdivide_f3_f9.event_simulate.v1',
+      targetProfile: 'factory_cube_single_user_mesh_8_12_6',
+      acceptedAction: {
+        name: 'blender.mesh.edit_subdivide',
+        arguments: {
+          targetId: 'tutorial.cube',
+          resultMeshId: 'tutorial.cube.subdivided_mesh',
+          resultMeshName: 'OperatingLine.Cube.Subdivided',
+          cuts: 2,
+          smooth: 0.25,
+        },
+      },
+      proofScope: {
+        managedActionResult: 'not_executed',
+        managedIdentityVerified: false,
+        managedReceiptCreated: false,
+        managedReplacementMeshCreated: false,
+        nativeMutationKind: 'in_place_edit_mesh_subdivide',
+        omittedAcceptedArguments: ['targetId', 'resultMeshId', 'resultMeshName'],
+      },
+      nativeUndoDepth: 4,
+      nativeRedoDepth: 4,
+      operationIds: [...meshEditSubdivideShortcutProofOperationIds],
+    });
+    expect(binding.integrity.contentSha256).toBe(
+      computeProcedureShortcutProofBindingContentSha256(binding),
+    );
+  });
+
+  it('rejects Edit Subdivide when MCP is not materialized and available', () => {
+    const base = fixture('edit_subdivide');
+    const materialization = mutateEditSubdivideMaterialization((value) => {
+      const leaf = value.tree.nodes[0];
+      if (leaf?.kind !== 'leaf' || leaf.mcpTracks[0] === undefined) {
+        throw new Error('expected Edit Subdivide MCP track');
+      }
+      (leaf.mcpTracks[0] as { availability: string }).availability = 'unavailable';
+    });
+
+    expect(() =>
+      prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
+    ).toThrowError(/exact catalog-authorized factory Cube shortcut proof track/);
+  });
+
+  it.each([
+    ['missing', [{ kind: 'object', objectName: 'Cube' }]],
+    [
+      'wrong',
+      [
+        { kind: 'object', objectName: 'Cube' },
+        { kind: 'operator', operatorId: 'mesh.bevel' },
+      ],
+    ],
+  ])('rejects Edit Subdivide with a %s operator anchor', (_, anchors) => {
+    const base = fixture('edit_subdivide');
+    const materialization = mutateEditSubdivideMaterialization((value) => {
+      const leaf = value.tree.nodes[0];
+      if (leaf?.kind !== 'leaf') throw new Error('expected Edit Subdivide leaf');
+      leaf.anchors = anchors;
+    });
+
+    expect(() =>
+      prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
+  });
+
+  it('rejects Edit Subdivide cuts outside the accepted action bounds', () => {
+    const base = fixture('edit_subdivide');
+    const materialization = mutateEditSubdivideMaterialization((value) => {
+      const leaf = value.tree.nodes[0];
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('expected Edit Subdivide action');
+      }
+      leaf.action.arguments['cuts'] = 9;
+    });
+
+    expect(() =>
+      prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
+  });
+
+  it('rejects crossing the Edit Subdivide action with the legacy executor profile', () => {
+    const base = fixture('edit_subdivide');
+    const materialization = mutateEditSubdivideMaterialization((value) => {
+      const leaf = value.tree.nodes[0];
+      if (
+        leaf?.kind !== 'leaf' ||
+        leaf.shortcutTracks[0]?.availability !== 'available' ||
+        leaf.shortcutTracks[0].proofExecution === undefined
+      ) {
+        throw new Error('expected Edit Subdivide shortcut proof');
+      }
+      const proofExecution = leaf.shortcutTracks[0].proofExecution;
+      leaf.shortcutTracks[0].proofExecution = {
+        ...proofExecution,
+        executorId: 'blender.subdivision_surface_f9.event_simulate.v1',
+      } as typeof proofExecution;
+    });
+    const leaf = materialization.tree.nodes[0];
+    if (leaf?.kind !== 'leaf' || leaf.shortcutTracks[0]?.availability !== 'available') {
+      throw new Error('expected Edit Subdivide shortcut track');
+    }
+
+    expect(() =>
+      buildProcedureShortcutProofProposalRecord({
+        recordId: ids.record,
+        request: base.request,
+        materialization,
+        proposal: base.proposal,
+        planContentSha256: sha256(base.proposal.plan),
+        shortcutTrackContentSha256: sha256(leaf.shortcutTracks[0]),
+        createdAt: '2026-08-20T10:00:01Z',
+      }),
+    ).toThrowError(/mismatched action and executor profiles/);
+  });
+
   it('rejects an action with an unapproved argument', () => {
     const base = fixture();
     const materialization = mutateMaterialization((value) => {
@@ -345,7 +608,7 @@ describe('procedure shortcut proof service', () => {
 
     expect(() =>
       prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
-    ).toThrowError(/exact bounded Subdivision Surface action/);
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
   });
 
   it('rejects an action other than Subdivision Surface', () => {
@@ -358,7 +621,7 @@ describe('procedure shortcut proof service', () => {
 
     expect(() =>
       prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
-    ).toThrowError(/exact bounded Subdivision Surface action/);
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
   });
 
   it('rejects a logical target other than the factory Cube binding', () => {
@@ -371,7 +634,7 @@ describe('procedure shortcut proof service', () => {
 
     expect(() =>
       prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
-    ).toThrowError(/exact bounded Subdivision Surface action/);
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
   });
 
   it.each([
@@ -389,7 +652,7 @@ describe('procedure shortcut proof service', () => {
 
     expect(() =>
       prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
-    ).toThrowError(/exact bounded Subdivision Surface action/);
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
   });
 
   it('rejects a semantic object anchor that does not identify the factory Cube', () => {
@@ -402,7 +665,7 @@ describe('procedure shortcut proof service', () => {
 
     expect(() =>
       prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
-    ).toThrowError(/factory Cube object anchor/);
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
   });
 
   it('rejects ambiguous object anchors even when one names the factory Cube', () => {
@@ -415,7 +678,7 @@ describe('procedure shortcut proof service', () => {
 
     expect(() =>
       prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
-    ).toThrowError(/factory Cube object anchor/);
+    ).toThrowError(/exact bounded catalog-authorized action profile/);
   });
 
   it('rejects a target profile outside the factory Cube proof boundary', () => {

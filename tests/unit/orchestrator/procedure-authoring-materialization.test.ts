@@ -1653,7 +1653,7 @@ describe('procedure authoring materialization', () => {
       id: 'blender.mesh.edit_subdivide.semantic.shortcut',
       modality: 'shortcut',
     });
-    expect(shortcutTrack.preconditions).toHaveLength(9);
+    expect(shortcutTrack.preconditions).toHaveLength(14);
     expect(shortcutTrack.preconditions).toContainEqual({
       kind: 'mode',
       label: 'Mode',
@@ -1662,8 +1662,22 @@ describe('procedure authoring materialization', () => {
     expect(shortcutTrack.preconditions).toContainEqual({
       kind: 'selection',
       label: 'Active Target',
-      value: 'Exactly one accepted target Mesh object is active and selected',
+      value: 'Exactly the factory Cube is active and selected',
     });
+    expect(shortcutTrack.preconditions).toEqual(
+      expect.arrayContaining([
+        { kind: 'scene_state', label: 'Object Identity', value: 'Cube' },
+        {
+          kind: 'scene_state',
+          label: 'Initial Topology',
+          value: '8 vertices, 12 edges, 6 polygons',
+        },
+        { kind: 'scene_state', label: 'Mesh Data Users', value: '1' },
+        { kind: 'scene_state', label: 'Scene Mesh Datablocks', value: '1' },
+        { kind: 'scene_state', label: 'Modifiers', value: 'None' },
+        { kind: 'scene_state', label: 'Shape Keys', value: 'None' },
+      ]),
+    );
     expect(
       shortcutTrack.operations.map(({ kind, id, order, parameters }) => ({
         kind,
