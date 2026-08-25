@@ -350,6 +350,14 @@ function projectionParameterRecord(
       throw new Error(`Missing projected menu operation ${target.operationId}`);
     return operation.parameters;
   }
+  if (target.modality === 'menu_candidate') {
+    const candidate = leaf.menuCandidates?.find((item) => item.id === target.trackId);
+    const operation = candidate?.operations.find((item) => item.id === target.operationId);
+    if (operation === undefined) {
+      throw new Error(`Missing projected menu candidate operation ${target.operationId}`);
+    }
+    return operation.parameters;
+  }
   if (target.modality === 'shortcut') {
     const track = leaf.shortcutTracks.find((candidate) => candidate.id === target.trackId);
     const operation =
@@ -368,7 +376,7 @@ function projectionParameterRecord(
       : undefined;
   if (operation === undefined)
     throw new Error(`Missing projected MCP operation ${target.operationId}`);
-  return operation.arguments;
+  return operation.operationParameters ?? operation.arguments;
 }
 
 function projectionLeaf(tree: ProcedureTree, leafId: string): ProcedureLeafNode {
@@ -921,6 +929,18 @@ function parameterRecord(
     }
     return { values: operation.parameters, schemas: {} };
   }
+  if (target.kind === 'menu_candidate') {
+    const candidate = leaf.menuCandidates?.find((item) => item.id === target.trackId);
+    const operation = candidate?.operations.find((item) => item.id === target.operationId);
+    if (operation === undefined) {
+      throw new ProcedureTreeEditorError(
+        'not_found',
+        'Menu candidate operation was not found',
+        404,
+      );
+    }
+    return { values: operation.parameters, schemas: {} };
+  }
   if (target.kind === 'mcp') {
     const track = leaf.mcpTracks.find((candidate) => candidate.id === target.trackId);
     if (track?.availability !== 'available') {
@@ -1246,6 +1266,17 @@ function validateCommentAnchor(
       throw new ProcedureTreeEditorError(
         'not_found',
         'Comment semantic operation was not found',
+        404,
+      );
+    }
+    return;
+  }
+  if (anchor.kind === 'operation' && anchor.modality === 'menu_candidate') {
+    const candidate = node.menuCandidates?.find((item) => item.id === anchor.trackId);
+    if (!candidate?.operations.some((operation) => operation.id === anchor.operationId)) {
+      throw new ProcedureTreeEditorError(
+        'not_found',
+        'Comment menu candidate operation was not found',
         404,
       );
     }

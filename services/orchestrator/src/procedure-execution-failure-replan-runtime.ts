@@ -18,6 +18,7 @@ import { z } from 'zod';
 
 import type { ActionCatalogRegistry } from './action-catalogs.js';
 import type { InteractionCatalogRegistry } from './interaction-catalogs.js';
+import { projectInteractionCatalogForProvider } from './procedure-authoring-prompt.js';
 import type {
   CanonicalProcedureExecutionFailureEvidence,
   ProcedureExecutionFailurePolicyEvidenceResolver,
@@ -551,11 +552,12 @@ export function createProcedureExecutionFailureReplanRuntimeResolver(
         adapterId: binding.materialization.tree.adapterId,
         ...embeddedAction,
       }) ||
-      !isDeepStrictEqual(interactionCatalog, {
-        adapterId: binding.materialization.tree.adapterId,
-        actionCatalogVersion: embeddedAction.catalogVersion,
-        ...embeddedInteraction,
-      })
+      contentSha256(interactionCatalog) !==
+        binding.materialization.catalogBinding.interactionCatalogContentSha256 ||
+      !isDeepStrictEqual(
+        projectInteractionCatalogForProvider(interactionCatalog),
+        embeddedInteraction,
+      )
     ) {
       return null;
     }

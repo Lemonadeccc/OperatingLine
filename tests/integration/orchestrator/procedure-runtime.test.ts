@@ -24,6 +24,9 @@ import {
   canonicalizeProtocolJsonValue,
   companionActionExecutionStatusSchema,
   companionActionPollDeliverySchema,
+  companionLeafOperationPollDeliverySchema,
+  companionLeafOperationRecoveryPollDeliverySchema,
+  companionLeafOperationStatusSchema,
   companionMenuControlProofPollDeliverySchema,
   companionMenuControlProofProgressSchema,
   companionMenuControlProofStatusSchema,
@@ -39,6 +42,11 @@ import {
   computeProcedureShortcutProofNativeObservationContentSha256,
   computeProcedureShortcutProofOperationReceiptContentSha256,
   computeProcedureShortcutProofStrongObservationContentSha256,
+  editBevelLeafOperationIds,
+  editExtrudeRegionLeafOperationIds,
+  editInsetLeafOperationIds,
+  editTriangulateLeafOperationIds,
+  editPokeLeafOperationIds,
   guideProtocolVersion,
   procedureLeafReplayCurrentStateRequestResultSchema,
   procedureLeafReplayCurrentStateStatusResultSchema,
@@ -47,6 +55,9 @@ import {
   procedureLeafReplayProposalResultSchema,
   procedureMenuControlProofProposalResultSchema,
   procedureShortcutProofProposalResultSchema,
+  mirrorLeafOperationIds,
+  subdivisionSurfaceLeafOperationIds,
+  transformGeometryLeafOperationIds,
   procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptPacketSchema,
@@ -188,80 +199,31 @@ function strongPrimitiveObservationDetails(input: {
   };
 }
 
-function strongMirrorObservationDetails(input: {
-  readonly parameters: Record<string, unknown>;
-  readonly evaluatedTopology: {
-    readonly evaluatedVertexCount: number;
-    readonly evaluatedEdgeCount: number;
-    readonly evaluatedFaceCount: number;
+function strongSubdivisionSurfaceObservationDetails(input: {
+  parameters: Record<string, unknown>;
+  evaluatedTopology: {
+    evaluatedVertexCount: number;
+    evaluatedEdgeCount: number;
+    evaluatedFaceCount: number;
   };
 }) {
-  const targetId = input.parameters['targetId'];
-  const modifierId = input.parameters['modifierId'];
-  const modifierType = input.parameters['modifierType'];
-  const axis = input.parameters['axis'];
+  const { parameters } = input;
+  const targetId = parameters['targetId'];
+  const modifierId = parameters['modifierId'];
   if (
     typeof targetId !== 'string' ||
     typeof modifierId !== 'string' ||
-    modifierType !== 'MIRROR' ||
-    (axis !== 'X' && axis !== 'Y' && axis !== 'Z')
+    parameters['modifierType'] !== 'SUBSURF'
   ) {
-    throw new Error('Expected managed Mirror observation identities');
+    throw new Error('Expected managed Subdivision Surface observation identities');
   }
   return {
-    parameters: structuredClone(input.parameters),
+    parameters: structuredClone(parameters),
     supported: true,
     targetId,
     modifierId,
-    modifierType,
-    propertiesMatch: true,
-    axis,
-    expectedAxis: axis,
-    mirrorFixedStateMatches: true,
-    mirrorObjectAbsent: true,
-    sourceContentIntact: true,
-    ...input.evaluatedTopology,
-    evaluatedFinite: true,
-    evaluatedWithinLimits: true,
-  };
-}
-
-function strongSolidifyObservationDetails(input: {
-  readonly parameters: Record<string, unknown>;
-  readonly evaluatedTopology: {
-    readonly evaluatedVertexCount: number;
-    readonly evaluatedEdgeCount: number;
-    readonly evaluatedFaceCount: number;
-  };
-}) {
-  const targetId = input.parameters['targetId'];
-  const modifierId = input.parameters['modifierId'];
-  const modifierType = input.parameters['modifierType'];
-  const thickness = input.parameters['thickness'];
-  const offset = input.parameters['offset'];
-  if (
-    typeof targetId !== 'string' ||
-    typeof modifierId !== 'string' ||
-    modifierType !== 'SOLIDIFY' ||
-    typeof thickness !== 'number' ||
-    typeof offset !== 'number'
-  ) {
-    throw new Error('Expected managed Solidify observation identities and parameters');
-  }
-  return {
-    parameters: structuredClone(input.parameters),
-    supported: true,
-    targetId,
-    modifierId,
-    modifierType,
-    propertiesMatch: true,
-    thickness,
-    offset,
-    solidifyMode: 'EXTRUDE' as const,
-    useEvenOffset: true as const,
-    useRim: true as const,
-    useRimOnly: false as const,
-    solidifyFixedStateMatches: true as const,
+    modifierType: 'SUBSURF' as const,
+    propertiesMatch: true as const,
     sourceContentIntact: true as const,
     ...input.evaluatedTopology,
     evaluatedFinite: true as const,
@@ -272,7 +234,7 @@ function strongSolidifyObservationDetails(input: {
 async function waitUntilAfter(isoTimestamp: string): Promise<void> {
   const timestamp = Date.parse(isoTimestamp);
   for (let attempt = 0; attempt < 100 && Date.now() <= timestamp; attempt += 1) {
-    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 1));
   }
   if (Date.now() <= timestamp) {
     throw new Error(`Clock did not advance beyond ${isoTimestamp} within the bounded wait`);
@@ -921,8 +883,109 @@ function subdivisionSurfaceAuthoringCandidateFixture(
   const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
   observations[0] = {
     kind: 'modifier_ready',
-    parameters: { modifierId: 'tutorial.cube.subdivision_surface' },
+    parameters: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.subdivision_surface',
+      modifierType: 'SUBSURF',
+      levels: 3,
+      renderLevels: 2,
+      subdivisionType: 'CATMULL_CLARK',
+      quality: 3,
+      showOnlyControlEdges: true,
+      useCreases: true,
+      useLimitSurface: true,
+      boundarySmooth: 'ALL',
+      uvSmooth: 'PRESERVE_BOUNDARIES',
+      useCustomNormals: false,
+      showViewport: true,
+      showRender: true,
+      showInEditMode: true,
+      showOnCage: false,
+    },
   };
+  return tree;
+}
+
+function subdivisionSurfaceReplayAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = subdivisionSurfaceAuthoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Subdivision Surface replay leaf');
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.subdivision_surface',
+    },
+  ];
+  return tree;
+}
+
+function transformGeometryReplayAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  tree['id'] = packet.context.requestedTreeId;
+  tree['revision'] = packet.context.recommendedRevision;
+  const nodes = tree['nodes'] as Array<Record<string, unknown>>;
+  const creatorLeaf = nodes.find((node) => node['kind'] === 'leaf');
+  if (creatorLeaf === undefined) throw new Error('Expected one Transform Geometry target creator');
+  const creatorAction = creatorLeaf['action'] as { arguments: Record<string, unknown> };
+  const leaf = structuredClone(creatorLeaf);
+  leaf['id'] = `${String(creatorLeaf['id'])}.transform`;
+  leaf['order'] = 2;
+  leaf['dependsOn'] = [String(creatorLeaf['id'])];
+  const actionArguments = {
+    targetId: creatorAction.arguments['resourceId'],
+    modifierId: 'snowman.eye.left.transform.modifier',
+    modifierName: 'OperatingLine.EyeLeft.Transform',
+    nodeGroupId: 'snowman.eye.left.transform.nodes',
+    nodeGroupName: 'OperatingLine.EyeLeft.TransformNodes',
+    translation: [1, 2, 3],
+    rotation: [0.1, 0.2, 0.3],
+    scale: [1.5, 2, 2.5],
+  };
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.geometry_nodes.create_transform',
+    arguments: actionArguments,
+  };
+  leaf['title'] = 'Create an exact Transform Geometry node group';
+  leaf['intent'] = 'Create, configure, connect, and verify the accepted Transform Geometry graph.';
+  leaf['semanticOperations'] = [
+    {
+      id: 'semantic.transform_geometry',
+      order: 1,
+      semanticAction: 'node.transform_geometry',
+      description: 'Configure the accepted Transform Geometry values.',
+      parameters: { translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      evidenceRefs: ['evidence.prompt'],
+    },
+  ];
+  leaf['anchors'] = [
+    { kind: 'object', objectName: creatorAction.arguments['objectName'] },
+    {
+      kind: 'owned_control',
+      surfaceId: 'geometry_nodes.editor',
+      controlId: actionArguments.nodeGroupId,
+    },
+  ];
+  leaf['expectedObservations'] = [
+    {
+      kind: 'geometry_nodes_ready',
+      parameters: {
+        targetId: actionArguments.targetId,
+        modifierId: actionArguments.modifierId,
+        nodeGroupId: actionArguments.nodeGroupId,
+        nodeTypes: ['GeometryNodeTransform', 'NodeGroupInput', 'NodeGroupOutput'],
+      },
+    },
+  ];
+  nodes.push(leaf);
   return tree;
 }
 
@@ -1217,73 +1280,6 @@ function mirrorAuthoringCandidateFixture(
   return tree;
 }
 
-function solidifyAuthoringCandidateFixture(
-  packet: ProcedureAuthoringPromptPacket,
-): Record<string, unknown> {
-  const tree = authoringCandidateFixture(packet);
-  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
-    (node) => node['kind'] === 'leaf',
-  );
-  if (leaf === undefined) throw new Error('Expected one Solidify authoring candidate leaf');
-  leaf['action'] = {
-    adapterId: 'blender',
-    name: 'blender.modifier.add_solidify',
-    arguments: {
-      targetId: 'tutorial.cube',
-      modifierId: 'tutorial.cube.solidify',
-      modifierName: 'OperatingLine.Cube.Solidify',
-      thickness: 0.25,
-      offset: -0.5,
-    },
-  };
-  leaf['title'] = 'Add a bounded Solidify modifier';
-  leaf['intent'] = 'Add a managed Solidify modifier with exact thickness and offset.';
-  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
-  semanticOperations[0] = {
-    ...semanticOperations[0],
-    semanticAction: 'add_solidify_modifier',
-    description: 'Add one Solidify modifier to the accepted Cube.',
-    parameters: { thickness: 0.25, offset: -0.5 },
-  };
-  semanticOperations[1] = {
-    ...semanticOperations[1],
-    description: 'Keep the accepted Cube as the active Object Mode modifier target.',
-    parameters: { targetId: 'tutorial.cube' },
-  };
-  semanticOperations[2] = {
-    ...semanticOperations[2],
-    description: 'Track the managed Solidify modifier identity and name.',
-    parameters: {
-      modifierId: 'tutorial.cube.solidify',
-      modifierName: 'OperatingLine.Cube.Solidify',
-    },
-  };
-  leaf['anchors'] = [
-    { kind: 'object', objectName: 'OperatingLine.Cube' },
-    {
-      kind: 'owned_control',
-      surfaceId: 'modifier.stack',
-      controlId: 'tutorial.cube.solidify',
-    },
-  ];
-  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
-  observations[0] = {
-    kind: 'modifier_ready',
-    parameters: {
-      targetId: 'tutorial.cube',
-      modifierId: 'tutorial.cube.solidify',
-      modifierType: 'SOLIDIFY',
-      thickness: 0.25,
-      offset: -0.5,
-      solidifyMode: 'EXTRUDE',
-      useEvenOffset: true,
-      useRim: true,
-      useRimOnly: false,
-    },
-  };
-  return tree;
-}
-
 function editBevelAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -1383,6 +1379,112 @@ function editInsetAuthoringCandidateFixture(
     parameters: {
       targetId: 'tutorial.cube',
       resultMeshId: 'tutorial.cube.inset.mesh',
+    },
+  };
+  return tree;
+}
+
+function editTriangulateAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Edit Mode Triangulate candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_triangulate',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.triangulated.mesh',
+      resultMeshName: 'OperatingLine.Cube.Triangulated',
+    },
+  };
+  leaf['title'] = 'Triangulate every face of the accepted Cube in Edit Mode';
+  leaf['intent'] = 'Triangulate every Cube face with the fixed managed methods.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'triangulate_mesh_faces',
+    description: 'Triangulate every face of the accepted Cube.',
+    parameters: { quadMethod: 'FIXED', ngonMethod: 'EAR_CLIP' },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Triangulated' },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.quads_convert_to_tris' },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'mesh_triangulated',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.triangulated.mesh',
+    },
+  };
+  return tree;
+}
+
+function editExtrudeRegionAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Extrude Region candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_extrude_region',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.extruded.mesh',
+      resultMeshName: 'OperatingLine.Cube.Extruded',
+      polygonIndices: [1],
+      translation: [0, 0, 1],
+    },
+  };
+  leaf['title'] = 'Extrude one accepted Cube face in Edit Mode';
+  leaf['intent'] = 'Extrude Cube face 1 by the exact accepted local-space translation.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'extrude_mesh_face_region',
+    description: 'Extrude the accepted connected face region.',
+    parameters: { polygonIndices: [1], translation: [0, 0, 1] },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Extruded' },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.extrude_region_move' },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'mesh_region_extruded',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.extruded.mesh',
+      polygonIndices: [1],
+      translation: [0, 0, 1],
     },
   };
   return tree;
@@ -3530,7 +3632,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.4.0',
+        formatVersion: '1.6.0',
         catalogBinding: {
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
         },
@@ -3544,7 +3646,7 @@ describe('procedure compilation runtime', () => {
           },
         ],
       });
-      expect(materialization.tree.formatVersion).toBe('1.1.0');
+      expect(materialization.tree.formatVersion).toBe('1.2.0');
       expect(leaf.action.arguments).toEqual({
         targetId: 'tutorial.cube',
         resultMeshId: 'tutorial.cube.subdivided.mesh',
@@ -3553,6 +3655,21 @@ describe('procedure compilation runtime', () => {
         smooth: 0.25,
       });
       expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.menuCandidates?.[0]).toMatchObject({
+        projection: 'candidate_only',
+        equivalence: 'not_equivalent_to_managed_action',
+        executionAuthority: 'none',
+        operations: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'candidate.set_number_of_cuts',
+            parameters: { value: 2 },
+          }),
+          expect.objectContaining({
+            id: 'candidate.set_smoothness',
+            parameters: { value: 0.25 },
+          }),
+        ]),
+      });
       expect(leaf.mcpTracks[0]).toMatchObject({
         id: 'blender.mesh.edit_subdivide.semantic.mcp',
         availability: 'available',
@@ -3609,7 +3726,7 @@ describe('procedure compilation runtime', () => {
     }
   });
 
-  it('materializes the active Mirror procedure with its exact action-level MCP binding', async () => {
+  it('materializes the active Mirror procedure with its exact seven-operation MCP binding', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -3648,7 +3765,7 @@ describe('procedure compilation runtime', () => {
         throw new Error('Expected one materialized Mirror leaf');
       }
       expect(materialization).toMatchObject({
-        formatVersion: '1.4.0',
+        formatVersion: '1.5.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -3684,26 +3801,148 @@ describe('procedure compilation runtime', () => {
       expect(leaf.shortcutTracks).toEqual([
         expect.objectContaining({ availability: 'unavailable' }),
       ]);
-      expect(leaf.mcpTracks).toEqual([
-        expect.objectContaining({
-          availability: 'available',
-          modality: 'mcp',
-          operations: [
-            expect.objectContaining({
-              serverName: 'operating-line',
-              toolName: 'operatingline.blender.action.execute',
-              arguments: {
-                formatVersion: '1.0.0',
-                requestId: '$runtime.requestId',
-                replayId: '$runtime.replayId',
-                expectedState: '$runtime.expectedState',
-              },
-              argumentSource: 'accepted_leaf_action',
-              actionArguments: leaf.action.arguments,
-              resultBinding: `${leaf.id}.companion_state_report`,
-            }),
-          ],
-        }),
+      const track = leaf.mcpTracks[0];
+      if (track?.availability !== 'available') throw new Error('Expected Mirror MCP track');
+      expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+        mirrorLeafOperationIds,
+      );
+      expect(track.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      expect(
+        track.operations.every(
+          (operation) =>
+            operation.serverName === 'operating-line' &&
+            operation.toolName === 'operatingline.blender.modifier.mirror.execute-next' &&
+            operation.argumentSource === undefined &&
+            operation.actionArguments === undefined &&
+            operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+        ),
+      ).toBe(true);
+      expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+        { targetId: 'tutorial.cube', modifierId: 'tutorial.cube.mirror' },
+        {},
+        {},
+        {},
+        {},
+        {},
+        { modifierName: 'OperatingLine.Cube.Mirror', axis: 'Y' },
+      ]);
+      expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('materializes the active Subdivision Surface procedure with its exact four-operation MCP binding', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Add a managed Subdivision Surface modifier with viewport level three.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: subdivisionSurfaceAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Subdivision Surface materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Subdivision Surface leaf');
+      }
+      expect(materialization).toMatchObject({
+        formatVersion: '1.5.0',
+        catalogBinding: {
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        },
+        coverage: [
+          {
+            leafId: leaf.id,
+            recipeId: 'blender.modifier.add_subdivision_surface.semantic',
+            menu: 'unavailable',
+            shortcut: 'materialized',
+            mcp: 'materialized',
+          },
+        ],
+      });
+      expect(leaf.action.arguments).toEqual({
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.subdivision_surface',
+        modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+        viewportLevel: 3,
+      });
+      const shortcut = leaf.shortcutTracks[0];
+      if (shortcut?.availability !== 'available') {
+        throw new Error('Expected Subdivision Surface shortcut candidate');
+      }
+      expect(shortcut.operations).toHaveLength(4);
+      const track = leaf.mcpTracks[0];
+      if (track?.availability !== 'available') {
+        throw new Error('Expected Subdivision Surface MCP track');
+      }
+      expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+        subdivisionSurfaceLeafOperationIds,
+      );
+      expect(track.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4]);
+      expect(
+        track.operations.every(
+          (operation) =>
+            operation.serverName === 'operating-line' &&
+            operation.toolName ===
+              'operatingline.blender.modifier.subdivision-surface.execute-next' &&
+            operation.argumentSource === undefined &&
+            operation.actionArguments === undefined &&
+            operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+        ),
+      ).toBe(true);
+      expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+        {
+          targetId: 'tutorial.cube',
+          modifierId: 'tutorial.cube.subdivision_surface',
+        },
+        {},
+        {},
+        {
+          modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+          viewportLevel: 3,
+        },
       ]);
       expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
 
@@ -3905,7 +4144,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.4.0',
+        formatVersion: '1.5.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -3935,6 +4174,35 @@ describe('procedure compilation runtime', () => {
         availability: 'available',
         modality: 'mcp',
       });
+      const mcp = leaf.mcpTracks[0];
+      if (mcp?.availability !== 'available') {
+        throw new Error('Expected one materialized Edit Mode Bevel MCP track');
+      }
+      expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+        editBevelLeafOperationIds,
+      );
+      expect(mcp.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(
+        mcp.operations.every(
+          (operation) =>
+            operation.serverName === 'operating-line' &&
+            operation.toolName === 'operatingline.blender.mesh.edit-bevel-edges.execute-next' &&
+            operation.argumentSource === undefined &&
+            operation.actionArguments === undefined &&
+            operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+        ),
+      ).toBe(true);
+      expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+        {
+          targetId: 'tutorial.cube',
+          resultMeshId: 'tutorial.cube.beveled.mesh',
+        },
+        {},
+        {},
+        {},
+        { width: 0.2, segments: 3, profile: 0.6 },
+        { resultMeshName: 'OperatingLine.Cube.Beveled' },
+      ]);
       const shortcut = leaf.shortcutTracks[0];
       if (shortcut?.availability !== 'available') {
         throw new Error('Expected one materialized Edit Mode Bevel shortcut');
@@ -4081,7 +4349,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.4.0',
+        formatVersion: '1.5.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -4119,6 +4387,36 @@ describe('procedure compilation runtime', () => {
         availability: 'available',
         modality: 'mcp',
       });
+      const mcp = leaf.mcpTracks[0];
+      if (mcp?.availability !== 'available') {
+        throw new Error('Expected one materialized Edit Mode Inset MCP track');
+      }
+      expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+        editInsetLeafOperationIds,
+      );
+      expect(mcp.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(
+        mcp.operations.every(
+          (operation) =>
+            operation.toolName === 'operatingline.blender.mesh.edit-inset-faces.execute-next' &&
+            Object.keys(operation.arguments).join(',') ===
+              'formatVersion,requestId,replayId,expectedState' &&
+            operation.argumentSource === undefined &&
+            operation.actionArguments === undefined &&
+            operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+        ),
+      ).toBe(true);
+      expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+        {
+          targetId: 'tutorial.cube',
+          resultMeshId: 'tutorial.cube.inset.mesh',
+        },
+        {},
+        {},
+        {},
+        { thickness: 0.2, depth: 0.1 },
+        { resultMeshName: 'OperatingLine.Cube.Inset' },
+      ]);
       const shortcut = leaf.shortcutTracks[0];
       if (shortcut?.availability !== 'available') {
         throw new Error('Expected one materialized Edit Mode Inset shortcut');
@@ -4218,6 +4516,178 @@ describe('procedure compilation runtime', () => {
     }
   });
 
+  it('materializes and structurally compiles the active Edit Triangulate candidate', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Triangulate every Cube face.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: editTriangulateAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Triangulate materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Edit Mode Triangulate leaf');
+      }
+
+      expect(materialization.coverage).toEqual([
+        {
+          leafId: leaf.id,
+          recipeId: 'blender.mesh.edit_triangulate.semantic',
+          menu: 'unavailable',
+          shortcut: 'unavailable',
+          mcp: 'materialized',
+        },
+      ]);
+      const mcp = leaf.mcpTracks[0];
+      if (mcp?.availability !== 'available') {
+        throw new Error('Expected one materialized Edit Mode Triangulate MCP track');
+      }
+      expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+        editTriangulateLeafOperationIds,
+      );
+      expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+        { targetId: 'tutorial.cube', resultMeshId: 'tutorial.cube.triangulated.mesh' },
+        {},
+        {},
+        {},
+        {},
+        { resultMeshName: 'OperatingLine.Cube.Triangulated' },
+      ]);
+      expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.shortcutTracks[0]).toMatchObject({ availability: 'unavailable' });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('materializes and structurally compiles the active Extrude Region candidate', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Extrude Cube face 1 upward by one local unit.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: editExtrudeRegionAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Extrude Region materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Extrude Region leaf');
+      }
+
+      expect(materialization.coverage).toEqual([
+        {
+          leafId: leaf.id,
+          recipeId: 'blender.mesh.edit_extrude_region.semantic',
+          menu: 'unavailable',
+          shortcut: 'unavailable',
+          mcp: 'materialized',
+        },
+      ]);
+      const mcp = leaf.mcpTracks[0];
+      if (mcp?.availability !== 'available') {
+        throw new Error('Expected one materialized Extrude Region MCP track');
+      }
+      expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+        editExtrudeRegionLeafOperationIds,
+      );
+      expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+        { targetId: 'tutorial.cube', resultMeshId: 'tutorial.cube.extruded.mesh' },
+        {},
+        {},
+        { polygonIndices: [1] },
+        { translation: [0, 0, 1] },
+        { resultMeshName: 'OperatingLine.Cube.Extruded' },
+      ]);
+      expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.shortcutTracks[0]).toMatchObject({ availability: 'unavailable' });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it('materializes and structurally compiles the active Edit Mode Poke Faces candidate', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
@@ -4256,7 +4726,7 @@ describe('procedure compilation runtime', () => {
       }
 
       expect(materialization).toMatchObject({
-        formatVersion: '1.4.0',
+        formatVersion: '1.5.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -4293,6 +4763,33 @@ describe('procedure compilation runtime', () => {
         availability: 'available',
         modality: 'mcp',
       });
+      const mcp = leaf.mcpTracks[0];
+      if (mcp?.availability !== 'available') {
+        throw new Error('Expected one materialized Edit Mode Poke MCP track');
+      }
+      expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+        editPokeLeafOperationIds,
+      );
+      expect(mcp.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(
+        mcp.operations.every(
+          (operation) =>
+            operation.toolName === 'operatingline.blender.mesh.edit-poke-faces.execute-next' &&
+            Object.keys(operation.arguments).join(',') ===
+              'formatVersion,requestId,replayId,expectedState' &&
+            operation.argumentSource === undefined &&
+            operation.actionArguments === undefined &&
+            operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+        ),
+      ).toBe(true);
+      expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+        { targetId: 'tutorial.cube', resultMeshId: 'tutorial.cube.poked.mesh' },
+        {},
+        {},
+        {},
+        { offset: 0.2 },
+        { resultMeshName: 'OperatingLine.Cube.Poked' },
+      ]);
       const shortcut = leaf.shortcutTracks[0];
       if (shortcut?.availability !== 'available') {
         throw new Error('Expected one materialized Edit Mode Poke shortcut');
@@ -5414,6 +5911,12 @@ describe('procedure compilation runtime', () => {
       fixture: (packet: ProcedureAuthoringPromptPacket) =>
         primitiveReplayAuthoringCandidateFixture(packet, 'cylinder'),
     },
+    {
+      catalogVersion: '1.47.0',
+      primitive: 'Subdivision Surface',
+      goal: '在已接受的 Cube 上添加视口等级为三的 Subdivision Surface modifier。',
+      fixture: subdivisionSurfaceReplayAuthoringCandidateFixture,
+    },
   ])(
     'rejects a frozen InteractionCatalog $catalogVersion $primitive binding at action execution',
     async ({ catalogVersion, goal, fixture }) => {
@@ -5633,22 +6136,6 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
       geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
     },
-    {
-      primitive: 'mirror',
-      actionName: 'blender.modifier.add_mirror',
-      goal: '在已接受的 Cube 上添加精确绑定本地 Y 轴的 Mirror modifier。',
-      fixture: mirrorAuthoringCandidateFixture,
-      topology: { vertexCount: 16, edgeCount: 24, faceCount: 12 },
-      geometryDetailKeys: [],
-    },
-    {
-      primitive: 'solidify',
-      actionName: 'blender.modifier.add_solidify',
-      goal: '在已接受的 Cube 上添加厚度和偏移精确的 Solidify modifier。',
-      fixture: solidifyAuthoringCandidateFixture,
-      topology: { vertexCount: 16, edgeCount: 24, faceCount: 12 },
-      geometryDetailKeys: [],
-    },
   ])(
     'gates the accepted $primitive orchestration result on its exact action-level MCP and Start checkpoint',
     async ({ primitive, actionName, goal, fixture, topology, geometryDetailKeys }) => {
@@ -5702,16 +6189,15 @@ describe('procedure compilation runtime', () => {
         expect(proposed.binding).toMatchObject({
           actionName,
           claims: {
-            menuTrack: ['mirror', 'solidify'].includes(primitive)
-              ? 'unavailable'
-              : 'catalog_grounded_not_executed',
+            menuTrack:
+              primitive === 'subdivision_surface' ? 'unavailable' : 'catalog_grounded_not_executed',
             mcpTrack: 'catalog_grounded_not_executed',
           },
           materialization: {
             formatVersion: '1.4.0',
             coverage: [
               expect.objectContaining({
-                menu: ['mirror', 'solidify'].includes(primitive) ? 'unavailable' : 'materialized',
+                menu: primitive === 'subdivision_surface' ? 'unavailable' : 'materialized',
                 mcp: 'materialized',
               }),
             ],
@@ -5861,8 +6347,8 @@ describe('procedure compilation runtime', () => {
 
         await waitUntilAfter(delivery!.dispatchedAt);
         const fullObservationDetails =
-          primitive === 'mirror'
-            ? strongMirrorObservationDetails({
+          primitive === 'subdivision_surface'
+            ? strongSubdivisionSurfaceObservationDetails({
                 parameters: expectedObservation.parameters,
                 evaluatedTopology: {
                   evaluatedVertexCount: topology.vertexCount,
@@ -5870,20 +6356,11 @@ describe('procedure compilation runtime', () => {
                   evaluatedFaceCount: topology.faceCount,
                 },
               })
-            : primitive === 'solidify'
-              ? strongSolidifyObservationDetails({
-                  parameters: expectedObservation.parameters,
-                  evaluatedTopology: {
-                    evaluatedVertexCount: topology.vertexCount,
-                    evaluatedEdgeCount: topology.edgeCount,
-                    evaluatedFaceCount: topology.faceCount,
-                  },
-                })
-              : strongPrimitiveObservationDetails({
-                  parameters: expectedObservation.parameters,
-                  topology,
-                  geometryDetailKeys,
-                });
+            : strongPrimitiveObservationDetails({
+                parameters: expectedObservation.parameters,
+                topology,
+                geometryDetailKeys,
+              });
         const reportFor = (sequence: number, details: Record<string, unknown>) => {
           const occurredAt = new Date().toISOString();
           return {
@@ -5984,88 +6461,36 @@ describe('procedure compilation runtime', () => {
           ).toMatchObject({ status: 'dispatched' });
         }
 
-        if (primitive === 'mirror') {
-          const missingFixedStateDetails: Record<string, unknown> =
-            structuredClone(fullObservationDetails);
-          delete missingFixedStateDetails['mirrorFixedStateMatches'];
-          const missingFixedStateReport = reportFor(successSequence++, missingFixedStateDetails);
-          await postState(missingFixedStateReport);
-          const missingFixedStateResult = await postResult(missingFixedStateReport);
-          expect(missingFixedStateResult.status).toBe(409);
-          await expect(missingFixedStateResult.json()).resolves.toMatchObject({
-            error: 'action_execution_observation_mismatch',
-          });
-          expect(
-            companionActionExecutionStatusSchema.parse(
-              (
-                await callMcpTool(runtime, 8973, 'operatingline.blender.action.status', {
-                  requestId: actionRequest.requestId,
-                })
-              ).result?.structuredContent,
-            ),
-          ).toMatchObject({ status: 'dispatched' });
-
-          const wrongAxisReport = reportFor(successSequence++, {
+        if (primitive === 'subdivision_surface') {
+          const wrongFixedParameters = {
+            ...expectedObservation.parameters,
+            renderLevels: 1,
+          };
+          const wrongFixedReport = reportFor(successSequence++, {
             ...fullObservationDetails,
-            axis: 'X',
+            parameters: wrongFixedParameters,
           });
-          await postState(wrongAxisReport);
-          const wrongAxisResult = await postResult(wrongAxisReport);
-          expect(wrongAxisResult.status).toBe(409);
-          await expect(wrongAxisResult.json()).resolves.toMatchObject({
+          await postState(wrongFixedReport);
+          const wrongFixedResult = await postResult(wrongFixedReport);
+          expect(wrongFixedResult.status).toBe(409);
+          await expect(wrongFixedResult.json()).resolves.toMatchObject({
             error: 'action_execution_observation_mismatch',
           });
-          expect(
-            companionActionExecutionStatusSchema.parse(
-              (
-                await callMcpTool(runtime, 8974, 'operatingline.blender.action.status', {
-                  requestId: actionRequest.requestId,
-                })
-              ).result?.structuredContent,
-            ),
-          ).toMatchObject({ status: 'dispatched' });
-        }
 
-        if (primitive === 'solidify') {
-          const missingFixedStateDetails: Record<string, unknown> =
-            structuredClone(fullObservationDetails);
-          delete missingFixedStateDetails['solidifyFixedStateMatches'];
-          const missingFixedStateReport = reportFor(successSequence++, missingFixedStateDetails);
-          await postState(missingFixedStateReport);
-          const missingFixedStateResult = await postResult(missingFixedStateReport);
-          expect(missingFixedStateResult.status).toBe(409);
-          await expect(missingFixedStateResult.json()).resolves.toMatchObject({
-            error: 'action_execution_observation_mismatch',
-          });
-          expect(
-            companionActionExecutionStatusSchema.parse(
-              (
-                await callMcpTool(runtime, 8975, 'operatingline.blender.action.status', {
-                  requestId: actionRequest.requestId,
-                })
-              ).result?.structuredContent,
-            ),
-          ).toMatchObject({ status: 'dispatched' });
-
-          const wrongThicknessReport = reportFor(successSequence++, {
-            ...fullObservationDetails,
-            thickness: 0.5,
-          });
-          await postState(wrongThicknessReport);
-          const wrongThicknessResult = await postResult(wrongThicknessReport);
-          expect(wrongThicknessResult.status).toBe(409);
-          await expect(wrongThicknessResult.json()).resolves.toMatchObject({
-            error: 'action_execution_observation_mismatch',
-          });
-          expect(
-            companionActionExecutionStatusSchema.parse(
-              (
-                await callMcpTool(runtime, 8976, 'operatingline.blender.action.status', {
-                  requestId: actionRequest.requestId,
-                })
-              ).result?.structuredContent,
-            ),
-          ).toMatchObject({ status: 'dispatched' });
+          const prematureFinalize = await fetch(
+            `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+            {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                replayId: replayRequest.replayId,
+                actionExecutionRequestId: actionRequest.requestId,
+                attestationId: randomUUID(),
+                reportId: wrongFixedReport.reportId,
+              }),
+            },
+          );
+          expect(prematureFinalize.status).toBe(409);
         }
 
         const successReport = reportFor(successSequence, fullObservationDetails);
@@ -6082,6 +6507,33 @@ describe('procedure compilation runtime', () => {
         expect(
           companionActionExecutionStatusSchema.parse(statusMcp.result?.structuredContent),
         ).toMatchObject({ status: 'succeeded', result });
+
+        const finalizedResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              replayId: replayRequest.replayId,
+              actionExecutionRequestId: actionRequest.requestId,
+              attestationId: randomUUID(),
+              reportId: successReport.reportId,
+            }),
+          },
+        );
+        expect(
+          finalizedResponse.status,
+          JSON.stringify(await finalizedResponse.clone().json()),
+        ).toBe(200);
+        expect(
+          procedureLeafReplayFinalizeResultSchema.parse(await finalizedResponse.json()),
+        ).toMatchObject({
+          status: 'accepted',
+          attestation: {
+            execution: { action: { name: actionName } },
+            successGate: { allSatisfied: true },
+          },
+        });
       } finally {
         await runtime.stop();
       }
@@ -8592,7 +9044,7 @@ describe('procedure compilation runtime', () => {
     } finally {
       await runtime.stop();
     }
-  }, 20_000);
+  }, 40_000);
 
   it('attests an approved managed Icosphere replay with subdivision-bound topology', async () => {
     const runtime = await startRuntime({
@@ -9187,6 +9639,1401 @@ describe('procedure compilation runtime', () => {
       }
     },
   );
+
+  it('executes the accepted Transform Geometry replay as eleven server-derived operations', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-transform-recovery-'));
+    const databasePath = join(directory, 'state.db');
+    let runtime = await startRuntime({
+      databasePath,
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Create the exact accepted Transform Geometry graph one operation at a time.',
+          treeId: 'transform.geometry.procedure',
+          revision: 1,
+          locale: 'en',
+        }),
+      });
+      expect(promptResponse.status).toBe(200);
+      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+      const tree = transformGeometryReplayAuthoringCandidateFixture(packet);
+      const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+        (node) =>
+          node['kind'] === 'leaf' &&
+          (node['action'] as { name?: string } | undefined)?.name ===
+            'blender.geometry_nodes.create_transform',
+      );
+      if (leaf === undefined) throw new Error('Expected one Transform Geometry leaf');
+      const leafId = String(leaf['id']);
+      const creatorLeafId = String((leaf['dependsOn'] as string[])[0]);
+      const replayId = randomUUID();
+      const proposedMcp = await callMcpTool(
+        runtime,
+        9_100,
+        'operatingline.procedure.replay.propose',
+        {
+          formatVersion: '1.0.0',
+          replayId,
+          targetInstanceId,
+          leafId,
+          replayMode: 'managed_action',
+          packet,
+          tree,
+        },
+      );
+      expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+      const proposed = procedureLeafReplayProposalResultSchema.parse(
+        proposedMcp.result?.structuredContent,
+      );
+      expect(proposed.binding).toMatchObject({
+        actionName: 'blender.geometry_nodes.create_transform',
+        claims: { mcpTrack: 'catalog_grounded_not_executed' },
+        materialization: {
+          formatVersion: '1.5.0',
+          coverage: expect.arrayContaining([
+            expect.objectContaining({ leafId, mcp: 'materialized' }),
+          ]),
+        },
+      });
+
+      const hello = blenderDocumentCompanionHello(targetInstanceId);
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(hello),
+      });
+      expect(sessionResponse.status).toBe(200);
+      let session = (await sessionResponse.json()) as { leaseId: string };
+      let leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const rotateDocumentLease = async () => {
+        const rotatedResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(hello),
+        });
+        expect(rotatedResponse.status).toBe(200);
+        session = (await rotatedResponse.json()) as { leaseId: string };
+        leaseHeaders = {
+          ...headers,
+          'x-operatingline-companion-lease': session.leaseId,
+        };
+      };
+      const proposal = proposed.binding.proposal;
+      const decision = {
+        protocolVersion: guideProtocolVersion,
+        decisionId: randomUUID(),
+        proposalId: proposal.proposalId,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const decisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
+      );
+      expect(decisionResponse.status).toBe(200);
+      await waitUntilAfter(decision.occurredAt);
+      await rotateDocumentLease();
+
+      const executionId = randomUUID();
+      const planContentSha256 = computePlanContentSha256(proposal.plan);
+      const startOccurredAt = new Date().toISOString();
+      const startReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: 1,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256,
+        executionId,
+        phase: 'running',
+        activeStepId: creatorLeafId,
+        completedStepIds: [creatorLeafId],
+        transition: 'step_succeeded',
+        stepId: creatorLeafId,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: randomUUID(),
+          operation: 'next',
+          committedAt: new Date(Date.parse(startOccurredAt) - 1).toISOString(),
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+            planContentSha256,
+            executionId,
+            activeStepId: creatorLeafId,
+            completedStepIds: [creatorLeafId],
+            receiptStepIds: [creatorLeafId],
+          },
+        },
+        error: null,
+        occurredAt: startOccurredAt,
+      } as const;
+      const startStateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(startReport),
+      });
+      expect(startStateResponse.status).toBe(200);
+
+      const rejectedPublicArguments = await callMcpTool(
+        runtime,
+        9_101,
+        'operatingline.blender.geometry-nodes.transform.execute-next',
+        {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          replayId,
+          expectedState: { reportId: startReport.reportId, sequence: 1 },
+          operationOrdinal: 11,
+        },
+      );
+      expect(rejectedPublicArguments.result?.isError).toBe(true);
+      expect(rejectedPublicArguments.result?.content?.[0]?.text).toContain(
+        'Input validation error',
+      );
+
+      const expiringRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId,
+        expectedState: { reportId: startReport.reportId, sequence: 1 },
+      } as const;
+      const expiringQueuedMcp = await callMcpTool(
+        runtime,
+        9_190,
+        'operatingline.blender.geometry-nodes.transform.execute-next',
+        expiringRequest,
+      );
+      expect(expiringQueuedMcp.result?.isError).not.toBe(true);
+      expect(
+        companionLeafOperationStatusSchema.parse(expiringQueuedMcp.result?.structuredContent),
+      ).toMatchObject({ status: 'queued', operationOrdinal: 1 });
+
+      const replacementSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(blenderDocumentCompanionHello(targetInstanceId)),
+        },
+      );
+      expect(replacementSessionResponse.status).toBe(200);
+      const replacementSession = (await replacementSessionResponse.json()) as {
+        leaseId: string;
+      };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': replacementSession.leaseId,
+      };
+      const expiredStatusMcp = await callMcpTool(
+        runtime,
+        9_191,
+        'operatingline.blender.geometry-nodes.transform.status',
+        { requestId: expiringRequest.requestId },
+      );
+      expect(
+        companionLeafOperationStatusSchema.parse(expiredStatusMcp.result?.structuredContent),
+      ).toMatchObject({
+        status: 'pre_dispatch_authority_expired',
+        preDispatchAuthorityExpirationEvidence: {
+          source: 'document_authority_drift',
+          priorStatus: 'queued',
+          retainsTargetLock: false,
+          automaticReplay: false,
+        },
+      });
+      const expiredPollUrl = new URL('/api/v1/companion/leaf-operation', runtime.baseUrl);
+      expiredPollUrl.searchParams.set('adapterId', 'blender');
+      expiredPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const expiredPollResponse = await fetch(expiredPollUrl, { headers: leaseHeaders });
+      expect(expiredPollResponse.status).toBe(200);
+      await expect(expiredPollResponse.json()).resolves.toEqual({ request: null });
+      await rotateDocumentLease();
+
+      const recoveryRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId,
+        expectedState: { reportId: startReport.reportId, sequence: 1 },
+      } as const;
+      const recoveryQueuedMcp = await callMcpTool(
+        runtime,
+        9_192,
+        'operatingline.blender.geometry-nodes.transform.execute-next',
+        recoveryRequest,
+      );
+      expect(recoveryQueuedMcp.result?.isError).not.toBe(true);
+      const recoveryPollUrl = new URL('/api/v1/companion/leaf-operation-recovery', runtime.baseUrl);
+      recoveryPollUrl.searchParams.set('adapterId', 'blender');
+      recoveryPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const operationPollUrl = new URL('/api/v1/companion/leaf-operation', runtime.baseUrl);
+      operationPollUrl.searchParams.set('adapterId', 'blender');
+      operationPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const recoveryDeliveryResponse = await fetch(operationPollUrl, { headers: leaseHeaders });
+      expect(recoveryDeliveryResponse.status).toBe(200);
+      const recoveryDelivery = companionLeafOperationPollDeliverySchema.parse(
+        await recoveryDeliveryResponse.json(),
+      ).request;
+      if (recoveryDelivery === null) throw new Error('Expected recovery test operation delivery');
+      await waitUntilAfter(recoveryDelivery.dispatchedAt);
+      const recoveryTokenSha256 = 'f'.repeat(64);
+      const recoverySignal = {
+        ...recoveryDelivery,
+        status: 'recovery_required',
+        progress: null,
+        error: 'Native Undo outcome is indeterminate.',
+        recoveryReason: {
+          kind: 'native_undo_outcome_indeterminate',
+          nativeUndoGuard: {
+            expectedRestoredCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+            recoveryTokenSha256,
+          },
+          requiresExplicitRecovery: true,
+          automaticReplay: false,
+        },
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const recoverySignalResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/leaf-operation-result`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(recoverySignal) },
+      );
+      expect(recoverySignalResponse.status).toBe(200);
+      await expect(recoverySignalResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const noAutomaticReplay = await fetch(operationPollUrl, { headers: leaseHeaders });
+      expect(noAutomaticReplay.status).toBe(200);
+      await expect(noAutomaticReplay.json()).resolves.toEqual({ request: null });
+
+      const unrotatedRecovery = await fetch(recoveryPollUrl, { headers: leaseHeaders });
+      expect(unrotatedRecovery.status).toBe(409);
+      await expect(unrotatedRecovery.json()).resolves.toMatchObject({
+        error: 'leaf_operation_recovery_lease_not_rotated',
+      });
+
+      const wrongDocumentResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderDocumentCompanionHello(targetInstanceId)),
+      });
+      expect(wrongDocumentResponse.status).toBe(200);
+      const wrongDocumentSession = (await wrongDocumentResponse.json()) as { leaseId: string };
+      const wrongDocumentRecovery = await fetch(recoveryPollUrl, {
+        headers: {
+          ...headers,
+          'x-operatingline-companion-lease': wrongDocumentSession.leaseId,
+        },
+      });
+      expect(wrongDocumentRecovery.status).toBe(409);
+      await expect(wrongDocumentRecovery.json()).resolves.toMatchObject({
+        error: 'leaf_operation_recovery_document_mismatch',
+      });
+
+      await rotateDocumentLease();
+      const recoveryChallengeResponse = await fetch(recoveryPollUrl, { headers: leaseHeaders });
+      expect(recoveryChallengeResponse.status).toBe(200);
+      const recoveryChallenge = companionLeafOperationRecoveryPollDeliverySchema.parse(
+        await recoveryChallengeResponse.json(),
+      ).request;
+      if (recoveryChallenge === null) throw new Error('Expected leaf-operation recovery challenge');
+      expect(recoveryChallenge).toMatchObject({
+        originalDelivery: { requestId: recoveryRequest.requestId },
+        acceptedPrefix: {
+          completedOperationIds: [],
+          nextOrdinal: 1,
+          latestFingerprintSha256: null,
+        },
+        authorityProof: {
+          reportId: startReport.reportId,
+          sequence: startReport.sequence,
+          authorizedStartCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+        },
+        nativeUndoGuard: {
+          expectedRestoredCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+          recoveryTokenSha256,
+        },
+        automaticReplay: false,
+      });
+      await waitUntilAfter(recoveryChallenge.requestedAt);
+      const restoredAt = new Date().toISOString();
+      await waitUntilAfter(restoredAt);
+      const observedAt = new Date().toISOString();
+      await waitUntilAfter(observedAt);
+      const recoveryAck = {
+        formatVersion: recoveryChallenge.formatVersion,
+        challenge: recoveryChallenge,
+        recoveryId: recoveryChallenge.recoveryId,
+        requestId: recoveryChallenge.originalDelivery.requestId,
+        originalDeliveryId: recoveryChallenge.originalDelivery.deliveryId,
+        replacementSessionFingerprintSha256: recoveryChallenge.replacementSessionFingerprintSha256,
+        outcome: 'prefix_restored',
+        evidence: {
+          kind: 'prefix_restored',
+          expectedState: recoveryChallenge.expectedState,
+          leafRun: recoveryChallenge.acceptedPrefix,
+          currentCheckpoint: {
+            reportId: startReport.reportId,
+            sequence: startReport.sequence,
+            checkpointId: startReport.nativeUndoCheckpoint.checkpointId,
+            previousCheckpointId: startReport.nativeUndoCheckpoint.previousCheckpointId,
+            operation: startReport.nativeUndoCheckpoint.operation,
+            sceneFingerprintSha256: null,
+            markerMatched: true,
+            sessionSnapshotMatches: true,
+            stageVerified: true,
+            observedAt,
+          },
+          restoration: 'native_undo_restored',
+          nativeUndoWitness: {
+            sourceCheckpointId: randomUUID(),
+            restoredCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+            recoveryTokenSha256,
+            restoredAt,
+            probeSatisfied: true,
+          },
+        },
+        retainsTargetLock: false,
+        automaticReplay: false,
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const hostileRecoveryAck = structuredClone(recoveryAck);
+      hostileRecoveryAck.evidence.nativeUndoWitness.recoveryTokenSha256 = 'e'.repeat(64);
+      const hostileRecoveryResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(hostileRecoveryAck) },
+      );
+      expect(hostileRecoveryResponse.status).toBe(400);
+      const recoveryAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(recoveryAck) },
+      );
+      expect(recoveryAckResponse.status).toBe(200);
+      await expect(recoveryAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+      // If the accepted response is lost, the immutable ACK remains safely
+      // confirmable under a later lease from the same durable document.
+      await rotateDocumentLease();
+      const duplicateRecoveryAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(recoveryAck) },
+      );
+      expect(duplicateRecoveryAckResponse.status).toBe(200);
+      await expect(duplicateRecoveryAckResponse.json()).resolves.toEqual({
+        result: 'duplicate',
+      });
+      const recoveredStatusMcp = await callMcpTool(
+        runtime,
+        9_193,
+        'operatingline.blender.geometry-nodes.transform.status',
+        { requestId: recoveryRequest.requestId },
+      );
+      expect(
+        companionLeafOperationStatusSchema.parse(recoveredStatusMcp.result?.structuredContent),
+      ).toMatchObject({ status: 'failed' });
+
+      const actionArguments = (leaf['action'] as { arguments: Record<string, unknown> }).arguments;
+      const operationParameters = [
+        {
+          targetId: actionArguments['targetId'],
+          modifierId: actionArguments['modifierId'],
+          modifierName: actionArguments['modifierName'],
+          nodeGroupId: actionArguments['nodeGroupId'],
+          nodeGroupName: actionArguments['nodeGroupName'],
+        },
+        {},
+        {},
+        {},
+        { translation: actionArguments['translation'] },
+        { rotation: actionArguments['rotation'] },
+        { scale: actionArguments['scale'] },
+        {},
+        {},
+        {},
+        {},
+      ];
+      const runId = randomUUID();
+      const receiptId = randomUUID();
+      const bindingSha256 = '5'.repeat(64);
+      let fingerprint = '0'.repeat(64);
+      let latestNativeCheckpointId = startReport.nativeUndoCheckpoint.checkpointId;
+
+      for (let ordinal = 1; ordinal <= 11; ordinal += 1) {
+        if (ordinal === 2) {
+          const prefixRecoveryRequest = {
+            formatVersion: '1.0.0',
+            requestId: randomUUID(),
+            replayId,
+            expectedState: { reportId: startReport.reportId, sequence: 1 },
+          } as const;
+          const prefixRecoveryQueued = await callMcpTool(
+            runtime,
+            9_194,
+            'operatingline.blender.geometry-nodes.transform.execute-next',
+            prefixRecoveryRequest,
+          );
+          expect(prefixRecoveryQueued.result?.isError).not.toBe(true);
+          const prefixRecoveryDeliveryResponse = await fetch(operationPollUrl, {
+            headers: leaseHeaders,
+          });
+          expect(prefixRecoveryDeliveryResponse.status).toBe(200);
+          const prefixRecoveryDelivery = companionLeafOperationPollDeliverySchema.parse(
+            await prefixRecoveryDeliveryResponse.json(),
+          ).request;
+          if (prefixRecoveryDelivery === null) {
+            throw new Error('Expected prefix recovery operation delivery');
+          }
+          await waitUntilAfter(prefixRecoveryDelivery.dispatchedAt);
+
+          await runtime.stop();
+          runtime = await startRuntime({
+            databasePath,
+            accessToken,
+            actionCatalogs: blenderActionCatalogs,
+            interactionCatalogs: blenderInteractionCatalogs,
+          });
+
+          const restartRecoveryStatus = await callMcpTool(
+            runtime,
+            9_195,
+            'operatingline.blender.geometry-nodes.transform.status',
+            { requestId: prefixRecoveryRequest.requestId },
+          );
+          expect(
+            companionLeafOperationStatusSchema.parse(
+              restartRecoveryStatus.result?.structuredContent,
+            ),
+          ).toMatchObject({
+            status: 'recovery_required',
+            recoveryEvidence: {
+              source: 'coordinator_restart',
+              reason: 'runtime_restart_after_delivery',
+              priorStatus: 'dispatched',
+              requiresExplicitRecovery: true,
+              automaticReplay: false,
+              retainsTargetLock: true,
+            },
+          });
+
+          const restartedSessionResponse = await fetch(
+            `${runtime.baseUrl}/api/v1/companion/session`,
+            { method: 'POST', headers, body: JSON.stringify(hello) },
+          );
+          expect(restartedSessionResponse.status).toBe(200);
+          session = (await restartedSessionResponse.json()) as { leaseId: string };
+          leaseHeaders = {
+            ...headers,
+            'x-operatingline-companion-lease': session.leaseId,
+          };
+
+          const restartedOperationPollUrl = new URL(
+            '/api/v1/companion/leaf-operation',
+            runtime.baseUrl,
+          );
+          restartedOperationPollUrl.searchParams.set('adapterId', 'blender');
+          restartedOperationPollUrl.searchParams.set('instanceId', targetInstanceId);
+          const noRestartReplay = await fetch(restartedOperationPollUrl, {
+            headers: leaseHeaders,
+          });
+          expect(noRestartReplay.status).toBe(200);
+          await expect(noRestartReplay.json()).resolves.toEqual({ request: null });
+
+          const lockedWhileRecovering = await callMcpTool(
+            runtime,
+            9_196,
+            'operatingline.blender.geometry-nodes.transform.execute-next',
+            {
+              ...prefixRecoveryRequest,
+              requestId: randomUUID(),
+            },
+          );
+          expect(lockedWhileRecovering.result?.isError).toBe(true);
+          expect(lockedWhileRecovering.result?.content?.[0]?.text).toContain(
+            'leaf_operation_in_progress',
+          );
+
+          const restartedRecoveryPollUrl = new URL(
+            '/api/v1/companion/leaf-operation-recovery',
+            runtime.baseUrl,
+          );
+          restartedRecoveryPollUrl.searchParams.set('adapterId', 'blender');
+          restartedRecoveryPollUrl.searchParams.set('instanceId', targetInstanceId);
+          const prefixChallengeResponse = await fetch(restartedRecoveryPollUrl, {
+            headers: leaseHeaders,
+          });
+          expect(prefixChallengeResponse.status).toBe(200);
+          const prefixChallenge = companionLeafOperationRecoveryPollDeliverySchema.parse(
+            await prefixChallengeResponse.json(),
+          ).request;
+          if (prefixChallenge === null) {
+            throw new Error('Expected non-empty-prefix recovery challenge');
+          }
+          expect(prefixChallenge.acceptedPrefix).toMatchObject({
+            completedOperationIds: transformGeometryLeafOperationIds.slice(0, 1),
+            runId,
+            bindingSha256,
+            receiptId,
+            nextOrdinal: 2,
+            latestFingerprintSha256: fingerprint,
+          });
+          await waitUntilAfter(prefixChallenge.requestedAt);
+          const appliedFingerprint = '2'.repeat(64);
+          const appliedResult = {
+            ...prefixRecoveryDelivery,
+            status: 'succeeded',
+            progress: {
+              runId,
+              bindingSha256,
+              stepId: leafId,
+              actionName: 'blender.geometry_nodes.create_transform',
+              recipeId: 'blender.geometry_nodes.create_transform.semantic',
+              catalogVersion: prefixRecoveryDelivery.catalogVersion,
+              operationIds: transformGeometryLeafOperationIds,
+              completedOperationIds: transformGeometryLeafOperationIds.slice(0, 2),
+              nextOrdinal: 3,
+              latestObservation: {
+                kind: 'guided_geometry_operation',
+                satisfied: true,
+                details: {
+                  status: 'passed',
+                  direction: 'forward',
+                  operationOrdinal: 2,
+                  operationId: transformGeometryLeafOperationIds[1],
+                  mutating: true,
+                  receiptId,
+                  runId,
+                  stepId: leafId,
+                  actionName: 'blender.geometry_nodes.create_transform',
+                  recipeId: 'blender.geometry_nodes.create_transform.semantic',
+                  catalogVersion: prefixRecoveryDelivery.catalogVersion,
+                  beforeFingerprintSha256: fingerprint,
+                  afterFingerprintSha256: appliedFingerprint,
+                  evidence: {
+                    completedOperations: [1, 2],
+                    nodeGroupId: actionArguments['nodeGroupId'],
+                    modifierId: actionArguments['modifierId'],
+                    completeGraph: false,
+                    preconditionsValidated: false,
+                    preflightKind: null,
+                    preflightTargetId: null,
+                    stage: 2,
+                    nodeCount: 0,
+                    interfaceSocketCount: 0,
+                    linkCount: 0,
+                    rnaControlWrites: [],
+                    nodes: [],
+                    interfaceSockets: [],
+                  },
+                },
+              },
+              leafCompleted: false,
+              finalReport: null,
+            },
+            error: null,
+            occurredAt: new Date().toISOString(),
+          } as const;
+          const appliedObservedAt = new Date().toISOString();
+          await waitUntilAfter(appliedObservedAt);
+          const appliedCheckpointId = randomUUID();
+          const appliedRecoveryAck = {
+            formatVersion: prefixChallenge.formatVersion,
+            challenge: prefixChallenge,
+            recoveryId: prefixChallenge.recoveryId,
+            requestId: prefixChallenge.originalDelivery.requestId,
+            originalDeliveryId: prefixChallenge.originalDelivery.deliveryId,
+            replacementSessionFingerprintSha256:
+              prefixChallenge.replacementSessionFingerprintSha256,
+            outcome: 'operation_applied',
+            evidence: {
+              kind: 'operation_applied',
+              terminalResult: appliedResult,
+              currentCheckpoint: {
+                reportId: startReport.reportId,
+                sequence: startReport.sequence,
+                checkpointId: appliedCheckpointId,
+                previousCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+                operation: 'leaf_operation',
+                sceneFingerprintSha256: appliedFingerprint,
+                markerMatched: true,
+                sessionSnapshotMatches: true,
+                stageVerified: true,
+                observedAt: appliedObservedAt,
+              },
+            },
+            retainsTargetLock: false,
+            automaticReplay: false,
+            occurredAt: new Date().toISOString(),
+          } as const;
+          const hostileAppliedAck = structuredClone(appliedRecoveryAck);
+          hostileAppliedAck.evidence.currentCheckpoint.previousCheckpointId = appliedCheckpointId;
+          const hostileAppliedResponse = await fetch(
+            `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+            {
+              method: 'POST',
+              headers: leaseHeaders,
+              body: JSON.stringify(hostileAppliedAck),
+            },
+          );
+          expect(hostileAppliedResponse.status).toBe(409);
+          await expect(hostileAppliedResponse.json()).resolves.toMatchObject({
+            error: 'leaf_operation_recovery_applied_checkpoint_invalid',
+          });
+          const appliedRecoveryAckResponse = await fetch(
+            `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+            {
+              method: 'POST',
+              headers: leaseHeaders,
+              body: JSON.stringify(appliedRecoveryAck),
+            },
+          );
+          expect(appliedRecoveryAckResponse.status).toBe(200);
+          await expect(appliedRecoveryAckResponse.json()).resolves.toEqual({
+            result: 'accepted',
+          });
+          await rotateDocumentLease();
+          const duplicateAppliedRecoveryAckResponse = await fetch(
+            `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+            {
+              method: 'POST',
+              headers: leaseHeaders,
+              body: JSON.stringify(appliedRecoveryAck),
+            },
+          );
+          expect(duplicateAppliedRecoveryAckResponse.status).toBe(200);
+          await expect(duplicateAppliedRecoveryAckResponse.json()).resolves.toEqual({
+            result: 'duplicate',
+          });
+          const appliedRecoveryStatus = await callMcpTool(
+            runtime,
+            9_197,
+            'operatingline.blender.geometry-nodes.transform.status',
+            { requestId: prefixRecoveryRequest.requestId },
+          );
+          expect(
+            companionLeafOperationStatusSchema.parse(
+              appliedRecoveryStatus.result?.structuredContent,
+            ),
+          ).toMatchObject({
+            status: 'succeeded',
+            operationOrdinal: 2,
+            result: {
+              progress: {
+                completedOperationIds: transformGeometryLeafOperationIds.slice(0, 2),
+                nextOrdinal: 3,
+                latestObservation: {
+                  details: { afterFingerprintSha256: appliedFingerprint },
+                },
+              },
+            },
+          });
+          fingerprint = appliedFingerprint;
+          continue;
+        }
+
+        const request = {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          replayId,
+          expectedState: { reportId: startReport.reportId, sequence: 1 },
+        } as const;
+        const queuedMcp = await callMcpTool(
+          runtime,
+          9_101 + ordinal,
+          'operatingline.blender.geometry-nodes.transform.execute-next',
+          request,
+        );
+        expect(queuedMcp.result?.isError, queuedMcp.result?.content?.[0]?.text).not.toBe(true);
+        const queued = companionLeafOperationStatusSchema.parse(
+          queuedMcp.result?.structuredContent,
+        );
+        expect(queued).toMatchObject({
+          requestId: request.requestId,
+          replayId,
+          operationOrdinal: ordinal,
+          sourceOperationId: transformGeometryLeafOperationIds[ordinal - 1],
+          operationParameters: operationParameters[ordinal - 1],
+          status: 'queued',
+        });
+
+        if (ordinal === 1) {
+          const duplicateMcp = await callMcpTool(
+            runtime,
+            9_200,
+            'operatingline.blender.geometry-nodes.transform.execute-next',
+            request,
+          );
+          expect(duplicateMcp.result?.structuredContent).toEqual(queued);
+          await rotateDocumentLease();
+        }
+
+        const pollUrl = new URL('/api/v1/companion/leaf-operation', runtime.baseUrl);
+        pollUrl.searchParams.set('adapterId', 'blender');
+        pollUrl.searchParams.set('instanceId', targetInstanceId);
+        const pollResponse = await fetch(pollUrl, { headers: leaseHeaders });
+        expect(pollResponse.status).toBe(200);
+        const delivery = companionLeafOperationPollDeliverySchema.parse(
+          await pollResponse.json(),
+        ).request;
+        if (delivery === null) throw new Error(`Expected operation ${ordinal} delivery`);
+        await waitUntilAfter(delivery.dispatchedAt);
+
+        const mutating = ordinal >= 2 && ordinal <= 10;
+        const afterFingerprint = mutating ? ordinal.toString(16).repeat(64) : fingerprint;
+        const nodeGroupPresent = ordinal >= 2;
+        const transformPresent = ordinal >= 4;
+        const outputPresent = ordinal >= 8;
+        const rnaControlWrites = (() => {
+          const binding =
+            ordinal === 5
+              ? {
+                  actionArgument: 'translation',
+                  socketIdentifier: 'Translation',
+                  defaultValue: [0, 0, 0],
+                }
+              : ordinal === 6
+                ? {
+                    actionArgument: 'rotation',
+                    socketIdentifier: 'Rotation',
+                    defaultValue: [0, 0, 0],
+                  }
+                : ordinal === 7
+                  ? {
+                      actionArgument: 'scale',
+                      socketIdentifier: 'Scale',
+                      defaultValue: [1, 1, 1],
+                    }
+                  : undefined;
+          if (binding === undefined) return [];
+          const accepted = actionArguments[binding.actionArgument] as number[];
+          const labels = ['X', 'Y', 'Z'] as const;
+          return labels.map((componentLabel, componentIndex) => ({
+            order: componentIndex + 1,
+            executionMethod: 'blender_rna_property_write',
+            mcpTool: 'operatingline.blender.geometry-nodes.transform.execute-next',
+            sourceOperationId: transformGeometryLeafOperationIds[ordinal - 1],
+            semanticAction: 'node.transform_geometry',
+            actionArgument: binding.actionArgument,
+            nodeGroupId: actionArguments['nodeGroupId'],
+            nodeGroupName: actionArguments['nodeGroupName'],
+            nodeName: 'OperatingLine Transform',
+            nodeType: 'GeometryNodeTransform',
+            socketIdentifier: binding.socketIdentifier,
+            propertyName: 'default_value',
+            componentIndex,
+            componentLabel,
+            beforeValue: binding.defaultValue[componentIndex],
+            acceptedValue: accepted[componentIndex],
+            observedValue: Math.fround(accepted[componentIndex]!),
+            uiPath: [
+              'Geometry Nodes',
+              actionArguments['nodeGroupName'],
+              'OperatingLine Transform',
+              binding.socketIdentifier,
+              componentLabel,
+            ],
+          }));
+        })();
+        const evidence: Record<string, unknown> = {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          nodeGroupId: nodeGroupPresent ? actionArguments['nodeGroupId'] : null,
+          modifierId: nodeGroupPresent ? actionArguments['modifierId'] : null,
+          completeGraph: ordinal === 11,
+          preconditionsValidated: ordinal === 1,
+          preflightKind: ordinal === 1 ? 'managed_transform_geometry_resources' : null,
+          preflightTargetId: ordinal === 1 ? actionArguments['targetId'] : null,
+          stage: Math.min(ordinal, 10),
+          nodeCount: ordinal < 3 ? 0 : ordinal < 4 ? 1 : outputPresent ? 3 : 2,
+          interfaceSocketCount: ordinal < 3 ? 0 : outputPresent ? 2 : 1,
+          linkCount: ordinal < 9 ? 0 : ordinal === 9 ? 1 : 2,
+          rnaControlWrites,
+        };
+        if (nodeGroupPresent) {
+          evidence['nodes'] = [
+            ...(ordinal >= 3 ? ['OperatingLine Input'] : []),
+            ...(ordinal >= 4 ? ['OperatingLine Transform'] : []),
+            ...(outputPresent ? ['OperatingLine Output'] : []),
+          ].sort();
+          evidence['interfaceSockets'] = [
+            ...(ordinal >= 3
+              ? [{ name: 'Geometry', inOut: 'INPUT', socketType: 'NodeSocketGeometry' }]
+              : []),
+            ...(outputPresent
+              ? [{ name: 'Geometry', inOut: 'OUTPUT', socketType: 'NodeSocketGeometry' }]
+              : []),
+          ];
+        }
+        if (transformPresent) {
+          evidence['translation'] = ordinal >= 5 ? actionArguments['translation'] : [0, 0, 0];
+          evidence['rotation'] = ordinal >= 6 ? actionArguments['rotation'] : [0, 0, 0];
+          evidence['scale'] = ordinal >= 7 ? actionArguments['scale'] : [1, 1, 1];
+        }
+
+        let finalReport: { reportId: string; sequence: number } | null = null;
+        if (ordinal === 11) {
+          const occurredAt = new Date().toISOString();
+          const report = {
+            protocolVersion: guideProtocolVersion,
+            reportId: randomUUID(),
+            sequence: 2,
+            adapterId: 'blender',
+            instanceId: targetInstanceId,
+            companionVersion: '0.1.0',
+            hostVersion: '4.5.3 LTS',
+            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+            planContentSha256,
+            executionId,
+            phase: 'completed',
+            activeStepId: leafId,
+            completedStepIds: [creatorLeafId, leafId],
+            transition: 'step_succeeded',
+            stepId: leafId,
+            observations: [
+              {
+                kind: 'geometry_nodes_ready',
+                satisfied: true,
+                details: {
+                  parameters: {
+                    targetId: actionArguments['targetId'],
+                    modifierId: actionArguments['modifierId'],
+                    nodeGroupId: actionArguments['nodeGroupId'],
+                    nodeTypes: ['GeometryNodeTransform', 'NodeGroupInput', 'NodeGroupOutput'],
+                  },
+                  supported: true,
+                  targetId: actionArguments['targetId'],
+                  modifierId: actionArguments['modifierId'],
+                  nodeGroupId: actionArguments['nodeGroupId'],
+                  nodeTypes: ['GeometryNodeTransform', 'NodeGroupInput', 'NodeGroupOutput'],
+                },
+              },
+            ],
+            observationGate: null,
+            artifactAttestation: null,
+            nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+              planId: proposal.plan.id,
+              planRevision: proposal.plan.revision,
+              planContentSha256,
+              executionId,
+              stepId: leafId,
+              occurredAt,
+              completedStepIds: [creatorLeafId, leafId],
+              receiptStepIds: [creatorLeafId, leafId],
+              previousCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+            }),
+            error: null,
+            occurredAt,
+          };
+          const reportResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+            method: 'POST',
+            headers: leaseHeaders,
+            body: JSON.stringify(report),
+          });
+          expect(reportResponse.status, JSON.stringify(await reportResponse.clone().json())).toBe(
+            200,
+          );
+          finalReport = { reportId: report.reportId, sequence: report.sequence };
+          latestNativeCheckpointId = report.nativeUndoCheckpoint.checkpointId;
+        }
+
+        const progress = {
+          runId,
+          bindingSha256,
+          stepId: leafId,
+          actionName: 'blender.geometry_nodes.create_transform',
+          recipeId: 'blender.geometry_nodes.create_transform.semantic',
+          catalogVersion: delivery.catalogVersion,
+          operationIds: transformGeometryLeafOperationIds,
+          completedOperationIds: transformGeometryLeafOperationIds.slice(0, ordinal),
+          nextOrdinal: ordinal + 1,
+          latestObservation: {
+            kind: 'guided_geometry_operation',
+            satisfied: true,
+            details: {
+              status: 'passed',
+              direction: 'forward',
+              operationOrdinal: ordinal,
+              operationId: transformGeometryLeafOperationIds[ordinal - 1],
+              mutating,
+              receiptId,
+              runId,
+              stepId: leafId,
+              actionName: 'blender.geometry_nodes.create_transform',
+              recipeId: 'blender.geometry_nodes.create_transform.semantic',
+              catalogVersion: delivery.catalogVersion,
+              beforeFingerprintSha256: fingerprint,
+              afterFingerprintSha256: afterFingerprint,
+              evidence,
+            },
+          },
+          leafCompleted: ordinal === 11,
+          finalReport,
+        };
+        const result = {
+          ...delivery,
+          status: 'succeeded',
+          progress,
+          error: null,
+          occurredAt: new Date().toISOString(),
+        };
+
+        if (ordinal === 6 || ordinal === 11) {
+          await rotateDocumentLease();
+        }
+
+        if (ordinal === 6) {
+          const hostileResult = structuredClone(result);
+          const writes = hostileResult.progress.latestObservation.details.evidence[
+            'rnaControlWrites'
+          ] as Array<Record<string, unknown>>;
+          writes[0]!['beforeValue'] = 42;
+          const hostileResponse = await fetch(
+            `${runtime.baseUrl}/api/v1/companion/leaf-operation-result`,
+            { method: 'POST', headers: leaseHeaders, body: JSON.stringify(hostileResult) },
+          );
+          expect(hostileResponse.status).toBe(409);
+          await expect(hostileResponse.json()).resolves.toMatchObject({
+            error: 'leaf_operation_observation_mismatch',
+          });
+        }
+
+        if (ordinal === 11) {
+          const hostileResult = structuredClone(result);
+          hostileResult.progress.latestObservation.details.evidence['linkCount'] = 1;
+          const hostileResponse = await fetch(
+            `${runtime.baseUrl}/api/v1/companion/leaf-operation-result`,
+            { method: 'POST', headers: leaseHeaders, body: JSON.stringify(hostileResult) },
+          );
+          expect(hostileResponse.status).toBe(409);
+          await expect(hostileResponse.json()).resolves.toMatchObject({
+            error: 'leaf_operation_observation_mismatch',
+          });
+        }
+
+        const resultResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/leaf-operation-result`,
+          { method: 'POST', headers: leaseHeaders, body: JSON.stringify(result) },
+        );
+        expect(resultResponse.status, JSON.stringify(await resultResponse.clone().json())).toBe(
+          200,
+        );
+        await expect(resultResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+        if (ordinal === 8) {
+          await rotateDocumentLease();
+          const duplicateResultResponse = await fetch(
+            `${runtime.baseUrl}/api/v1/companion/leaf-operation-result`,
+            { method: 'POST', headers: leaseHeaders, body: JSON.stringify(result) },
+          );
+          expect(duplicateResultResponse.status).toBe(200);
+          await expect(duplicateResultResponse.json()).resolves.toEqual({ result: 'duplicate' });
+        }
+
+        const statusMcp = await callMcpTool(
+          runtime,
+          9_300 + ordinal,
+          'operatingline.blender.geometry-nodes.transform.status',
+          { requestId: request.requestId },
+        );
+        expect(
+          companionLeafOperationStatusSchema.parse(statusMcp.result?.structuredContent),
+        ).toMatchObject({
+          operationOrdinal: ordinal,
+          status: 'succeeded',
+          result: {
+            progress: {
+              completedOperationIds: transformGeometryLeafOperationIds.slice(0, ordinal),
+              leafCompleted: ordinal === 11,
+              finalReport,
+            },
+          },
+        });
+        fingerprint = afterFingerprint;
+      }
+
+      let replayTreeRevision = Number(tree['revision']);
+      const prepareReplayForCurrentDocument = async (input: {
+        replayId: string;
+        currentHello: ReturnType<typeof blenderDocumentCompanionHello>;
+        reportSequence: number;
+        previousCheckpointId: string;
+        mcpId: number;
+      }) => {
+        replayTreeRevision += 1;
+        const replayPromptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            targetAdapterId: 'blender',
+            actionCatalogVersion: blenderActionCatalog.catalogVersion,
+            interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+            goal: 'Create the exact accepted Transform Geometry graph one operation at a time.',
+            treeId: 'transform.geometry.procedure',
+            revision: replayTreeRevision,
+            locale: 'en',
+          }),
+        });
+        expect(replayPromptResponse.status).toBe(200);
+        const replayPacket = procedureAuthoringPromptPacketSchema.parse(
+          await replayPromptResponse.json(),
+        );
+        const replayTree = transformGeometryReplayAuthoringCandidateFixture(replayPacket);
+        const replayProposal = await callMcpTool(
+          runtime,
+          input.mcpId,
+          'operatingline.procedure.replay.propose',
+          {
+            formatVersion: '1.0.0',
+            replayId: input.replayId,
+            targetInstanceId,
+            leafId,
+            replayMode: 'managed_action',
+            packet: replayPacket,
+            tree: replayTree,
+          },
+        );
+        expect(replayProposal.result?.isError, replayProposal.result?.content?.[0]?.text).not.toBe(
+          true,
+        );
+        const replayBinding = procedureLeafReplayProposalResultSchema.parse(
+          replayProposal.result?.structuredContent,
+        ).binding;
+        const replayDecision = {
+          protocolVersion: guideProtocolVersion,
+          decisionId: randomUUID(),
+          proposalId: replayBinding.proposal.proposalId,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          decision: 'accepted',
+          occurredAt: new Date().toISOString(),
+        } as const;
+        const replayDecisionResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+          { method: 'POST', headers: leaseHeaders, body: JSON.stringify(replayDecision) },
+        );
+        expect(replayDecisionResponse.status).toBe(200);
+        await waitUntilAfter(replayDecision.occurredAt);
+        const rotatedSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(input.currentHello),
+        });
+        expect(rotatedSessionResponse.status).toBe(200);
+        session = (await rotatedSessionResponse.json()) as { leaseId: string };
+        leaseHeaders = {
+          ...headers,
+          'x-operatingline-companion-lease': session.leaseId,
+        };
+        const replayPlanContentSha256 = computePlanContentSha256(replayBinding.proposal.plan);
+        const replayStartOccurredAt = new Date().toISOString();
+        const replayExecutionId = randomUUID();
+        const replayStartReport = {
+          protocolVersion: guideProtocolVersion,
+          reportId: randomUUID(),
+          sequence: input.reportSequence,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          companionVersion: '0.1.0',
+          hostVersion: '4.5.3 LTS',
+          plan: {
+            id: replayBinding.proposal.plan.id,
+            revision: replayBinding.proposal.plan.revision,
+          },
+          planContentSha256: replayPlanContentSha256,
+          executionId: replayExecutionId,
+          phase: 'running',
+          activeStepId: creatorLeafId,
+          completedStepIds: [creatorLeafId],
+          transition: 'step_succeeded',
+          stepId: creatorLeafId,
+          observations: [],
+          observationGate: null,
+          artifactAttestation: null,
+          nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+            planId: replayBinding.proposal.plan.id,
+            planRevision: replayBinding.proposal.plan.revision,
+            planContentSha256: replayPlanContentSha256,
+            executionId: replayExecutionId,
+            stepId: creatorLeafId,
+            occurredAt: replayStartOccurredAt,
+            previousCheckpointId: input.previousCheckpointId,
+          }),
+          error: null,
+          occurredAt: replayStartOccurredAt,
+        } as const;
+        const replayStartResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(replayStartReport),
+        });
+        expect(
+          replayStartResponse.status,
+          JSON.stringify(await replayStartResponse.clone().json()),
+        ).toBe(200);
+        return {
+          request: {
+            formatVersion: '1.0.0',
+            requestId: randomUUID(),
+            replayId: input.replayId,
+            expectedState: {
+              reportId: replayStartReport.reportId,
+              sequence: replayStartReport.sequence,
+            },
+          } as const,
+          checkpointId: replayStartReport.nativeUndoCheckpoint.checkpointId,
+        };
+      };
+
+      const retirementReplay = await prepareReplayForCurrentDocument({
+        replayId: randomUUID(),
+        currentHello: hello,
+        reportSequence: 3,
+        previousCheckpointId: latestNativeCheckpointId,
+        mcpId: 9_400,
+      });
+      const retirementQueued = await callMcpTool(
+        runtime,
+        9_401,
+        'operatingline.blender.geometry-nodes.transform.execute-next',
+        retirementReplay.request,
+      );
+      expect(retirementQueued.result?.isError).not.toBe(true);
+      const retirementOperationPollUrl = new URL(
+        '/api/v1/companion/leaf-operation',
+        runtime.baseUrl,
+      );
+      retirementOperationPollUrl.searchParams.set('adapterId', 'blender');
+      retirementOperationPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const retirementDeliveryResponse = await fetch(retirementOperationPollUrl, {
+        headers: leaseHeaders,
+      });
+      const retirementDelivery = companionLeafOperationPollDeliverySchema.parse(
+        await retirementDeliveryResponse.json(),
+      ).request;
+      if (retirementDelivery === null) throw new Error('Expected retirement operation delivery');
+      await waitUntilAfter(retirementDelivery.dispatchedAt);
+      const retirementSignalResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/leaf-operation-result`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify({
+            ...retirementDelivery,
+            status: 'recovery_required',
+            progress: null,
+            error: 'Operation outcome is indeterminate after the local evidence was lost.',
+            recoveryReason: {
+              kind: 'operation_outcome_indeterminate',
+              requiresExplicitRecovery: true,
+              automaticReplay: false,
+            },
+            occurredAt: new Date().toISOString(),
+          }),
+        },
+      );
+      expect(retirementSignalResponse.status).toBe(200);
+
+      await rotateDocumentLease();
+      const retirementRecoveryPollUrl = new URL(
+        '/api/v1/companion/leaf-operation-recovery',
+        runtime.baseUrl,
+      );
+      retirementRecoveryPollUrl.searchParams.set('adapterId', 'blender');
+      retirementRecoveryPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const sameSessionChallengeResponse = await fetch(retirementRecoveryPollUrl, {
+        headers: leaseHeaders,
+      });
+      const sameSessionChallenge = companionLeafOperationRecoveryPollDeliverySchema.parse(
+        await sameSessionChallengeResponse.json(),
+      ).request;
+      if (sameSessionChallenge === null) {
+        throw new Error('Expected same-session retirement recovery challenge');
+      }
+      const retirementAckFor = (
+        challenge: NonNullable<typeof sameSessionChallenge>,
+        occurredAt: string,
+      ) =>
+        ({
+          formatVersion: challenge.formatVersion,
+          challenge,
+          recoveryId: challenge.recoveryId,
+          requestId: challenge.originalDelivery.requestId,
+          originalDeliveryId: challenge.originalDelivery.deliveryId,
+          replacementSessionFingerprintSha256: challenge.replacementSessionFingerprintSha256,
+          outcome: 'document_incarnation_retired',
+          evidence: {
+            kind: 'document_incarnation_retired',
+            reason: 'runtime_recovery_evidence_lost',
+            mutationOutcome: 'indeterminate',
+            requiresFreshDocumentIncarnation: true,
+          },
+          retainsTargetLock: false,
+          automaticReplay: false,
+          occurredAt,
+        }) as const;
+      const sameSessionRetirementResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(retirementAckFor(sameSessionChallenge, new Date().toISOString())),
+        },
+      );
+      expect(sameSessionRetirementResponse.status).toBe(409);
+      await expect(sameSessionRetirementResponse.json()).resolves.toMatchObject({
+        error: 'leaf_operation_recovery_retirement_session_invalid',
+      });
+
+      const replacementProcessHello = { ...hello, sessionId: randomUUID() };
+      const replacementProcessResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        { method: 'POST', headers, body: JSON.stringify(replacementProcessHello) },
+      );
+      expect(replacementProcessResponse.status).toBe(200);
+      session = (await replacementProcessResponse.json()) as { leaseId: string };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const replacedSessionChallengeResponse = await fetch(retirementRecoveryPollUrl, {
+        headers: leaseHeaders,
+      });
+      const replacedSessionChallenge = companionLeafOperationRecoveryPollDeliverySchema.parse(
+        await replacedSessionChallengeResponse.json(),
+      ).request;
+      if (replacedSessionChallenge === null) {
+        throw new Error('Expected replaced-session retirement recovery challenge');
+      }
+      expect(replacedSessionChallenge.recoveryId).not.toBe(sameSessionChallenge.recoveryId);
+      const retirementAck = retirementAckFor(replacedSessionChallenge, new Date().toISOString());
+      const retirementAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/leaf-operation-recovery`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(retirementAck),
+        },
+      );
+      expect(retirementAckResponse.status).toBe(200);
+      await expect(retirementAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const retirementStatus = await callMcpTool(
+        runtime,
+        9_402,
+        'operatingline.blender.geometry-nodes.transform.status',
+        { requestId: retirementReplay.request.requestId },
+      );
+      expect(
+        companionLeafOperationStatusSchema.parse(retirementStatus.result?.structuredContent),
+      ).toMatchObject({
+        status: 'failed',
+        result: {
+          status: 'failed',
+          error: expect.stringContaining('document incarnation is retired'),
+        },
+      });
+
+      const quarantinedReplay = await prepareReplayForCurrentDocument({
+        replayId: randomUUID(),
+        currentHello: replacementProcessHello,
+        reportSequence: 4,
+        previousCheckpointId: retirementReplay.checkpointId,
+        mcpId: 9_403,
+      });
+      const assertRetiredDocumentRejected = async (request: typeof quarantinedReplay.request) => {
+        const rejected = await callMcpTool(
+          runtime,
+          9_404,
+          'operatingline.blender.geometry-nodes.transform.execute-next',
+          request,
+        );
+        expect(rejected.result?.isError).toBe(true);
+        expect(rejected.result?.content?.[0]?.text).toContain(
+          'leaf_operation_document_incarnation_retired',
+        );
+      };
+      await assertRetiredDocumentRejected(retirementReplay.request);
+      await assertRetiredDocumentRejected(quarantinedReplay.request);
+      await assertRetiredDocumentRejected(quarantinedReplay.request);
+
+      const freshDocumentHello = blenderDocumentCompanionHello(targetInstanceId);
+      const freshDocumentSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        { method: 'POST', headers, body: JSON.stringify(freshDocumentHello) },
+      );
+      session = (await freshDocumentSessionResponse.json()) as { leaseId: string };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const freshDocumentReplay = await prepareReplayForCurrentDocument({
+        replayId: randomUUID(),
+        currentHello: freshDocumentHello,
+        reportSequence: 5,
+        previousCheckpointId: randomUUID(),
+        mcpId: 9_405,
+      });
+      const freshDocumentQueued = await callMcpTool(
+        runtime,
+        9_406,
+        'operatingline.blender.geometry-nodes.transform.execute-next',
+        freshDocumentReplay.request,
+      );
+      expect(freshDocumentQueued.result?.isError).not.toBe(true);
+      expect(
+        companionLeafOperationStatusSchema.parse(freshDocumentQueued.result?.structuredContent),
+      ).toMatchObject({ status: 'queued', operationOrdinal: 1 });
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      const oldDocumentAfterRestartResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        { method: 'POST', headers, body: JSON.stringify(replacementProcessHello) },
+      );
+      session = (await oldDocumentAfterRestartResponse.json()) as { leaseId: string };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const persistedQuarantineReplay = await prepareReplayForCurrentDocument({
+        replayId: randomUUID(),
+        currentHello: replacementProcessHello,
+        reportSequence: 6,
+        previousCheckpointId: retirementReplay.checkpointId,
+        mcpId: 9_407,
+      });
+      await assertRetiredDocumentRejected(persistedQuarantineReplay.request);
+    } finally {
+      await runtime.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 40_000);
 
   it('runs the accepted UV Sphere menu-control proof through document-bound delivery and terminal evidence', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-menu-control-proof-'));

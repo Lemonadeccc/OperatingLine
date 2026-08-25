@@ -3,11 +3,14 @@ import { isDeepStrictEqual } from 'node:util';
 
 import type { OperatingLineDatabase } from '@operatingline/persistence';
 import {
+  guidePlanSchema,
   guideProposalSchema,
   guideRevisionRequestSchema,
   plannerReplanDraftSchema,
   plannerReplanProposedEventSchema,
   planningQualityEvaluationRequestSchema,
+  projectGuidePlanForProvider,
+  providerGuidePlanSchema,
   type CompanionStateReport,
   type GuidePlan,
   type GuideProposal,
@@ -15,7 +18,9 @@ import {
   type GuideRevisionRequest,
   type PlanningIntent,
   type PlanningQualityReport,
+  type PlannerReplanDraft,
   type PlannerReplanGenerationResult,
+  type ProviderGuidePlan,
   type ReplanningPromptPacket,
   type ReplanningPromptRequest,
 } from '@operatingline/protocol';
@@ -110,6 +115,36 @@ function proposalResult(
     planningQuality,
     duplicate,
   };
+}
+
+export function restoreHostOwnedCandidateMenuProjections(
+  providerPlanInput: ProviderGuidePlan,
+  trustedSourcePlanInput: GuidePlan,
+): GuidePlan {
+  const providerPlan = providerGuidePlanSchema.parse(providerPlanInput);
+  const trustedSourcePlan = guidePlanSchema.parse(trustedSourcePlanInput);
+  const providerSourcePlan = projectGuidePlanForProvider(trustedSourcePlan);
+  const providerSourceSteps = new Map(providerSourcePlan.steps.map((step) => [step.id, step]));
+  const trustedSourceSteps = new Map(trustedSourcePlan.steps.map((step) => [step.id, step]));
+
+  return guidePlanSchema.parse({
+    ...providerPlan,
+    steps: providerPlan.steps.map((step) => {
+      const providerSourceStep = providerSourceSteps.get(step.id);
+      const trustedSourceStep = trustedSourceSteps.get(step.id);
+      if (
+        providerSourceStep === undefined ||
+        trustedSourceStep?.candidateMenuProjection === undefined ||
+        !isDeepStrictEqual(step, providerSourceStep)
+      ) {
+        return step;
+      }
+      return {
+        ...step,
+        candidateMenuProjection: structuredClone(trustedSourceStep.candidateMenuProjection),
+      };
+    }),
+  });
 }
 
 export function createReplanningService(options: ReplanningServiceOptions): ReplanningService {
@@ -266,69 +301,8 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
       );
     }
 
-    let submissionCatalog;
-    try {
-      submissionCatalog = options.actionCatalogRegistry.get({
-        targetAdapterId: revisionRequest.adapterId,
-        catalogVersion: revisionRequest.catalogVersion,
-      });
-      validateProposalTarget(submission.plan, revisionRequest.adapterId);
-      validateGuidePlanAgainstActionCatalog(submission.plan, submissionCatalog);
-    } catch {
-      throw new PlannerGenerationRuntimeError(
-        'planner_replan_submission_invalid',
-        'Replan proposal failed deterministic GuidePlan or ActionCatalog validation',
-        'never',
-      );
-    }
-    const mergeContext = resolveGuideRevisionMergeContext(
-      options.database,
-      revisionRequest,
-      submissionCatalog,
-      submission.plan.revision,
-    );
-    if (mergeContext !== null) {
-      const scopeEvaluation = evaluateLocalReplanScope(
-        revisionRequest,
-        submission.plan,
-        mergeContext,
-      );
-      if (!scopeEvaluation.locality.valid || scopeEvaluation.planDiff === null) {
-        throw new PlannerGenerationRuntimeError(
-          'planner_replan_submission_invalid',
-          'Branch merge proposal does not match the deterministic conflict-free merge result',
-          'never',
-        );
-      }
-    }
-    const submittedQuality = evaluatePlanningQuality(
-      planningQualityEvaluationRequestSchema.parse({
-        targetAdapterId: revisionRequest.adapterId,
-        catalogVersion: submission.catalogVersion,
-        ...(submission.planning === undefined
-          ? {}
-          : {
-              goal: submission.planning.goal,
-              requiredPhaseIds: submission.planning.requiredPhaseIds,
-              ...(submission.planning.capabilityCoverage === undefined
-                ? {}
-                : { capabilityCoverage: submission.planning.capabilityCoverage }),
-            }),
-        plan: submission.plan,
-      }),
-      submissionCatalog,
-      {
-        allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, submission.plan),
-      },
-    );
-    if (!submittedQuality.valid) {
-      throw new PlannerGenerationRuntimeError(
-        'planner_replan_submission_invalid',
-        'Replan proposal failed the deterministic planning-quality baseline',
-        'never',
-      );
-    }
-
+    let submittedGeneratedDraft: PlannerReplanDraft | null = null;
+    let completedGeneratedResult: PlannerReplanGenerationResult | null = null;
     if (submission.generationRequestId !== undefined) {
       const generated = options.completedGeneration(submission.generationRequestId);
       if (generated === null || generated.status !== 'ready') {
@@ -357,6 +331,86 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
           'never',
         );
       }
+      submittedGeneratedDraft = submittedDraft.data;
+      completedGeneratedResult = generated;
+    }
+
+    let submissionCatalog;
+    try {
+      submissionCatalog = options.actionCatalogRegistry.get({
+        targetAdapterId: revisionRequest.adapterId,
+        catalogVersion: revisionRequest.catalogVersion,
+      });
+    } catch {
+      throw new PlannerGenerationRuntimeError(
+        'planner_replan_submission_invalid',
+        'Replan proposal failed deterministic ActionCatalog resolution',
+        'never',
+      );
+    }
+    const mergeContext = resolveGuideRevisionMergeContext(
+      options.database,
+      revisionRequest,
+      submissionCatalog,
+      submission.plan.revision,
+    );
+    const proposalPlan =
+      submittedGeneratedDraft === null
+        ? submission.plan
+        : restoreHostOwnedCandidateMenuProjections(
+            submittedGeneratedDraft.plan,
+            mergeContext?.expectedMergedPlan ?? revisionRequest.basePlan,
+          );
+    try {
+      validateProposalTarget(proposalPlan, revisionRequest.adapterId);
+      validateGuidePlanAgainstActionCatalog(proposalPlan, submissionCatalog);
+    } catch {
+      throw new PlannerGenerationRuntimeError(
+        'planner_replan_submission_invalid',
+        'Replan proposal failed deterministic GuidePlan or ActionCatalog validation',
+        'never',
+      );
+    }
+    if (mergeContext !== null) {
+      const scopeEvaluation = evaluateLocalReplanScope(revisionRequest, proposalPlan, mergeContext);
+      if (!scopeEvaluation.locality.valid || scopeEvaluation.planDiff === null) {
+        throw new PlannerGenerationRuntimeError(
+          'planner_replan_submission_invalid',
+          'Branch merge proposal does not match the deterministic conflict-free merge result',
+          'never',
+        );
+      }
+    }
+    const submittedQuality = evaluatePlanningQuality(
+      planningQualityEvaluationRequestSchema.parse({
+        targetAdapterId: revisionRequest.adapterId,
+        catalogVersion: submission.catalogVersion,
+        ...(submission.planning === undefined
+          ? {}
+          : {
+              goal: submission.planning.goal,
+              requiredPhaseIds: submission.planning.requiredPhaseIds,
+              ...(submission.planning.capabilityCoverage === undefined
+                ? {}
+                : { capabilityCoverage: submission.planning.capabilityCoverage }),
+            }),
+        plan: proposalPlan,
+      }),
+      submissionCatalog,
+      {
+        allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, proposalPlan),
+      },
+    );
+    if (!submittedQuality.valid) {
+      throw new PlannerGenerationRuntimeError(
+        'planner_replan_submission_invalid',
+        'Replan proposal failed the deterministic planning-quality baseline',
+        'never',
+      );
+    }
+
+    if (submission.generationRequestId !== undefined) {
+      const submittedDraft = submittedGeneratedDraft!;
 
       if (existingProposalInput !== null) {
         const existingProposal = guideProposalSchema.parse(existingProposalInput);
@@ -374,7 +428,7 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
           existingProposal.targetAdapterId !== revisionRequest.adapterId ||
           existingProposal.targetInstanceId !== revisionRequest.instanceId ||
           existingProposal.catalogVersion !== submission.catalogVersion ||
-          !isDeepStrictEqual(existingProposal.plan, submission.plan)
+          !isDeepStrictEqual(existingProposal.plan, proposalPlan)
         ) {
           throw new PlannerGenerationRuntimeError(
             'planner_revision_request_not_pending',
@@ -390,54 +444,54 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
           planningQualityEvaluationRequestSchema.parse({
             targetAdapterId: revisionRequest.adapterId,
             catalogVersion: submission.catalogVersion,
-            goal: submittedDraft.data.planning.goal,
-            requiredPhaseIds: submittedDraft.data.planning.requiredPhaseIds,
-            ...(submittedDraft.data.planning.capabilityCoverage === undefined
+            goal: submittedDraft.planning.goal,
+            requiredPhaseIds: submittedDraft.planning.requiredPhaseIds,
+            ...(submittedDraft.planning.capabilityCoverage === undefined
               ? {}
-              : { capabilityCoverage: submittedDraft.data.planning.capabilityCoverage }),
-            plan: submission.plan,
+              : { capabilityCoverage: submittedDraft.planning.capabilityCoverage }),
+            plan: proposalPlan,
           }),
           catalog,
           {
-            allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, submission.plan),
+            allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, proposalPlan),
           },
         );
         return proposalResult(existingProposal, planningQuality, true);
       }
 
       const packet = getPrompt({ revisionRequestId: revisionRequest.requestId }, false);
-      if (packet.context.targetRevision !== submission.plan.revision) {
+      if (packet.context.targetRevision !== proposalPlan.revision) {
         throw new PlannerGenerationRuntimeError(
           'planner_replan_generation_stale',
-          `Generated revision ${submission.plan.revision} is stale; current target revision is ${packet.context.targetRevision}`,
+          `Generated revision ${proposalPlan.revision} is stale; current target revision is ${packet.context.targetRevision}`,
           'never',
         );
       }
-      const scopeEvaluation = evaluateLocalReplanScope(
-        revisionRequest,
-        submission.plan,
-        packet.context.merge ?? null,
-      );
+      const scopeEvaluation = evaluateLocalReplanScope(revisionRequest, proposalPlan, mergeContext);
       const planningQuality = evaluatePlanningQuality(
         planningQualityEvaluationRequestSchema.parse({
           targetAdapterId: revisionRequest.adapterId,
           catalogVersion: submission.catalogVersion,
-          goal: submittedDraft.data.planning.goal,
-          requiredPhaseIds: submittedDraft.data.planning.requiredPhaseIds,
-          ...(submittedDraft.data.planning.capabilityCoverage === undefined
+          goal: submittedDraft.planning.goal,
+          requiredPhaseIds: submittedDraft.planning.requiredPhaseIds,
+          ...(submittedDraft.planning.capabilityCoverage === undefined
             ? {}
-            : { capabilityCoverage: submittedDraft.data.planning.capabilityCoverage }),
-          plan: submission.plan,
+            : { capabilityCoverage: submittedDraft.planning.capabilityCoverage }),
+          plan: proposalPlan,
         }),
         packet.context.catalog,
         {
-          allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, submission.plan),
+          allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, proposalPlan),
         },
       );
       if (
         !scopeEvaluation.locality.valid ||
         scopeEvaluation.planDiff === null ||
-        !planningQuality.valid
+        !planningQuality.valid ||
+        completedGeneratedResult === null ||
+        !isDeepStrictEqual(scopeEvaluation.planDiff, completedGeneratedResult.planDiff) ||
+        !isDeepStrictEqual(scopeEvaluation.locality, completedGeneratedResult.locality) ||
+        !isDeepStrictEqual(planningQuality, completedGeneratedResult.planningQuality)
       ) {
         throw new PlannerGenerationRuntimeError(
           'planner_replan_generation_stale',
@@ -451,7 +505,7 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
       targetAdapterId: revisionRequest.adapterId,
       targetInstanceId: revisionRequest.instanceId,
       catalogVersion: submission.catalogVersion,
-      plan: submission.plan,
+      plan: proposalPlan,
       replan: {
         requestId: revisionRequest.requestId,
         ...(submission.generationRequestId === undefined

@@ -11,6 +11,7 @@ import {
   canonicalizeProtocolJsonValue,
   parseProcedureTree,
   procedureAuthoringCandidateTreeSchema,
+  procedureAuthoringPromptPacketLegacyMaxCanonicalBytes,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
 } from '@operatingline/protocol';
 
@@ -167,10 +168,19 @@ describe('procedure authoring prompt', () => {
         procedureAuthoringPromptPacketContent(packet),
       ),
     );
-    expect(canonicalizeProtocolJsonValue(packet).byteLength).toBeLessThanOrEqual(
-      procedureAuthoringPromptPacketMaxCanonicalBytes,
-    );
+    const canonicalBytes = canonicalizeProtocolJsonValue(packet).byteLength;
+    expect(canonicalBytes).toBeGreaterThan(procedureAuthoringPromptPacketLegacyMaxCanonicalBytes);
+    expect(canonicalBytes).toBeLessThanOrEqual(procedureAuthoringPromptPacketMaxCanonicalBytes);
     expect(validateProcedureAuthoringPromptPacketIntegrity(packet)).toEqual(packet);
+    const legacyBudgetPacket = structuredClone(packet);
+    legacyBudgetPacket.limits.maxCanonicalBytes =
+      procedureAuthoringPromptPacketLegacyMaxCanonicalBytes;
+    legacyBudgetPacket.integrity.contentSha256 = computeProcedureAuthoringPromptPacketContentSha256(
+      procedureAuthoringPromptPacketContent(legacyBudgetPacket),
+    );
+    expect(() => validateProcedureAuthoringPromptPacketIntegrity(legacyBudgetPacket)).toThrow(
+      `exceeds ${procedureAuthoringPromptPacketLegacyMaxCanonicalBytes} canonical bytes`,
+    );
     const tamperedPacket = structuredClone(packet);
     tamperedPacket.context.goalProvenance.source.text = 'Tampered after sealing.';
     expect(() => validateProcedureAuthoringPromptPacketIntegrity(tamperedPacket)).toThrow(
@@ -238,6 +248,38 @@ describe('procedure authoring prompt', () => {
       { value: changedIdentity, accepted: false },
       { value: changedSource, accepted: false },
     ]);
+  });
+
+  it('keeps host-owned menu candidates and execution proofs outside the provider boundary', () => {
+    const sourceCatalogCanonicalBytes = canonicalizeProtocolJsonValue(blenderInteractionCatalog);
+    expect(JSON.stringify(blenderInteractionCatalog)).toContain('"menuCandidate"');
+    expect(JSON.stringify(blenderInteractionCatalog)).toContain('"proofExecution"');
+
+    const packet = buildProcedureAuthoringPromptPacket(
+      {
+        targetAdapterId: 'blender',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        goal,
+        treeId: 'snowman.eye.left.provider-boundary.procedure',
+        revision: 1,
+      },
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+
+    for (const providerValue of [packet, packet.context, packet.responseContract.schema]) {
+      const providerJson = JSON.stringify(providerValue);
+      expect(providerJson).not.toContain('"menuCandidate"');
+      expect(providerJson).not.toContain('"menuCandidates"');
+      expect(providerJson).not.toContain('"proofExecution"');
+    }
+    expect(canonicalizeProtocolJsonValue(blenderInteractionCatalog)).toEqual(
+      sourceCatalogCanonicalBytes,
+    );
+    expect(canonicalizeProtocolJsonValue(packet).byteLength).toBeLessThanOrEqual(
+      procedureAuthoringPromptPacketMaxCanonicalBytes,
+    );
   });
 
   it('preserves leading and trailing goal whitespace as exact provenance', () => {

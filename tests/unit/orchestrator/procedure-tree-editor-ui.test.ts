@@ -217,6 +217,19 @@ describe('ProcedureTree editor UI assets', () => {
     expect(script).toContain('!Number.isInteger(value)');
   });
 
+  it('renders catalog menu candidates as readonly numbered guidance without execution authority', () => {
+    const script = procedureTreeEditorUiAssets['/procedure-editor/app.js'].body;
+
+    expect(script).toContain("kind: 'menu_candidate'");
+    expect(script).toContain("'MENU CANDIDATE ' + String(operation.order).padStart(2, '0')");
+    expect(script).toContain(
+      'CANDIDATE ONLY · native in-place path · no managed receipt/replacement',
+    );
+    expect(script).toContain('候选轨迹只读，参数由 Action 和目录投影同步');
+    expect(script).toContain("state.selected.kind === 'menu_candidate'");
+    expect(script).not.toContain("commandButton('执行候选轨迹'");
+  });
+
   it('discards stale parameter forms across branch, head, selection, and mutation changes', () => {
     const script = procedureTreeEditorUiAssets['/procedure-editor/app.js'].body;
 

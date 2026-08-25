@@ -98,6 +98,11 @@ export interface CompanionLeaseManager {
     adapterId: string,
     instanceId: string,
   ): ActiveCompanionDocumentSession;
+  lookupDocumentSessionIdentityForReceiptFingerprint(
+    sessionFingerprintSha256: string,
+    adapterId: string,
+    instanceId: string,
+  ): CompanionDocumentSessionIdentity;
   rememberDocumentSessionFingerprint(
     sessionFingerprintSha256: string,
     identity: CompanionDocumentSessionIdentity,
@@ -483,6 +488,26 @@ export function createCompanionLeaseManager(
         throw new Error('Version 1.1 companion lease produced a mismatched response');
       }
       return { hello: current.hello, lease };
+    },
+
+    lookupDocumentSessionIdentityForReceiptFingerprint(
+      sessionFingerprintSha256,
+      adapterId,
+      instanceId,
+    ) {
+      const remembered = documentSessionByLeaseFingerprint.get(sessionFingerprintSha256);
+      if (
+        remembered === undefined ||
+        remembered.adapterId !== adapterId ||
+        remembered.instanceId !== instanceId
+      ) {
+        throw new CompanionLeaseError(
+          'lease_identity_mismatch',
+          'Receipt fingerprint is not bound to a known version 1.1 Companion document session',
+          409,
+        );
+      }
+      return { ...remembered };
     },
 
     rememberDocumentSessionFingerprint(sessionFingerprintSha256, identity) {

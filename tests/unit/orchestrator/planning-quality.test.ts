@@ -364,6 +364,273 @@ const evaluateSolidify = (input: {
     },
   );
 
+const bevelModifierPlan = (): GuidePlan => {
+  const plan = subdivisionSurfacePlan();
+  const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_bevel',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.bevel',
+      modifierName: 'OperatingLine.Cube.Bevel',
+      width: 0.25,
+      segments: 3,
+      angleLimit: Math.PI / 3,
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.bevel',
+    },
+  ];
+  leaf.expectedObservations = [
+    {
+      kind: 'modifier_ready',
+      parameters: {
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.bevel',
+        modifierType: 'BEVEL',
+        width: 0.25,
+        segments: 3,
+        angleLimit: Math.PI / 3,
+      },
+    },
+  ];
+  return guidePlanSchema.parse({
+    ...plan,
+    id: 'bevel-modifier-quality',
+    title: 'Add a Bevel modifier',
+  });
+};
+
+const bevelModifierCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'bevel-modifier',
+      statement: 'Add a Bevel modifier to the accepted Cube.',
+      coverage: [
+        {
+          capabilityId: 'geometry.bevel_modifier',
+          stepIds: ['snowman.model.head'],
+        },
+      ],
+    },
+  ],
+};
+
+const evaluateBevelModifier = (input: { plan?: GuidePlan; targetId?: string }) =>
+  evaluatePlanningQuality(
+    {
+      targetAdapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      capabilityCoverage: bevelModifierCoverage,
+      plan: input.plan ?? bevelModifierPlan(),
+    },
+    blenderActionCatalog,
+    {
+      verifiedExternalResourceConsumers: [
+        {
+          consumerStepId: 'snowman.model.head',
+          resourceId: 'tutorial.cube',
+          resourceType: 'OBJECT',
+        },
+      ],
+      managedActionReplayAuthority: {
+        replayId: '44444444-4444-4444-8444-444444444444',
+        leafId: 'snowman.model.head',
+        actionName: 'blender.modifier.add_bevel',
+        targetId: input.targetId ?? 'tutorial.cube',
+      },
+    },
+  );
+
+const singleMaterialPlan = (): GuidePlan => {
+  const plan = subdivisionSurfacePlan();
+  const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.material.create_and_assign',
+    arguments: {
+      materialId: 'tutorial.material.snow',
+      materialName: 'OperatingLine.Snow',
+      targets: ['tutorial.head', 'tutorial.body'],
+      baseColor: [0.82, 0.9, 1, 1],
+      roughness: 0.35,
+      metallic: 0.1,
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Head' },
+    { kind: 'object', objectName: 'OperatingLine.Body' },
+  ];
+  leaf.expectedObservations = [
+    {
+      kind: 'material_assigned',
+      parameters: {
+        materialId: 'tutorial.material.snow',
+        targets: ['tutorial.head', 'tutorial.body'],
+      },
+    },
+  ];
+  return guidePlanSchema.parse({
+    ...plan,
+    id: 'single-material-quality',
+    title: 'Create and assign one material',
+  });
+};
+
+const singleMaterialCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'single-material',
+      statement: 'Create one Principled material and assign it to both accepted mesh objects.',
+      coverage: [
+        {
+          capabilityId: 'appearance.principled_palette',
+          stepIds: ['snowman.model.head'],
+        },
+      ],
+    },
+  ],
+};
+
+const evaluateSingleMaterial = (input: {
+  plan?: GuidePlan;
+  targetIds?: readonly string[];
+  consumers?: readonly {
+    readonly consumerStepId: string;
+    readonly resourceId: string;
+    readonly resourceType: string;
+  }[];
+}) =>
+  evaluatePlanningQuality(
+    {
+      targetAdapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      capabilityCoverage: singleMaterialCoverage,
+      plan: input.plan ?? singleMaterialPlan(),
+    },
+    blenderActionCatalog,
+    {
+      verifiedExternalResourceConsumers:
+        input.consumers ??
+        ([
+          {
+            consumerStepId: 'snowman.model.head',
+            resourceId: 'tutorial.head',
+            resourceType: 'OBJECT[]',
+          },
+          {
+            consumerStepId: 'snowman.model.head',
+            resourceId: 'tutorial.body',
+            resourceType: 'OBJECT[]',
+          },
+        ] as const),
+      managedActionReplayAuthority: {
+        replayId: '55555555-5555-4555-8555-555555555555',
+        leafId: 'snowman.model.head',
+        actionName: 'blender.material.create_and_assign',
+        targetIds: input.targetIds ?? ['tutorial.head', 'tutorial.body'],
+      },
+    },
+  );
+
+const materialPalettePlan = (): GuidePlan => {
+  const plan = subdivisionSurfacePlan();
+  const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.material.create_palette_and_assign',
+    arguments: {
+      materials: [
+        {
+          materialId: 'tutorial.material.eyes',
+          materialName: 'OperatingLine.Eyes',
+          targets: ['tutorial.eye.left', 'tutorial.eye.right'],
+          baseColor: [0.04, 0.08, 0.14, 1],
+          roughness: 0.31,
+          metallic: 0.17,
+        },
+        {
+          materialId: 'tutorial.material.body',
+          materialName: 'OperatingLine.Body',
+          targets: ['tutorial.body'],
+          baseColor: [0.72, 0.18, 0.09, 1],
+          roughness: 0.66,
+          metallic: 0.02,
+        },
+      ],
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.EyeLeft' },
+    { kind: 'object', objectName: 'OperatingLine.Body' },
+  ];
+  leaf.expectedObservations = [
+    {
+      kind: 'material_assigned',
+      parameters: {
+        materialId: 'tutorial.material.eyes',
+        targets: ['tutorial.eye.left'],
+      },
+    },
+    {
+      kind: 'material_assigned',
+      parameters: {
+        materialId: 'tutorial.material.body',
+        targets: ['tutorial.body'],
+      },
+    },
+  ];
+  return guidePlanSchema.parse({
+    ...plan,
+    id: 'material-palette-quality',
+    title: 'Create and assign an ordered material palette',
+  });
+};
+
+const evaluateMaterialPalette = (input: {
+  plan?: GuidePlan;
+  targetIds?: readonly string[];
+  consumers?: readonly {
+    readonly consumerStepId: string;
+    readonly resourceId: string;
+    readonly resourceType: string;
+  }[];
+}) => {
+  const targetIds = ['tutorial.eye.left', 'tutorial.eye.right', 'tutorial.body'];
+  return evaluatePlanningQuality(
+    {
+      targetAdapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      capabilityCoverage: singleMaterialCoverage,
+      plan: input.plan ?? materialPalettePlan(),
+    },
+    blenderActionCatalog,
+    {
+      verifiedExternalResourceConsumers:
+        input.consumers ??
+        targetIds.map((resourceId) => ({
+          consumerStepId: 'snowman.model.head',
+          resourceId,
+          resourceType: 'OBJECT[]',
+        })),
+      managedActionReplayAuthority: {
+        replayId: '66666666-6666-4666-8666-666666666666',
+        leafId: 'snowman.model.head',
+        actionName: 'blender.material.create_palette_and_assign',
+        targetIds: input.targetIds ?? targetIds,
+      },
+    },
+  );
+};
+
 describe('planning quality baseline', () => {
   it('accepts the complete teachable snowman plan deterministically', () => {
     const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
@@ -528,6 +795,263 @@ describe('planning quality baseline', () => {
         resourceType: 'OBJECT',
       },
     ]);
+
+    expect(report.valid).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.verified_external_input' }),
+    );
+  });
+
+  it('accepts only an exact managed Bevel Modifier replay as a verified external consumer', () => {
+    const report = evaluateBevelModifier({});
+
+    expect(report.valid).toBe(true);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'resource.verified_external_input',
+        severity: 'warning',
+        stepIds: ['snowman.model.head'],
+      }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+  });
+
+  it('requires every Single Material target to have exact managed replay authority', () => {
+    const missing = evaluateSingleMaterial({ consumers: [] });
+    expect(missing.valid).toBe(false);
+    expect(missing.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'resource.missing_creator',
+        stepIds: ['snowman.model.head'],
+      }),
+    );
+
+    const exact = evaluateSingleMaterial({});
+    expect(exact.valid).toBe(true);
+    expect(
+      exact.findings.filter((finding) => finding.code === 'resource.verified_external_input'),
+    ).toHaveLength(2);
+    expect(exact.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+  });
+
+  it.each([
+    'authority target order',
+    'missing consumer',
+    'forged consumer',
+    'wrong consumer type',
+    'action target order',
+    'observation target order',
+    'observation extra parameter',
+  ] as const)('rejects Single Material external consumers with a mismatched %s', (mismatch) => {
+    const plan = singleMaterialPlan();
+    const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+    let targetIds: readonly string[] | undefined;
+    let consumers:
+      | readonly {
+          readonly consumerStepId: string;
+          readonly resourceId: string;
+          readonly resourceType: string;
+        }[]
+      | undefined;
+    if (mismatch === 'authority target order') {
+      targetIds = ['tutorial.body', 'tutorial.head'];
+    }
+    if (mismatch === 'missing consumer') {
+      consumers = [
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.head',
+          resourceType: 'OBJECT[]',
+        },
+      ];
+    }
+    if (mismatch === 'forged consumer') {
+      consumers = [
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.head',
+          resourceType: 'OBJECT[]',
+        },
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.attacker',
+          resourceType: 'OBJECT[]',
+        },
+      ];
+    }
+    if (mismatch === 'wrong consumer type') {
+      consumers = [
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.head',
+          resourceType: 'OBJECT[]',
+        },
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.body',
+          resourceType: 'MESH',
+        },
+      ];
+    }
+    if (leaf.action === null) throw new Error('expected Single Material action');
+    if (mismatch === 'action target order') {
+      leaf.action.arguments['targets'] = ['tutorial.body', 'tutorial.head'];
+    }
+    if (mismatch === 'observation target order') {
+      leaf.expectedObservations[0]!.parameters['targets'] = ['tutorial.body', 'tutorial.head'];
+    }
+    if (mismatch === 'observation extra parameter') {
+      leaf.expectedObservations[0]!.parameters['materialName'] = 'OperatingLine.Snow';
+    }
+
+    const report = evaluateSingleMaterial({
+      plan,
+      ...(targetIds === undefined ? {} : { targetIds }),
+      ...(consumers === undefined ? {} : { consumers }),
+    });
+
+    expect(report.valid).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.verified_external_input' }),
+    );
+  });
+
+  it('accepts only the exact nested Material Palette boundary and all flattened consumers', () => {
+    const report = evaluateMaterialPalette({});
+    expect(report.valid).toBe(true);
+    expect(
+      report.findings.filter((finding) => finding.code === 'resource.verified_external_input'),
+    ).toHaveLength(3);
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+  });
+
+  it.each([
+    'authority target order',
+    'missing consumer',
+    'wrong consumer type',
+    'material order',
+    'target order',
+    'observation material order',
+    'observation target outside definition',
+  ] as const)('rejects Material Palette replay authority with mismatched %s', (mismatch) => {
+    const plan = materialPalettePlan();
+    const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+    if (leaf.action === null) throw new Error('expected Material Palette action');
+    const materials = leaf.action.arguments['materials'] as Array<Record<string, unknown>>;
+    let targetIds: readonly string[] | undefined;
+    let consumers:
+      | readonly {
+          readonly consumerStepId: string;
+          readonly resourceId: string;
+          readonly resourceType: string;
+        }[]
+      | undefined;
+    if (mismatch === 'authority target order') {
+      targetIds = ['tutorial.eye.right', 'tutorial.eye.left', 'tutorial.body'];
+    }
+    if (mismatch === 'missing consumer') {
+      consumers = [
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.eye.left',
+          resourceType: 'OBJECT[]',
+        },
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.eye.right',
+          resourceType: 'OBJECT[]',
+        },
+      ];
+    }
+    if (mismatch === 'wrong consumer type') {
+      consumers = ['tutorial.eye.left', 'tutorial.eye.right', 'tutorial.body'].map(
+        (resourceId, index) => ({
+          consumerStepId: leaf.id,
+          resourceId,
+          resourceType: index === 2 ? 'MESH' : 'OBJECT[]',
+        }),
+      );
+    }
+    if (mismatch === 'material order') {
+      leaf.action.arguments['materials'] = materials.toReversed();
+    }
+    if (mismatch === 'target order') {
+      materials[0]!['targets'] = ['tutorial.eye.right', 'tutorial.eye.left'];
+    }
+    if (mismatch === 'observation material order') {
+      leaf.expectedObservations = leaf.expectedObservations.toReversed();
+    }
+    if (mismatch === 'observation target outside definition') {
+      leaf.expectedObservations[1]!.parameters['targets'] = ['tutorial.eye.left'];
+    }
+
+    const report = evaluateMaterialPalette({
+      plan,
+      ...(targetIds === undefined ? {} : { targetIds }),
+      ...(consumers === undefined ? {} : { consumers }),
+    });
+    expect(report.valid).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.verified_external_input' }),
+    );
+  });
+
+  it.each([
+    'authority target',
+    'action width',
+    'action segments',
+    'action angle limit',
+    'observation width',
+    'observation segments',
+    'observation angle limit',
+    'observation extra parameter',
+    'owned-control anchor',
+  ] as const)('rejects a Bevel Modifier external consumer with a mismatched %s', (mismatch) => {
+    const plan = bevelModifierPlan();
+    const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+    let targetId: string | undefined;
+    if (mismatch === 'authority target') targetId = 'tutorial.other';
+    if (leaf.action === null) throw new Error('expected Bevel Modifier action');
+    if (mismatch === 'action width') leaf.action.arguments['width'] = 0.5;
+    if (mismatch === 'action segments') leaf.action.arguments['segments'] = 4;
+    if (mismatch === 'action angle limit') leaf.action.arguments['angleLimit'] = Math.PI / 2;
+    if (mismatch === 'observation width') {
+      leaf.expectedObservations[0]!.parameters['width'] = 0.5;
+    }
+    if (mismatch === 'observation segments') {
+      leaf.expectedObservations[0]!.parameters['segments'] = 4;
+    }
+    if (mismatch === 'observation angle limit') {
+      leaf.expectedObservations[0]!.parameters['angleLimit'] = Math.PI / 2;
+    }
+    if (mismatch === 'observation extra parameter') {
+      leaf.expectedObservations[0]!.parameters['limitMethod'] = 'ANGLE';
+    }
+    if (mismatch === 'owned-control anchor') {
+      leaf.anchors = leaf.anchors.map((anchor) =>
+        anchor.kind === 'owned_control' ? { ...anchor, controlId: 'tutorial.cube.other' } : anchor,
+      );
+    }
+
+    const report = evaluateBevelModifier({
+      plan,
+      ...(targetId === undefined ? {} : { targetId }),
+    });
 
     expect(report.valid).toBe(false);
     expect(report.findings).toContainEqual(

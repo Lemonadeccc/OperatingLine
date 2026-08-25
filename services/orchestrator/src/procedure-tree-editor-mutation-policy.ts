@@ -17,6 +17,7 @@ const protectedLeafFields = [
   'expectedObservations',
   'observationPolicy',
   'rollback',
+  'menuCandidates',
   'parameterProjection',
 ] as const satisfies readonly (keyof ProcedureLeafNode)[];
 
@@ -207,6 +208,7 @@ function assertValidationAndNormalize(
 function assertSafeNewLeaf(candidate: ProcedureLeafNode): void {
   const path = `nodes[id=${JSON.stringify(candidate.id)}]`;
   if (candidate.action !== null) fail(`${path}.action`);
+  if (candidate.menuCandidates !== undefined) fail(`${path}.menuCandidates`);
   if (candidate.parameterProjection !== undefined) fail(`${path}.parameterProjection`);
   if (candidate.semanticOperations.length !== 1) fail(`${path}.semanticOperations`);
   const semantic = candidate.semanticOperations[0]!;

@@ -17,13 +17,17 @@ import {
   verifyProcedureCompoundRecipeIntegrity,
   protocolJsonValueCanonicalization,
   procedureLeafReplayActionNameSchema,
+  operationLevelMcpActionNameSchema,
+  operationLevelMcpRecipeIdByAction,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
   procedureLeafReplayFormatVersion,
+  procedureLeafReplayFailedObservationSchema,
   procedureLeafReplayObservationSchema,
   procedureLeafReplayCurrentStateVerificationSchema,
   procedureLeafReplayFailureRecoveryAttestationSchema,
   stableProcedureLeafOrder,
+  validateActionArguments,
   type ActionCatalog,
   type CompanionStateReport,
   type CompanionProcedureReplayCurrentStateRequest,
@@ -53,6 +57,14 @@ import {
 } from './authority-consumption.js';
 
 export const pokeCompoundHistoryLockEventType = 'procedure.poke-compound.history-lock-state';
+export const pokeCompoundTransportHistoryLockEventTypes = [
+  'blender.poke-compound.queued',
+  'blender.poke-compound.dispatched',
+  'blender.poke-compound.recovery-required',
+  'blender.poke-compound.recovery-challenged',
+  'blender.poke-compound.completed',
+  'blender.poke-compound.quarantined',
+] as const;
 
 interface PokeCompoundHistoryLockDatabase {
   listExecutionEventsByTypes(eventTypes: readonly string[]): readonly {
@@ -66,11 +78,20 @@ export function createPokeCompoundHistoryLockOwnerReader(
   database: PokeCompoundHistoryLockDatabase,
 ): (adapterId: 'blender', instanceId: string) => string | null {
   return (adapterId, instanceId) => {
-    const latest = [...database.listExecutionEventsByTypes([pokeCompoundHistoryLockEventType])]
+    const latest = [
+      ...database.listExecutionEventsByTypes([
+        pokeCompoundHistoryLockEventType,
+        ...pokeCompoundTransportHistoryLockEventTypes,
+      ]),
+    ]
       .sort((left, right) => right.sequence - left.sequence)
       .find((event) => {
         if (typeof event.payload !== 'object' || event.payload === null) return false;
-        const target = (event.payload as { readonly target?: unknown }).target;
+        const payload = event.payload as {
+          readonly target?: unknown;
+          readonly execution?: { readonly target?: unknown };
+        };
+        const target = payload.target ?? payload.execution?.target;
         return (
           typeof target === 'object' &&
           target !== null &&
@@ -79,25 +100,49 @@ export function createPokeCompoundHistoryLockOwnerReader(
         );
       });
     if (latest === undefined) return null;
-    const parsed = procedureCompoundReplaySchema.safeParse(latest.payload);
+    const wrapped =
+      typeof latest.payload === 'object' && latest.payload !== null
+        ? (latest.payload as {
+            readonly request?: { readonly replay?: unknown };
+            readonly execution?: { readonly currentState?: unknown; readonly compoundId?: unknown };
+          })
+        : null;
+    const wrappedReplay = wrapped?.request?.replay;
+    const wrappedCurrentState = wrapped?.execution?.currentState;
+    const replayCandidate = wrappedReplay ?? latest.payload;
+    const parsed = procedureCompoundReplaySchema.safeParse(replayCandidate);
+    const currentState =
+      wrappedCurrentState === undefined
+        ? parsed.success
+          ? parsed.data.currentState
+          : null
+        : procedureCompoundCurrentStateSchema.safeParse(wrappedCurrentState);
+    const validCurrentState =
+      currentState === null
+        ? null
+        : 'success' in currentState
+          ? currentState.success
+            ? currentState.data
+            : null
+          : currentState;
     if (
       !parsed.success ||
       !verifyProcedureCompoundRecipeIntegrity(parsed.data.recipe) ||
-      !verifyProcedureCompoundCurrentStateIntegrity(parsed.data.currentState)
+      validCurrentState === null ||
+      !verifyProcedureCompoundCurrentStateIntegrity(validCurrentState)
     ) {
-      const rawRecipe =
-        typeof latest.payload === 'object' && latest.payload !== null
-          ? (latest.payload as { readonly recipe?: unknown }).recipe
+      const rawRecipe = parsed.success
+        ? parsed.data.recipe
+        : typeof replayCandidate === 'object' && replayCandidate !== null
+          ? (replayCandidate as { readonly recipe?: unknown }).recipe
           : undefined;
       const rawCompoundId =
         typeof rawRecipe === 'object' && rawRecipe !== null
           ? (rawRecipe as { readonly compoundId?: unknown }).compoundId
-          : undefined;
+          : wrapped?.execution?.compoundId;
       return typeof rawCompoundId === 'string' ? rawCompoundId : 'poke-compound-history-quarantine';
     }
-    return parsed.data.currentState.historyLock === 'released'
-      ? null
-      : parsed.data.recipe.compoundId;
+    return validCurrentState.historyLock === 'released' ? null : parsed.data.recipe.compoundId;
   };
 }
 
@@ -332,6 +377,27 @@ function isFiniteVector3(value: unknown, bounded = false): value is [number, num
   );
 }
 
+function isUnitQuaternion(value: unknown): value is [number, number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every((component) => isFiniteNumber(component) && component >= -1 && component <= 1) &&
+    Math.abs(Math.hypot(...value) - 1) <= 1e-6
+  );
+}
+
+function isUnitAxisAngle(value: unknown): value is [number, number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every(
+      (component) =>
+        isFiniteNumber(component) && component >= -2 * Math.PI && component <= 2 * Math.PI,
+    ) &&
+    Math.abs(Math.hypot(value[1]!, value[2]!, value[3]!) - 1) <= 1e-6
+  );
+}
+
 function hasReplayIdentity(parameters: Record<string, unknown>): boolean {
   return (
     typeof parameters['resourceId'] === 'string' &&
@@ -558,6 +624,8 @@ function isPoseAnimationReplayParameters(parameters: Record<string, unknown>): b
     return false;
   }
   let previousFrame = 0;
+  type RotationChannel = 'rotationEuler' | 'rotationQuaternion' | 'rotationAxisAngle';
+  const rotationChannelByBone = new Map<string, RotationChannel>();
   return keyframes.every((keyframe) => {
     if (typeof keyframe !== 'object' || keyframe === null || Array.isArray(keyframe)) return false;
     const value = keyframe as Record<string, unknown>;
@@ -580,16 +648,42 @@ function isPoseAnimationReplayParameters(parameters: Record<string, unknown>): b
       if (typeof pose !== 'object' || pose === null || Array.isArray(pose)) return false;
       const item = pose as Record<string, unknown>;
       const keys = Object.keys(item);
+      const hasEuler = keys.includes('rotationEuler');
+      const hasQuaternion = keys.includes('rotationQuaternion');
+      const hasAxisAngle = keys.includes('rotationAxisAngle');
+      const rotationChannels = [hasEuler, hasQuaternion, hasAxisAngle].filter(Boolean).length;
+      const rotationChannel: RotationChannel = hasEuler
+        ? 'rotationEuler'
+        : hasQuaternion
+          ? 'rotationQuaternion'
+          : 'rotationAxisAngle';
+      const previousRotationChannel =
+        typeof item['boneName'] === 'string'
+          ? rotationChannelByBone.get(item['boneName'])
+          : undefined;
       if (
-        !keys.every((key) => ['boneName', 'rotationEuler', 'location', 'scale'].includes(key)) ||
+        !keys.every((key) =>
+          [
+            'boneName',
+            'rotationEuler',
+            'rotationQuaternion',
+            'rotationAxisAngle',
+            'location',
+            'scale',
+          ].includes(key),
+        ) ||
         !keys.includes('boneName') ||
-        !keys.includes('rotationEuler') ||
+        rotationChannels !== 1 ||
         !isOperatingLineName(item['boneName']) ||
         boneNames.has(item['boneName']) ||
-        !isFiniteVector3(item['rotationEuler']) ||
-        !(item['rotationEuler'] as number[]).every(
-          (component) => component >= -2 * Math.PI && component <= 2 * Math.PI,
-        ) ||
+        (hasEuler &&
+          (!isFiniteVector3(item['rotationEuler']) ||
+            !(item['rotationEuler'] as number[]).every(
+              (component) => component >= -2 * Math.PI && component <= 2 * Math.PI,
+            ))) ||
+        (hasQuaternion && !isUnitQuaternion(item['rotationQuaternion'])) ||
+        (hasAxisAngle && !isUnitAxisAngle(item['rotationAxisAngle'])) ||
+        (previousRotationChannel !== undefined && previousRotationChannel !== rotationChannel) ||
         (item['location'] !== undefined && !isFiniteVector3(item['location'], true)) ||
         (item['scale'] !== undefined &&
           (!isFiniteVector3(item['scale']) ||
@@ -599,10 +693,413 @@ function isPoseAnimationReplayParameters(parameters: Record<string, unknown>): b
       ) {
         return false;
       }
+      rotationChannelByBone.set(item['boneName'], rotationChannel);
       boneNames.add(item['boneName']);
       return true;
     });
   });
+}
+
+const replayCanonicalLightTrailsNodeTypes = [
+  'GeometryNodeCurvePrimitiveCircle',
+  'GeometryNodeCurvePrimitiveLine',
+  'GeometryNodeCurveToMesh',
+  'GeometryNodeInputPosition',
+  'GeometryNodeInstanceOnPoints',
+  'GeometryNodeInstanceOnPoints',
+  'GeometryNodeJoinGeometry',
+  'GeometryNodeMeshLine',
+  'GeometryNodeMeshLine',
+  'GeometryNodeRealizeInstances',
+  'GeometryNodeRealizeInstances',
+  'GeometryNodeResampleCurve',
+  'GeometryNodeSetPosition',
+  'GeometryNodeTransform',
+  'NodeGroupInput',
+  'NodeGroupOutput',
+  'ShaderNodeCombineXYZ',
+  'ShaderNodeMath',
+  'ShaderNodeMath',
+  'ShaderNodeTexNoise',
+] as const;
+
+const replayCanonicalTransformGeometryNodeTypes = [
+  'GeometryNodeTransform',
+  'NodeGroupInput',
+  'NodeGroupOutput',
+] as const;
+
+function isTransformGeometryReplayParameters(parameters: Record<string, unknown>): boolean {
+  return (
+    hasExactKeys(parameters, ['targetId', 'modifierId', 'nodeGroupId', 'nodeTypes']) &&
+    isLogicalResourceId(parameters['targetId']) &&
+    isLogicalResourceId(parameters['modifierId']) &&
+    isLogicalResourceId(parameters['nodeGroupId']) &&
+    sameStringArray(parameters['nodeTypes'], replayCanonicalTransformGeometryNodeTypes)
+  );
+}
+
+const replayCanonicalLightTrailsInterface = [
+  ['INPUT', 'NodeSocketGeometry', 'Geometry'],
+  ['OUTPUT', 'NodeSocketGeometry', 'Geometry'],
+] as const;
+
+const replayCanonicalLightTrailsLinks = [
+  ['OperatingLine Center Noise', 'Value', 'OperatingLine Scale Height', 'Value'],
+  ['OperatingLine Curve To Mesh', 'Mesh', 'OperatingLine Tile Instances', 'Instance'],
+  ['OperatingLine Displace Trails', 'Geometry', 'OperatingLine Mirror Half Tile', 'Geometry'],
+  ['OperatingLine Displace Trails', 'Geometry', 'OperatingLine Mirrored Tile', 'Geometry'],
+  ['OperatingLine Half Tile Line', 'Curve', 'OperatingLine Trail Resolution', 'Curve'],
+  ['OperatingLine Loop Tiles', 'Mesh', 'OperatingLine Tile Instances', 'Points'],
+  ['OperatingLine Mirror Half Tile', 'Geometry', 'OperatingLine Mirrored Tile', 'Geometry'],
+  ['OperatingLine Mirrored Tile', 'Geometry', 'OperatingLine Curve To Mesh', 'Curve'],
+  ['OperatingLine Realize Tiles', 'Geometry', 'OperatingLine Output', 'GROUP_OUTPUT_GEOMETRY'],
+  ['OperatingLine Realize Trails', 'Geometry', 'OperatingLine Displace Trails', 'Geometry'],
+  ['OperatingLine Scale Height', 'Value', 'OperatingLine Z Offset', 'Z'],
+  ['OperatingLine Terrain Noise', 'Fac', 'OperatingLine Center Noise', 'Value'],
+  ['OperatingLine Tile Instances', 'Instances', 'OperatingLine Realize Tiles', 'Geometry'],
+  ['OperatingLine Trail Instances', 'Instances', 'OperatingLine Realize Trails', 'Geometry'],
+  ['OperatingLine Trail Position', 'Position', 'OperatingLine Terrain Noise', 'Vector'],
+  ['OperatingLine Trail Profile', 'Curve', 'OperatingLine Curve To Mesh', 'Profile Curve'],
+  ['OperatingLine Trail Resolution', 'Curve', 'OperatingLine Trail Instances', 'Instance'],
+  ['OperatingLine Trail Rows', 'Mesh', 'OperatingLine Trail Instances', 'Points'],
+  ['OperatingLine Z Offset', 'Vector', 'OperatingLine Displace Trails', 'Offset'],
+] as const;
+
+const replayLightTrailsSemanticParameterKeys = [
+  'trailCount',
+  'pointsPerTrail',
+  'tileLength',
+  'trailSpacing',
+  'noiseScale',
+  'noiseDetail',
+  'noiseRoughness',
+  'noiseSeed',
+  'height',
+  'profileSides',
+  'profileRadius',
+  'tileRepeatCount',
+] as const;
+
+function isLightTrailsReplayParameters(parameters: Record<string, unknown>): boolean {
+  if (
+    !hasExactKeys(parameters, [
+      'targetId',
+      'modifierId',
+      'modifierName',
+      'nodeGroupId',
+      'nodeGroupName',
+      ...replayLightTrailsSemanticParameterKeys,
+      'nodeTypes',
+    ]) ||
+    !isLogicalResourceId(parameters['targetId']) ||
+    !isLogicalResourceId(parameters['modifierId']) ||
+    !isOperatingLineName(parameters['modifierName']) ||
+    !isLogicalResourceId(parameters['nodeGroupId']) ||
+    !isOperatingLineName(parameters['nodeGroupName']) ||
+    !Array.isArray(parameters['nodeTypes']) ||
+    !sameCanonicalValue(
+      [...parameters['nodeTypes']].sort(),
+      [...replayCanonicalLightTrailsNodeTypes].sort(),
+    )
+  ) {
+    return false;
+  }
+  const boundedNumber = (key: string, minimum: number, maximum: number) =>
+    isFiniteNumber(parameters[key]) && parameters[key] >= minimum && parameters[key] <= maximum;
+  return (
+    Number.isSafeInteger(parameters['trailCount']) &&
+    boundedNumber('trailCount', 1, 128) &&
+    Number.isSafeInteger(parameters['pointsPerTrail']) &&
+    boundedNumber('pointsPerTrail', 8, 512) &&
+    boundedNumber('tileLength', 0.1, 1000) &&
+    boundedNumber('trailSpacing', 0.0001, 100) &&
+    boundedNumber('noiseScale', 0.0001, 1000) &&
+    boundedNumber('noiseDetail', 0, 15) &&
+    boundedNumber('noiseRoughness', 0, 1) &&
+    boundedNumber('noiseSeed', -10_000, 10_000) &&
+    boundedNumber('height', 0, 100) &&
+    Number.isSafeInteger(parameters['profileSides']) &&
+    boundedNumber('profileSides', 3, 8) &&
+    boundedNumber('profileRadius', 0.0001, 10) &&
+    Number.isSafeInteger(parameters['tileRepeatCount']) &&
+    boundedNumber('tileRepeatCount', 1, 5) &&
+    (parameters['trailCount'] as number) *
+      (parameters['pointsPerTrail'] as number) *
+      (parameters['profileSides'] as number) *
+      (parameters['tileRepeatCount'] as number) *
+      2 <=
+      3_000_000
+  );
+}
+
+const replayCanonicalTrailMaterialNodeTypes = [
+  'ShaderNodeBsdfPrincipled',
+  'ShaderNodeMapping',
+  'ShaderNodeMixRGB',
+  'ShaderNodeOutputMaterial',
+  'ShaderNodeTexCoord',
+  'ShaderNodeTexGradient',
+  'ShaderNodeTexWave',
+  'ShaderNodeValToRGB',
+  'ShaderNodeValToRGB',
+] as const;
+const replayCanonicalFloorMaterialNodeTypes = [
+  'ShaderNodeBsdfPrincipled',
+  'ShaderNodeBump',
+  'ShaderNodeMapping',
+  'ShaderNodeOutputMaterial',
+  'ShaderNodeTexCoord',
+  'ShaderNodeTexVoronoi',
+  'ShaderNodeValToRGB',
+  'ShaderNodeValToRGB',
+] as const;
+const replayCanonicalCompositorNodeTypes = [
+  'CompositorNodeComposite',
+  'CompositorNodeGlare',
+  'CompositorNodeRLayers',
+] as const;
+const replayLightTrailsSceneIdentityKeys = [
+  'collectionId',
+  'trailTargetId',
+  'floorTargetId',
+  'sceneId',
+  'sceneName',
+  'worldId',
+  'worldName',
+  'cameraId',
+  'cameraObjectName',
+  'cameraDataName',
+  'controllerId',
+  'controllerObjectName',
+  'trailMaterialId',
+  'trailMaterialName',
+  'floorMaterialId',
+  'floorMaterialName',
+  'cameraActionId',
+  'cameraActionName',
+] as const;
+const replayLightTrailsSceneScalarKeys = [
+  'frameStart',
+  'frameEnd',
+  'lens',
+  'fStop',
+  'focusDistance',
+  'trailEmissionStrength',
+  'gradientRotationDegrees',
+  'gradientStart',
+  'glowBandStart',
+  'glowBandEnd',
+  'gradientEnd',
+  'waveScale',
+  'floorEmissionStrength',
+  'floorMetallic',
+  'floorVoronoiScale',
+  'floorRoughnessMinimum',
+  'floorRoughnessMaximum',
+  'floorBumpStrength',
+  'floorBumpDistance',
+] as const;
+const replayLightTrailsSceneVectorKeys = ['cameraStart', 'cameraEnd', 'cameraTarget'] as const;
+const replayLightTrailsSceneColorKeys = [
+  'trailBaseColor',
+  'trailGlowColor',
+  'floorBaseColor',
+  'floorEmissionColor',
+] as const;
+
+function isFiniteBoundedArray(
+  value: unknown,
+  length: number,
+  minimum: number,
+  maximum: number,
+): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === length &&
+    value.every(
+      (component) => isFiniteNumber(component) && component >= minimum && component <= maximum,
+    )
+  );
+}
+
+function isLightTrailsSceneReplayParameters(parameters: Record<string, unknown>): boolean {
+  if (
+    !hasExactKeys(parameters, [
+      ...replayLightTrailsSceneIdentityKeys,
+      ...replayLightTrailsSceneScalarKeys,
+      ...replayLightTrailsSceneVectorKeys,
+      ...replayLightTrailsSceneColorKeys,
+      'trailMaterialNodeTypes',
+      'floorMaterialNodeTypes',
+      'compositorNodeTypes',
+    ]) ||
+    !replayLightTrailsSceneIdentityKeys.every((key) =>
+      key.endsWith('Name')
+        ? isOperatingLineName(parameters[key])
+        : isLogicalResourceId(parameters[key]),
+    ) ||
+    parameters['collectionId'] !== 'snowman.collection' ||
+    !replayLightTrailsSceneVectorKeys.every((key) =>
+      isFiniteBoundedArray(parameters[key], 3, -1000, 1000),
+    ) ||
+    !replayLightTrailsSceneColorKeys.every((key) =>
+      isFiniteBoundedArray(parameters[key], 4, 0, 1),
+    ) ||
+    !sameCanonicalValue(
+      parameters['trailMaterialNodeTypes'],
+      replayCanonicalTrailMaterialNodeTypes,
+    ) ||
+    !sameCanonicalValue(
+      parameters['floorMaterialNodeTypes'],
+      replayCanonicalFloorMaterialNodeTypes,
+    ) ||
+    !sameCanonicalValue(parameters['compositorNodeTypes'], replayCanonicalCompositorNodeTypes)
+  ) {
+    return false;
+  }
+  const bounded = (key: string, minimum: number, maximum: number) =>
+    isFiniteNumber(parameters[key]) && parameters[key] >= minimum && parameters[key] <= maximum;
+  const frameStart = parameters['frameStart'];
+  const frameEnd = parameters['frameEnd'];
+  const cameraStart = parameters['cameraStart'] as number[];
+  const cameraEnd = parameters['cameraEnd'] as number[];
+  const cameraTarget = parameters['cameraTarget'] as number[];
+  return (
+    Number.isSafeInteger(frameStart) &&
+    bounded('frameStart', 0, 99_999) &&
+    Number.isSafeInteger(frameEnd) &&
+    bounded('frameEnd', 1, 100_000) &&
+    (frameEnd as number) > (frameStart as number) &&
+    cameraStart.some((component, index) => component !== cameraEnd[index]) &&
+    cameraStart.some((component, index) => component !== cameraTarget[index]) &&
+    parameters['trailTargetId'] !== parameters['floorTargetId'] &&
+    parameters['cameraObjectName'] !== parameters['controllerObjectName'] &&
+    parameters['trailMaterialName'] !== parameters['floorMaterialName'] &&
+    bounded('lens', 1, 1000) &&
+    bounded('fStop', 0.1, 64) &&
+    bounded('focusDistance', 0.001, 1000) &&
+    bounded('trailEmissionStrength', 0, 10_000) &&
+    bounded('gradientRotationDegrees', -360, 360) &&
+    bounded('gradientStart', 0, 1) &&
+    bounded('glowBandStart', 0, 1) &&
+    bounded('glowBandEnd', 0, 1) &&
+    bounded('gradientEnd', 0, 1) &&
+    (parameters['gradientStart'] as number) < (parameters['glowBandStart'] as number) &&
+    (parameters['glowBandStart'] as number) < (parameters['glowBandEnd'] as number) &&
+    (parameters['glowBandEnd'] as number) < (parameters['gradientEnd'] as number) &&
+    bounded('waveScale', 0.0001, 1000) &&
+    bounded('floorEmissionStrength', 0, 10_000) &&
+    bounded('floorMetallic', 0, 1) &&
+    bounded('floorVoronoiScale', 0.0001, 1000) &&
+    bounded('floorRoughnessMinimum', 0, 1) &&
+    bounded('floorRoughnessMaximum', 0, 1) &&
+    (parameters['floorRoughnessMinimum'] as number) <
+      (parameters['floorRoughnessMaximum'] as number) &&
+    bounded('floorBumpStrength', 0, 100) &&
+    bounded('floorBumpDistance', 0.0001, 1000)
+  );
+}
+
+function isSingleMaterialActionArguments(parameters: Record<string, unknown>): boolean {
+  const targets = parameters['targets'];
+  const baseColor = parameters['baseColor'];
+  return (
+    hasExactKeys(parameters, [
+      'materialId',
+      'materialName',
+      'targets',
+      'baseColor',
+      'roughness',
+      'metallic',
+    ]) &&
+    isLogicalResourceId(parameters['materialId']) &&
+    isOperatingLineName(parameters['materialName']) &&
+    Array.isArray(targets) &&
+    targets.length >= 1 &&
+    targets.length <= 64 &&
+    targets.every(isLogicalResourceId) &&
+    new Set(targets).size === targets.length &&
+    Array.isArray(baseColor) &&
+    baseColor.length === 4 &&
+    baseColor.every((component) => isFiniteNumber(component) && component >= 0 && component <= 1) &&
+    isFiniteNumber(parameters['roughness']) &&
+    parameters['roughness'] >= 0 &&
+    parameters['roughness'] <= 1 &&
+    isFiniteNumber(parameters['metallic']) &&
+    parameters['metallic'] >= 0 &&
+    parameters['metallic'] <= 1
+  );
+}
+
+function isSingleMaterialObservationParameters(parameters: Record<string, unknown>): boolean {
+  const targets = parameters['targets'];
+  return (
+    hasExactKeys(parameters, ['materialId', 'targets']) &&
+    isLogicalResourceId(parameters['materialId']) &&
+    Array.isArray(targets) &&
+    targets.length >= 1 &&
+    targets.length <= 64 &&
+    targets.every(isLogicalResourceId) &&
+    new Set(targets).size === targets.length
+  );
+}
+
+function isMaterialPaletteActionArguments(parameters: Record<string, unknown>): boolean {
+  const materials = parameters['materials'];
+  if (
+    !hasExactKeys(parameters, ['materials']) ||
+    !Array.isArray(materials) ||
+    materials.length < 1 ||
+    materials.length > 8 ||
+    materials.some(
+      (material) =>
+        material === null ||
+        typeof material !== 'object' ||
+        Array.isArray(material) ||
+        !isSingleMaterialActionArguments(material as Record<string, unknown>),
+    )
+  ) {
+    return false;
+  }
+  const materialIds = materials.map((material) => material['materialId']);
+  const materialNames = materials.map((material) => material['materialName']);
+  const targetIds = materials.flatMap((material) => material['targets'] as string[]);
+  return (
+    new Set(materialIds).size === materialIds.length &&
+    new Set(materialNames).size === materialNames.length &&
+    new Set(targetIds).size === targetIds.length
+  );
+}
+
+function materialPaletteExpectedObservationsValid(
+  observations: readonly { readonly kind: string; readonly parameters: Record<string, unknown> }[],
+  actionArguments: Record<string, unknown>,
+): boolean {
+  if (!isMaterialPaletteActionArguments(actionArguments)) return false;
+  const materials = actionArguments['materials'] as Record<string, unknown>[];
+  return (
+    observations.length === materials.length &&
+    observations.every((observation, index) => {
+      const definition = materials[index]!;
+      if (
+        observation.kind !== 'material_assigned' ||
+        !isSingleMaterialObservationParameters(observation.parameters) ||
+        observation.parameters['materialId'] !== definition['materialId']
+      ) {
+        return false;
+      }
+      const acceptedTargets = definition['targets'] as string[];
+      const observedTargets = observation.parameters['targets'] as string[];
+      let cursor = 0;
+      return observedTargets.every((targetId) => {
+        const next = acceptedTargets.indexOf(targetId, cursor);
+        if (next < 0) return false;
+        cursor = next + 1;
+        return true;
+      });
+    })
+  );
 }
 
 const replayActionContracts = {
@@ -946,6 +1443,98 @@ const replayActionContracts = {
       parameters['useRim'] === true &&
       parameters['useRimOnly'] === false,
   },
+  'blender.modifier.add_bevel': {
+    observationShape: 'bevel_modifier',
+    observationKind: 'modifier_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      modifierId: actionArguments['modifierId'],
+      modifierType: 'BEVEL',
+      width: actionArguments['width'],
+      segments: actionArguments['segments'],
+      angleLimit: actionArguments['angleLimit'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      Object.keys(parameters).length === 6 &&
+      typeof parameters['targetId'] === 'string' &&
+      parameters['targetId'].length > 0 &&
+      typeof parameters['modifierId'] === 'string' &&
+      parameters['modifierId'].length > 0 &&
+      parameters['modifierType'] === 'BEVEL' &&
+      isFiniteNumber(parameters['width']) &&
+      parameters['width'] >= 0.0001 &&
+      parameters['width'] <= 100 &&
+      Number.isInteger(parameters['segments']) &&
+      Number(parameters['segments']) >= 1 &&
+      Number(parameters['segments']) <= 16 &&
+      isFiniteNumber(parameters['angleLimit']) &&
+      parameters['angleLimit'] >= 0 &&
+      parameters['angleLimit'] <= Math.PI,
+  },
+  'blender.material.create_and_assign': {
+    observationShape: 'single_material',
+    observationKind: 'material_assigned',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      materialId: actionArguments['materialId'],
+      targets: structuredClone(actionArguments['targets']),
+    }),
+    parametersValid: isSingleMaterialObservationParameters,
+  },
+  'blender.material.create_palette_and_assign': {
+    observationShape: 'material_palette',
+    observationKind: 'material_assigned',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      materials: structuredClone(actionArguments['materials']),
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      isMaterialPaletteActionArguments(parameters),
+  },
+  'blender.modifier.add_subdivision_surface': {
+    observationShape: 'subdivision_surface_modifier',
+    observationKind: 'modifier_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      modifierId: actionArguments['modifierId'],
+      modifierType: 'SUBSURF',
+      levels: actionArguments['viewportLevel'],
+      renderLevels: 2,
+      subdivisionType: 'CATMULL_CLARK',
+      quality: 3,
+      showOnlyControlEdges: true,
+      useCreases: true,
+      useLimitSurface: true,
+      boundarySmooth: 'ALL',
+      uvSmooth: 'PRESERVE_BOUNDARIES',
+      useCustomNormals: false,
+      showViewport: true,
+      showRender: true,
+      showInEditMode: true,
+      showOnCage: false,
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      Object.keys(parameters).length === 17 &&
+      typeof parameters['targetId'] === 'string' &&
+      parameters['targetId'].length > 0 &&
+      typeof parameters['modifierId'] === 'string' &&
+      parameters['modifierId'].length > 0 &&
+      parameters['modifierType'] === 'SUBSURF' &&
+      Number.isSafeInteger(parameters['levels']) &&
+      (parameters['levels'] as number) >= 1 &&
+      (parameters['levels'] as number) <= 3 &&
+      parameters['renderLevels'] === 2 &&
+      parameters['subdivisionType'] === 'CATMULL_CLARK' &&
+      parameters['quality'] === 3 &&
+      parameters['showOnlyControlEdges'] === true &&
+      parameters['useCreases'] === true &&
+      parameters['useLimitSurface'] === true &&
+      parameters['boundarySmooth'] === 'ALL' &&
+      parameters['uvSmooth'] === 'PRESERVE_BOUNDARIES' &&
+      parameters['useCustomNormals'] === false &&
+      parameters['showViewport'] === true &&
+      parameters['showRender'] === true &&
+      parameters['showInEditMode'] === true &&
+      parameters['showOnCage'] === false,
+  },
   'blender.rig.create_armature': {
     observationShape: 'managed_armature',
     observationKind: 'armature_ready',
@@ -985,6 +1574,60 @@ const replayActionContracts = {
     }),
     parametersValid: isPoseAnimationReplayParameters,
   },
+  'blender.geometry_nodes.create_light_trails': {
+    observationShape: 'managed_light_trails',
+    observationKind: 'light_trails_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      modifierId: actionArguments['modifierId'],
+      modifierName: actionArguments['modifierName'],
+      nodeGroupId: actionArguments['nodeGroupId'],
+      nodeGroupName: actionArguments['nodeGroupName'],
+      trailCount: actionArguments['trailCount'],
+      pointsPerTrail: actionArguments['pointsPerTrail'],
+      tileLength: actionArguments['tileLength'],
+      trailSpacing: actionArguments['trailSpacing'],
+      noiseScale: actionArguments['noiseScale'],
+      noiseDetail: actionArguments['noiseDetail'],
+      noiseRoughness: actionArguments['noiseRoughness'],
+      noiseSeed: actionArguments['noiseSeed'],
+      height: actionArguments['height'],
+      profileSides: actionArguments['profileSides'],
+      profileRadius: actionArguments['profileRadius'],
+      tileRepeatCount: actionArguments['tileRepeatCount'],
+      nodeTypes: [...replayCanonicalLightTrailsNodeTypes],
+    }),
+    parametersValid: isLightTrailsReplayParameters,
+  },
+  'blender.geometry_nodes.create_transform': {
+    observationShape: 'managed_transform_geometry',
+    observationKind: 'geometry_nodes_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      modifierId: actionArguments['modifierId'],
+      nodeGroupId: actionArguments['nodeGroupId'],
+      nodeTypes: [...replayCanonicalTransformGeometryNodeTypes],
+    }),
+    parametersValid: isTransformGeometryReplayParameters,
+  },
+  'blender.lookdev.create_light_trails_scene': {
+    observationShape: 'managed_light_trails_scene',
+    observationKind: 'light_trails_scene_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      ...Object.fromEntries(
+        [
+          ...replayLightTrailsSceneIdentityKeys,
+          ...replayLightTrailsSceneScalarKeys,
+          ...replayLightTrailsSceneVectorKeys,
+          ...replayLightTrailsSceneColorKeys,
+        ].map((key) => [key, structuredClone(actionArguments[key])]),
+      ),
+      trailMaterialNodeTypes: [...replayCanonicalTrailMaterialNodeTypes],
+      floorMaterialNodeTypes: [...replayCanonicalFloorMaterialNodeTypes],
+      compositorNodeTypes: [...replayCanonicalCompositorNodeTypes],
+    }),
+    parametersValid: isLightTrailsSceneReplayParameters,
+  },
 } as const satisfies Record<
   ProcedureLeafReplayActionName,
   | {
@@ -1018,8 +1661,46 @@ const replayActionContracts = {
       readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
     }
   | {
+      readonly observationShape: 'bevel_modifier';
+      readonly observationKind: 'modifier_ready';
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+    }
+  | {
+      readonly observationShape: 'single_material';
+      readonly observationKind: 'material_assigned';
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+    }
+  | {
+      readonly observationShape: 'material_palette';
+      readonly observationKind: 'material_assigned';
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+    }
+  | {
+      readonly observationShape: 'subdivision_surface_modifier';
+      readonly observationKind: 'modifier_ready';
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+    }
+  | {
       readonly observationShape:
-        'managed_edit' | 'managed_armature' | 'managed_skin_weights' | 'managed_pose_animation';
+        | 'managed_edit'
+        | 'managed_armature'
+        | 'managed_skin_weights'
+        | 'managed_pose_animation'
+        | 'managed_transform_geometry'
+        | 'managed_light_trails'
+        | 'managed_light_trails_scene';
       readonly observationKind:
         | 'mesh_topology_matches'
         | 'mesh_triangulated'
@@ -1029,7 +1710,10 @@ const replayActionContracts = {
         | 'mesh_faces_poked'
         | 'armature_ready'
         | 'skin_weights_ready'
-        | 'pose_animation_ready';
+        | 'pose_animation_ready'
+        | 'geometry_nodes_ready'
+        | 'light_trails_ready'
+        | 'light_trails_scene_ready';
       readonly expectedParameters: (
         actionArguments: Record<string, unknown>,
       ) => Record<string, unknown>;
@@ -1143,15 +1827,25 @@ export function prepareProcedureLeafReplay(
       'Managed leaf replay requires a rollback_step or retain_for_repair success gate and compensating action',
     );
   }
-  const expectedObservationParameters = actionContract.expectedParameters(leaf.action.arguments);
-  if (
-    leaf.expectedObservations.length !== 1 ||
-    leaf.expectedObservations[0]?.kind !== actionContract.observationKind ||
-    !sameCanonicalValue(leaf.expectedObservations[0].parameters, expectedObservationParameters)
-  ) {
-    throw new ProcedureLeafReplayError(
-      `Managed ${actionName} replay requires one exact ${actionContract.observationKind} success gate`,
-    );
+  if (actionContract.observationShape === 'material_palette') {
+    if (
+      !materialPaletteExpectedObservationsValid(leaf.expectedObservations, leaf.action.arguments)
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Managed material palette replay requires one ordered material_assigned success gate per palette entry',
+      );
+    }
+  } else {
+    const expectedObservationParameters = actionContract.expectedParameters(leaf.action.arguments);
+    if (
+      leaf.expectedObservations.length !== 1 ||
+      leaf.expectedObservations[0]?.kind !== actionContract.observationKind ||
+      !sameCanonicalValue(leaf.expectedObservations[0].parameters, expectedObservationParameters)
+    ) {
+      throw new ProcedureLeafReplayError(
+        `Managed ${actionName} replay requires one exact ${actionContract.observationKind} success gate`,
+      );
+    }
   }
 
   const leafCoverage = materialization.coverage.find((entry) => entry.leafId === leaf.id);
@@ -1199,6 +1893,23 @@ export function prepareProcedureLeafReplay(
     throw new ProcedureLeafReplayError(
       `ActionCatalog ${actionCatalog.catalogVersion} does not support ${actionContract.observationKind}`,
     );
+  }
+  const operationLevelAction = operationLevelMcpActionNameSchema.safeParse(actionName);
+  if (operationLevelAction.success) {
+    if (leafCoverage.recipeId !== operationLevelMcpRecipeIdByAction[operationLevelAction.data]) {
+      throw new ProcedureLeafReplayError(
+        'Guided Geometry replay requires its exact operation-level semantic recipe',
+      );
+    }
+    const argumentErrors = validateActionArguments(
+      leaf.action.arguments,
+      actionEntry.argumentsSchema,
+    );
+    if (argumentErrors.length > 0) {
+      throw new ProcedureLeafReplayError(
+        `Guided Geometry replay action arguments violate the installed ActionCatalog: ${argumentErrors.join('; ')}`,
+      );
+    }
   }
   const phases = (actionCatalog.planningPhases ?? []).filter((phase) =>
     phase.actionNames.includes(actionName),
@@ -1358,8 +2069,24 @@ function validateManagedEditReplayDetails(
   ] as const;
   const extraKeysByKind = {
     mesh_topology_matches: ['topologyGrew'],
-    mesh_triangulated: ['nonempty', 'allTriangles'],
-    mesh_region_extruded: ['topologyGrew'],
+    mesh_triangulated: [
+      'nonempty',
+      'allTriangles',
+      'sourceLoopCount',
+      'expectedVertexCount',
+      'expectedEdgeCount',
+      'expectedFaceCount',
+    ],
+    mesh_region_extruded: [
+      'topologyGrew',
+      'selectedFaceCount',
+      'selectedEdgeCount',
+      'selectedVertexCount',
+      'boundaryEdgeCount',
+      'expectedVertexCount',
+      'expectedEdgeCount',
+      'expectedFaceCount',
+    ],
     mesh_edges_beveled: ['topologyGrew'],
     mesh_faces_inset: [
       'resultNondegenerate',
@@ -1405,11 +2132,7 @@ function validateManagedEditReplayDetails(
   ) {
     return false;
   }
-  if (
-    ['mesh_topology_matches', 'mesh_region_extruded', 'mesh_edges_beveled'].includes(
-      observationKind,
-    )
-  ) {
+  if (['mesh_topology_matches', 'mesh_edges_beveled'].includes(observationKind)) {
     return (
       details['topologyGrew'] === true &&
       (details['vertexCount'] as number) > (details['sourceVertexCount'] as number) &&
@@ -1417,8 +2140,53 @@ function validateManagedEditReplayDetails(
       (details['faceCount'] as number) > (details['sourceFaceCount'] as number)
     );
   }
+  if (observationKind === 'mesh_region_extruded') {
+    const selectedFaceCount = details['selectedFaceCount'];
+    const selectedEdgeCount = details['selectedEdgeCount'];
+    const selectedVertexCount = details['selectedVertexCount'];
+    const boundaryEdgeCount = details['boundaryEdgeCount'];
+    const polygonIndices = expectedParameters['polygonIndices'];
+    const sourceVertexCount = details['sourceVertexCount'] as number;
+    const sourceEdgeCount = details['sourceEdgeCount'] as number;
+    const sourceFaceCount = details['sourceFaceCount'] as number;
+    return (
+      details['topologyGrew'] === true &&
+      Array.isArray(polygonIndices) &&
+      Number.isSafeInteger(selectedFaceCount) &&
+      selectedFaceCount === polygonIndices.length &&
+      Number.isSafeInteger(selectedEdgeCount) &&
+      (selectedEdgeCount as number) > 0 &&
+      Number.isSafeInteger(selectedVertexCount) &&
+      (selectedVertexCount as number) > 0 &&
+      Number.isSafeInteger(boundaryEdgeCount) &&
+      (boundaryEdgeCount as number) > 0 &&
+      details['expectedVertexCount'] === sourceVertexCount + (selectedVertexCount as number) &&
+      details['expectedEdgeCount'] ===
+        sourceEdgeCount + (selectedEdgeCount as number) + (boundaryEdgeCount as number) &&
+      details['expectedFaceCount'] === sourceFaceCount + (boundaryEdgeCount as number) &&
+      details['vertexCount'] === details['expectedVertexCount'] &&
+      details['edgeCount'] === details['expectedEdgeCount'] &&
+      details['faceCount'] === details['expectedFaceCount']
+    );
+  }
   if (observationKind === 'mesh_triangulated') {
-    return details['nonempty'] === true && details['allTriangles'] === true;
+    const sourceLoopCount = details['sourceLoopCount'];
+    const sourceVertexCount = details['sourceVertexCount'] as number;
+    const sourceEdgeCount = details['sourceEdgeCount'] as number;
+    const sourceFaceCount = details['sourceFaceCount'] as number;
+    return (
+      details['nonempty'] === true &&
+      details['allTriangles'] === true &&
+      Number.isSafeInteger(sourceLoopCount) &&
+      (sourceLoopCount as number) > 0 &&
+      details['expectedVertexCount'] === details['vertexCount'] &&
+      details['expectedEdgeCount'] === details['edgeCount'] &&
+      details['expectedFaceCount'] === details['faceCount'] &&
+      details['expectedVertexCount'] === sourceVertexCount &&
+      details['expectedEdgeCount'] ===
+        sourceEdgeCount + (sourceLoopCount as number) - 3 * sourceFaceCount &&
+      details['expectedFaceCount'] === (sourceLoopCount as number) - 2 * sourceFaceCount
+    );
   }
   const expectedCountsMatch =
     Number.isSafeInteger(details['sourceLoopCount']) &&
@@ -1639,12 +2407,275 @@ function validateManagedPoseAnimationReplayDetails(
   );
 }
 
+function validateManagedLightTrailsReplayDetails(
+  details: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  const resolvedParameters = details['resolvedParameters'];
+  if (
+    typeof resolvedParameters !== 'object' ||
+    resolvedParameters === null ||
+    Array.isArray(resolvedParameters)
+  ) {
+    return false;
+  }
+  const expectedEvaluatedVertexCount =
+    (expectedParameters['trailCount'] as number) *
+    (expectedParameters['pointsPerTrail'] as number) *
+    (expectedParameters['profileSides'] as number) *
+    (expectedParameters['tileRepeatCount'] as number) *
+    2;
+  const semanticParametersMatch = replayLightTrailsSemanticParameterKeys.every((key) => {
+    const expected = expectedParameters[key];
+    const actual = (resolvedParameters as Record<string, unknown>)[key];
+    return (
+      isFiniteNumber(expected) &&
+      isFiniteNumber(actual) &&
+      Math.abs(expected - actual) <=
+        Math.max(1e-6, 1e-6 * Math.max(Math.abs(expected), Math.abs(actual)))
+    );
+  });
+  return (
+    exactDetailKeys(details, [
+      'parameters',
+      'supported',
+      'targetId',
+      'modifierId',
+      'modifierName',
+      'nodeGroupId',
+      'nodeGroupName',
+      'nodeTypes',
+      'interfaceSignature',
+      'interfaceMatches',
+      'linkTopology',
+      'linkTopologyMatches',
+      'forbiddenNodeTypes',
+      'bakeCount',
+      'bakeDirectory',
+      'semanticSignatureMatches',
+      'fixedSemanticsMatch',
+      'resolvedParameters',
+      'semanticParametersMatch',
+      'evaluatedVertexCount',
+      'expectedEvaluatedVertexCount',
+      'evaluatedVertexCountMatches',
+      'evaluatedEdgeCount',
+      'evaluatedPolygonCount',
+      'evaluatedFinite',
+    ]) &&
+    details['targetId'] === expectedParameters['targetId'] &&
+    details['modifierId'] === expectedParameters['modifierId'] &&
+    details['modifierName'] === expectedParameters['modifierName'] &&
+    details['nodeGroupId'] === expectedParameters['nodeGroupId'] &&
+    details['nodeGroupName'] === expectedParameters['nodeGroupName'] &&
+    Array.isArray(details['nodeTypes']) &&
+    sameCanonicalValue(
+      [...details['nodeTypes']].sort(),
+      [...replayCanonicalLightTrailsNodeTypes].sort(),
+    ) &&
+    sameCanonicalValue(details['interfaceSignature'], replayCanonicalLightTrailsInterface) &&
+    details['interfaceMatches'] === true &&
+    sameCanonicalValue(details['linkTopology'], replayCanonicalLightTrailsLinks) &&
+    details['linkTopologyMatches'] === true &&
+    Array.isArray(details['forbiddenNodeTypes']) &&
+    details['forbiddenNodeTypes'].length === 0 &&
+    details['bakeCount'] === 0 &&
+    details['bakeDirectory'] === '' &&
+    details['semanticSignatureMatches'] === true &&
+    details['fixedSemanticsMatch'] === true &&
+    hasExactKeys(resolvedParameters as Record<string, unknown>, [
+      ...replayLightTrailsSemanticParameterKeys,
+    ]) &&
+    semanticParametersMatch &&
+    details['semanticParametersMatch'] === true &&
+    details['expectedEvaluatedVertexCount'] === expectedEvaluatedVertexCount &&
+    details['evaluatedVertexCount'] === expectedEvaluatedVertexCount &&
+    details['evaluatedVertexCountMatches'] === true &&
+    Number.isSafeInteger(details['evaluatedEdgeCount']) &&
+    (details['evaluatedEdgeCount'] as number) > 0 &&
+    (details['evaluatedEdgeCount'] as number) <= 12_000_000 &&
+    Number.isSafeInteger(details['evaluatedPolygonCount']) &&
+    (details['evaluatedPolygonCount'] as number) > 0 &&
+    (details['evaluatedPolygonCount'] as number) <= 12_000_000 &&
+    details['evaluatedFinite'] === true
+  );
+}
+
+function validateManagedTransformGeometryReplayDetails(
+  details: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  return (
+    exactDetailKeys(details, [
+      'parameters',
+      'supported',
+      'targetId',
+      'modifierId',
+      'nodeGroupId',
+      'nodeTypes',
+    ]) &&
+    details['targetId'] === expectedParameters['targetId'] &&
+    details['modifierId'] === expectedParameters['modifierId'] &&
+    details['nodeGroupId'] === expectedParameters['nodeGroupId'] &&
+    sameStringArray(details['nodeTypes'], replayCanonicalTransformGeometryNodeTypes)
+  );
+}
+
+function validateManagedLightTrailsSceneReplayDetails(
+  details: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  const proofKeys = [
+    'sceneMatches',
+    'collectionMatches',
+    'worldMatches',
+    'cameraMatches',
+    'controllerMatches',
+    'animationMatches',
+    'trailMaterialMatches',
+    'floorMaterialMatches',
+    'compositorMatches',
+    'noBakeNodes',
+    'noRenderArtifacts',
+  ] as const;
+  return (
+    exactDetailKeys(details, [
+      'parameters',
+      'supported',
+      'shape',
+      ...replayLightTrailsSceneIdentityKeys,
+      ...proofKeys,
+      'frameStart',
+      'frameEnd',
+      'cameraKeyframeCount',
+      'trailMaterialNodeTypes',
+      'floorMaterialNodeTypes',
+      'compositorNodeTypes',
+    ]) &&
+    details['shape'] === 'managed_light_trails_scene' &&
+    replayLightTrailsSceneIdentityKeys.every((key) => details[key] === expectedParameters[key]) &&
+    proofKeys.every((key) => details[key] === true) &&
+    details['frameStart'] === expectedParameters['frameStart'] &&
+    details['frameEnd'] === expectedParameters['frameEnd'] &&
+    details['cameraKeyframeCount'] === 6 &&
+    sameCanonicalValue(details['trailMaterialNodeTypes'], replayCanonicalTrailMaterialNodeTypes) &&
+    sameCanonicalValue(details['floorMaterialNodeTypes'], replayCanonicalFloorMaterialNodeTypes) &&
+    sameCanonicalValue(details['compositorNodeTypes'], replayCanonicalCompositorNodeTypes)
+  );
+}
+
+function strongMaterialObservationMatches(
+  observation: CompanionStateReport['observations'][number],
+  acceptedActionArguments: Record<string, unknown>,
+  expectedParameters: Record<string, unknown>,
+): boolean {
+  const strongDetailKeys = new Set([
+    'parameters',
+    'supported',
+    'materialId',
+    'materialName',
+    'targetIds',
+    'assignedTargetIds',
+    'useNodes',
+    'principledNodeCount',
+    'outputNodeCount',
+    'baseColor',
+    'roughness',
+    'metallic',
+    'receiptMatches',
+    'ownershipMatches',
+    'materialSurfaceMatches',
+    'assignmentsMatch',
+    'sourceContentIntact',
+  ]);
+  const proofKeys = [
+    'useNodes',
+    'receiptMatches',
+    'ownershipMatches',
+    'materialSurfaceMatches',
+    'assignmentsMatch',
+    'sourceContentIntact',
+  ] as const;
+  const observedBaseColor = observation.details['baseColor'];
+  const acceptedBaseColor = acceptedActionArguments['baseColor'];
+  const numberMatches = (observed: unknown, accepted: unknown) =>
+    isFiniteNumber(observed) &&
+    isFiniteNumber(accepted) &&
+    Math.abs(observed - accepted) <= Math.max(1e-6, Math.abs(accepted) * 1e-6);
+  return (
+    isSingleMaterialActionArguments(acceptedActionArguments) &&
+    Object.keys(observation.details).length === strongDetailKeys.size &&
+    Object.keys(observation.details).every((key) => strongDetailKeys.has(key)) &&
+    observation.details['materialId'] === acceptedActionArguments['materialId'] &&
+    observation.details['materialId'] === expectedParameters['materialId'] &&
+    observation.details['materialName'] === acceptedActionArguments['materialName'] &&
+    sameCanonicalValue(observation.details['targetIds'], expectedParameters['targets']) &&
+    sameCanonicalValue(observation.details['assignedTargetIds'], expectedParameters['targets']) &&
+    proofKeys.every((key) => observation.details[key] === true) &&
+    observation.details['principledNodeCount'] === 1 &&
+    observation.details['outputNodeCount'] === 1 &&
+    Array.isArray(observedBaseColor) &&
+    Array.isArray(acceptedBaseColor) &&
+    observedBaseColor.length === 4 &&
+    acceptedBaseColor.length === 4 &&
+    observedBaseColor.every((component, index) =>
+      numberMatches(component, acceptedBaseColor[index]),
+    ) &&
+    numberMatches(observation.details['roughness'], acceptedActionArguments['roughness']) &&
+    numberMatches(observation.details['metallic'], acceptedActionArguments['metallic'])
+  );
+}
+
 export function validateStrongProcedureLeafReplayObservation(
   binding: ProcedureLeafReplayBinding,
   report: CompanionStateReport,
 ) {
   const actionContract = replayActionContracts[binding.actionName];
   const expectedStep = binding.proposal.plan.steps.find((step) => step.id === binding.leafId);
+  if (actionContract.observationShape === 'material_palette') {
+    const acceptedActionArguments = expectedStep?.action?.arguments;
+    if (
+      expectedStep?.action?.name !== binding.actionName ||
+      acceptedActionArguments === undefined ||
+      !materialPaletteExpectedObservationsValid(
+        expectedStep.expectedObservations,
+        acceptedActionArguments,
+      ) ||
+      report.observations.length !== expectedStep.expectedObservations.length
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact ordered managed Material Palette observations',
+        409,
+      );
+    }
+    const materials = acceptedActionArguments['materials'] as Record<string, unknown>[];
+    const valid = report.observations.every((observation, index) => {
+      const expectedObservation = expectedStep.expectedObservations[index];
+      const definition = materials[index];
+      return (
+        expectedObservation !== undefined &&
+        definition !== undefined &&
+        observation.kind === 'material_assigned' &&
+        observation.satisfied === true &&
+        observation.details['supported'] === true &&
+        sameCanonicalValue(observation.details['parameters'], expectedObservation.parameters) &&
+        strongMaterialObservationMatches(observation, definition, expectedObservation.parameters)
+      );
+    });
+    if (!valid) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact ordered managed Material Palette observations',
+        409,
+      );
+    }
+    return report.observations.map((observation) =>
+      procedureLeafReplayObservationSchema.parse({
+        kind: observation.kind,
+        satisfied: true,
+        details: structuredClone(observation.details),
+      }),
+    );
+  }
   const expectedObservation = expectedStep?.expectedObservations[0];
   const observation = report.observations[0];
   const expectedParameters = expectedObservation?.parameters;
@@ -1668,7 +2699,181 @@ export function validateStrongProcedureLeafReplayObservation(
     );
   }
 
-  if (actionContract.observationShape === 'solidify_modifier') {
+  if (actionContract.observationShape === 'subdivision_surface_modifier') {
+    const strongDetailKeys = new Set([
+      'parameters',
+      'supported',
+      'targetId',
+      'modifierId',
+      'modifierType',
+      'propertiesMatch',
+      'sourceContentIntact',
+      'evaluatedVertexCount',
+      'evaluatedEdgeCount',
+      'evaluatedFaceCount',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ]);
+    const booleanDetailKeys = [
+      'propertiesMatch',
+      'sourceContentIntact',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ] as const;
+    const evaluatedCounts = [
+      ['evaluatedVertexCount', 8192],
+      ['evaluatedEdgeCount', 16384],
+      ['evaluatedFaceCount', 8192],
+    ] as const;
+    if (
+      Object.keys(observation.details).length !== strongDetailKeys.size ||
+      Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
+      observation.details['targetId'] !== expectedParameters['targetId'] ||
+      observation.details['modifierId'] !== expectedParameters['modifierId'] ||
+      observation.details['modifierType'] !== 'SUBSURF' ||
+      booleanDetailKeys.some((key) => observation.details[key] !== true) ||
+      evaluatedCounts.some(([key, maximum]) => {
+        const value = observation.details[key];
+        return (
+          !Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > maximum
+        );
+      })
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed Subdivision Surface observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'bevel_modifier') {
+    const strongDetailKeys = new Set([
+      'parameters',
+      'supported',
+      'targetId',
+      'modifierId',
+      'modifierType',
+      'propertiesMatch',
+      'width',
+      'segments',
+      'angleLimit',
+      'limitMethod',
+      'bevelFixedStateMatches',
+      'sourceContentIntact',
+      'evaluatedVertexCount',
+      'evaluatedEdgeCount',
+      'evaluatedFaceCount',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ]);
+    const booleanDetailKeys = [
+      'propertiesMatch',
+      'bevelFixedStateMatches',
+      'sourceContentIntact',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ] as const;
+    const evaluatedCounts = [
+      ['evaluatedVertexCount', 8192],
+      ['evaluatedEdgeCount', 16384],
+      ['evaluatedFaceCount', 8192],
+    ] as const;
+    if (
+      Object.keys(observation.details).length !== strongDetailKeys.size ||
+      Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
+      observation.details['targetId'] !== expectedParameters['targetId'] ||
+      observation.details['modifierId'] !== expectedParameters['modifierId'] ||
+      observation.details['modifierType'] !== 'BEVEL' ||
+      !isFiniteNumber(observation.details['width']) ||
+      !isFiniteNumber(expectedParameters['width']) ||
+      Math.abs(observation.details['width'] - expectedParameters['width']) > 1e-6 ||
+      observation.details['segments'] !== expectedParameters['segments'] ||
+      !isFiniteNumber(observation.details['angleLimit']) ||
+      !isFiniteNumber(expectedParameters['angleLimit']) ||
+      Math.abs(observation.details['angleLimit'] - expectedParameters['angleLimit']) > 1e-6 ||
+      observation.details['limitMethod'] !== 'ANGLE' ||
+      booleanDetailKeys.some((key) => observation.details[key] !== true) ||
+      evaluatedCounts.some(([key, maximum]) => {
+        const value = observation.details[key];
+        return (
+          !Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > maximum
+        );
+      })
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed Bevel Modifier observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'single_material') {
+    const acceptedActionArguments = expectedStep.action?.arguments;
+    const strongDetailKeys = new Set([
+      'parameters',
+      'supported',
+      'materialId',
+      'materialName',
+      'targetIds',
+      'assignedTargetIds',
+      'useNodes',
+      'principledNodeCount',
+      'outputNodeCount',
+      'baseColor',
+      'roughness',
+      'metallic',
+      'receiptMatches',
+      'ownershipMatches',
+      'materialSurfaceMatches',
+      'assignmentsMatch',
+      'sourceContentIntact',
+    ]);
+    const proofKeys = [
+      'useNodes',
+      'receiptMatches',
+      'ownershipMatches',
+      'materialSurfaceMatches',
+      'assignmentsMatch',
+      'sourceContentIntact',
+    ] as const;
+    const observedBaseColor = observation.details['baseColor'];
+    const acceptedBaseColor = acceptedActionArguments?.['baseColor'];
+    const observedRoughness = observation.details['roughness'];
+    const acceptedRoughness = acceptedActionArguments?.['roughness'];
+    const observedMetallic = observation.details['metallic'];
+    const acceptedMetallic = acceptedActionArguments?.['metallic'];
+    const numberMatches = (observed: unknown, accepted: unknown) =>
+      isFiniteNumber(observed) &&
+      isFiniteNumber(accepted) &&
+      Math.abs(observed - accepted) <= Math.max(1e-6, Math.abs(accepted) * 1e-6);
+    if (
+      acceptedActionArguments === undefined ||
+      !isSingleMaterialActionArguments(acceptedActionArguments) ||
+      Object.keys(observation.details).length !== strongDetailKeys.size ||
+      Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
+      observation.details['materialId'] !== acceptedActionArguments['materialId'] ||
+      observation.details['materialId'] !== expectedParameters['materialId'] ||
+      observation.details['materialName'] !== acceptedActionArguments['materialName'] ||
+      !sameCanonicalValue(observation.details['targetIds'], acceptedActionArguments['targets']) ||
+      !sameCanonicalValue(
+        observation.details['assignedTargetIds'],
+        acceptedActionArguments['targets'],
+      ) ||
+      proofKeys.some((key) => observation.details[key] !== true) ||
+      observation.details['principledNodeCount'] !== 1 ||
+      observation.details['outputNodeCount'] !== 1 ||
+      !Array.isArray(observedBaseColor) ||
+      !Array.isArray(acceptedBaseColor) ||
+      observedBaseColor.length !== 4 ||
+      acceptedBaseColor.length !== 4 ||
+      observedBaseColor.some(
+        (component, index) => !numberMatches(component, acceptedBaseColor[index]),
+      ) ||
+      !numberMatches(observedRoughness, acceptedRoughness) ||
+      !numberMatches(observedMetallic, acceptedMetallic)
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed Single Material observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'solidify_modifier') {
     const strongDetailKeys = new Set([
       'parameters',
       'supported',
@@ -1821,6 +3026,27 @@ export function validateStrongProcedureLeafReplayObservation(
         409,
       );
     }
+  } else if (actionContract.observationShape === 'managed_transform_geometry') {
+    if (!validateManagedTransformGeometryReplayDetails(observation.details, expectedParameters)) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed Transform Geometry observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'managed_light_trails') {
+    if (!validateManagedLightTrailsReplayDetails(observation.details, expectedParameters)) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed light-trails observation',
+        409,
+      );
+    }
+  } else if (actionContract.observationShape === 'managed_light_trails_scene') {
+    if (!validateManagedLightTrailsSceneReplayDetails(observation.details, expectedParameters)) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed light-trails scene observation',
+        409,
+      );
+    }
   } else {
     const expectedResourceId = expectedParameters['resourceId'];
     const expectedObjectName = expectedParameters['objectName'];
@@ -1883,11 +3109,13 @@ export function validateStrongProcedureLeafReplayObservation(
       );
     }
   }
-  return procedureLeafReplayObservationSchema.parse({
-    kind: actionContract.observationKind,
-    satisfied: true,
-    details: structuredClone(observation.details),
-  });
+  return [
+    procedureLeafReplayObservationSchema.parse({
+      kind: actionContract.observationKind,
+      satisfied: true,
+      details: structuredClone(observation.details),
+    }),
+  ];
 }
 
 export function buildProcedureLeafReplayAttestation(input: {
@@ -2063,7 +3291,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     );
   }
 
-  const attestedObservation = validateStrongProcedureLeafReplayObservation(binding, report);
+  const attestedObservations = validateStrongProcedureLeafReplayObservation(binding, report);
   if (
     Date.parse(report.occurredAt) > Date.parse(input.attestedAt) ||
     Date.parse(reportReceipt.receivedAt) > Date.parse(input.attestedAt)
@@ -2091,7 +3319,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     completedStepIds: [...report.completedStepIds],
     transition: 'step_succeeded' as const,
     stepId: binding.leafId,
-    observations: [attestedObservation],
+    observations: attestedObservations,
     observationGate: null,
     artifactAttestation: null,
     error: null,
@@ -2160,7 +3388,7 @@ export function buildProcedureLeafReplayAttestation(input: {
       occurredAt: report.occurredAt,
     },
     successGate: {
-      observations: [attestedObservation],
+      observations: attestedObservations,
       allSatisfied: true,
     },
     verificationScope: {
@@ -2346,7 +3574,33 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
   const expectedObservation = expectedStep?.expectedObservations[0];
   const failedObservation = failureReport.observations[0];
   const actionContract = replayActionContracts[binding.actionName];
-  if (
+  if (actionContract.observationShape === 'material_palette') {
+    const acceptedActionArguments = expectedStep?.action?.arguments;
+    const paletteFailureValid =
+      expectedStep?.action?.name === binding.actionName &&
+      acceptedActionArguments !== undefined &&
+      materialPaletteExpectedObservationsValid(
+        expectedStep.expectedObservations,
+        acceptedActionArguments,
+      ) &&
+      failureReport.observations.length === expectedStep.expectedObservations.length &&
+      failureReport.observations.every((observation, index) => {
+        const expected = expectedStep.expectedObservations[index];
+        return (
+          expected !== undefined &&
+          observation.kind === 'material_assigned' &&
+          observation.satisfied === false &&
+          observation.details['supported'] === true &&
+          sameCanonicalValue(observation.details['parameters'], expected.parameters)
+        );
+      });
+    if (!paletteFailureValid) {
+      throw new ProcedureLeafReplayError(
+        'Failure report lacks the exact ordered unsatisfied Material Palette observations',
+        409,
+      );
+    }
+  } else if (
     expectedStep?.action?.name !== binding.actionName ||
     expectedStep.expectedObservations.length !== 1 ||
     expectedObservation?.kind !== actionContract.observationKind ||
@@ -2416,8 +3670,9 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     );
   }
 
-  let recoveredObservation: ReturnType<typeof validateStrongProcedureLeafReplayObservation> | null =
-    null;
+  let recoveredObservations: ReturnType<
+    typeof validateStrongProcedureLeafReplayObservation
+  > | null = null;
   if (recoveryReport !== null) {
     if (
       recoveryReport.protocolVersion !== proposal.protocolVersion ||
@@ -2456,7 +3711,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
         409,
       );
     }
-    recoveredObservation = validateStrongProcedureLeafReplayObservation(binding, recoveryReport);
+    recoveredObservations = validateStrongProcedureLeafReplayObservation(binding, recoveryReport);
   }
   const finalReport = recoveryReport ?? failureReport;
   const finalReceipt = recoveryReportReceipt ?? failureReportReceipt;
@@ -2487,13 +3742,13 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     completedStepIds: [...failureReport.completedStepIds],
     transition: 'step_observation_failed' as const,
     stepId: binding.leafId,
-    observations: [
-      {
-        kind: failedObservation.kind,
-        satisfied: false as const,
-        details: structuredClone(failedObservation.details),
-      },
-    ],
+    observations: failureReport.observations.map((observation) =>
+      procedureLeafReplayFailedObservationSchema.parse({
+        kind: observation.kind,
+        satisfied: false,
+        details: structuredClone(observation.details),
+      }),
+    ),
     observationGate: {
       ...structuredClone(failureGate),
       status: failureGate.status as 'failed_rolled_back' | 'repair_required' | 'rollback_failed',
@@ -2502,7 +3757,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     error: null,
   };
   const attestedRecoveryReport =
-    recoveryReport === null || recoveredObservation === null
+    recoveryReport === null || recoveredObservations === null
       ? null
       : {
           ...recoveryReport,
@@ -2516,7 +3771,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
           completedStepIds: [...recoveryReport.completedStepIds],
           transition: 'observation_recovered' as const,
           stepId: binding.leafId,
-          observations: [recoveredObservation] as [typeof recoveredObservation],
+          observations: recoveredObservations,
           observationGate: {
             ...structuredClone(recoveryReport.observationGate!),
             status: 'recovered' as const,
@@ -2636,9 +3891,10 @@ export function buildProcedureLeafReplayCurrentStateRequest(input: {
 }): CompanionProcedureReplayCurrentStateRequest {
   const { attestation } = input;
   const directSuccess = 'successGate' in attestation;
-  const observation = directSuccess
-    ? attestation.successGate.observations[0]
-    : attestation.recoveryReport?.observations[0];
+  const observations = directSuccess
+    ? attestation.successGate.observations
+    : attestation.recoveryReport?.observations;
+  const observation = observations?.[0];
   const terminalReport = directSuccess ? attestation.report : attestation.recoveryReport;
   const terminalCheckpoint = terminalReport?.nativeUndoCheckpoint;
   const checkpointBacked = directSuccess
@@ -2650,6 +3906,7 @@ export function buildProcedureLeafReplayCurrentStateRequest(input: {
   if (
     !checkpointBacked ||
     attestation.verificationScope.currentHostStateAfterReport !== 'not_verified' ||
+    observations === undefined ||
     observation === undefined ||
     terminalReport === null ||
     terminalCheckpoint === undefined ||
@@ -2687,7 +3944,10 @@ export function buildProcedureLeafReplayCurrentStateRequest(input: {
     },
     expectedObservation: {
       kind: observation.kind,
-      contentSha256: computeProcedureLeafReplayObservationContentSha256(observation),
+      contentSha256:
+        observations.length === 1
+          ? computeProcedureLeafReplayObservationContentSha256(observation)
+          : computeProtocolCanonicalJsonSha256(observations),
     },
     requestedAt: input.requestedAt,
   };
@@ -2702,10 +3962,10 @@ export function buildProcedureLeafReplayCurrentStateVerification(input: {
   readonly recordedAt: string;
 }): ProcedureLeafReplayCurrentStateVerification {
   const { attestation, request, report, reportReceipt } = input;
-  const baselineObservation =
+  const baselineObservations =
     'successGate' in attestation
-      ? attestation.successGate.observations[0]
-      : attestation.recoveryReport?.observations[0];
+      ? attestation.successGate.observations
+      : attestation.recoveryReport?.observations;
   const expectedRequest = buildProcedureLeafReplayCurrentStateRequest({
     attestation,
     verificationId: request.verificationId,
@@ -2753,12 +4013,23 @@ export function buildProcedureLeafReplayCurrentStateVerification(input: {
     report.artifactAttestation === null &&
     report.error === null;
   const observation = report.observations[0];
+  const observationContent = report.observations.length === 1 ? observation : report.observations;
   const observationMatches =
-    report.observations.length === 1 &&
-    observation?.kind === request.expectedObservation.kind &&
-    observation?.satisfied === true &&
-    baselineObservation !== undefined &&
-    sameCanonicalValue(observation, baselineObservation);
+    report.observations.length >= 1 &&
+    report.observations.length <= 8 &&
+    report.observations.every(
+      (candidate) =>
+        candidate.kind === request.expectedObservation.kind && candidate.satisfied === true,
+    ) &&
+    baselineObservations !== undefined &&
+    sameCanonicalValue(report.observations, baselineObservations) &&
+    observationContent !== undefined &&
+    (report.observations.length === 1
+      ? computeProcedureLeafReplayObservationContentSha256(
+          procedureLeafReplayObservationSchema.parse(observation),
+        )
+      : computeProtocolCanonicalJsonSha256(observationContent)) ===
+      request.expectedObservation.contentSha256;
   const checkpoint = report.nativeUndoCheckpoint;
   const checkpointMatches =
     checkpoint !== undefined &&

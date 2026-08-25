@@ -822,6 +822,12 @@ const javascript = `(() => {
     const descriptors = [];
     if (node.action) descriptors.push({ kind: 'action', nodeId: node.id, label: 'Action · ' + node.action.name });
     node.semanticOperations.forEach((operation) => descriptors.push({ kind: 'semantic', nodeId: node.id, operationId: operation.id, label: '语义 · ' + operation.semanticAction }));
+    (node.menuCandidates || []).forEach((candidate) => {
+      candidate.operations.forEach((operation) => descriptors.push({
+        kind: 'menu_candidate', nodeId: node.id, trackId: candidate.id, operationId: operation.id,
+        label: 'MENU CANDIDATE ' + String(operation.order).padStart(2, '0') + ' · ' + operation.path.join(' → ')
+      }));
+    });
     [['menu', node.menuTracks], ['shortcut', node.shortcutTracks], ['mcp', node.mcpTracks]].forEach((pair) => {
       const modality = pair[0];
       pair[1].filter((track) => track.availability === 'available').forEach((track) => {
@@ -978,9 +984,28 @@ const javascript = `(() => {
         fields.append(structureInput('语义动作', operation.semanticAction, 'semantic-action', node.id, operation.id, semanticOperationExistedAtLoad(node.id, operation.id)), structureInput('描述', operation.description, 'semantic-description', node.id, operation.id, false));
         row.append(fields); semanticList.append(row);
       }); panel.append(semanticList);
+      renderMenuCandidateControls(panel, node);
       ['menu', 'shortcut', 'mcp'].forEach((modality) => renderTrackControls(panel, node, modality));
     }
     return panel;
+  }
+
+  function renderMenuCandidateControls(panel, node) {
+    if (!node.menuCandidates || node.menuCandidates.length === 0) return;
+    const heading = document.createElement('h3'); heading.textContent = 'MENU CANDIDATE · 仅供引导'; panel.append(heading);
+    const warning = document.createElement('p'); warning.className = 'muted';
+    warning.textContent = 'CANDIDATE ONLY · native in-place path · no managed receipt/replacement；候选轨迹只读，参数由 Action 和目录投影同步。';
+    panel.append(warning);
+    const list = document.createElement('div'); list.className = 'structure-list';
+    node.menuCandidates.forEach((candidate) => {
+      list.append(structureRow(candidate.title, candidate.id + ' · ' + candidate.executionAuthority + ' · ' + candidate.reason, []));
+      candidate.operations.forEach((operation) => {
+        const ordinal = String(operation.order).padStart(2, '0');
+        const parameters = Object.keys(operation.parameters).length === 0 ? '无参数' : JSON.stringify(operation.parameters);
+        list.append(structureRow(ordinal + ' · ' + operation.path.join(' → '), operation.id + ' · ' + parameters, []));
+      });
+    });
+    panel.append(list);
   }
 
   function renderTrackControls(panel, node, modality) {
@@ -1178,6 +1203,11 @@ const javascript = `(() => {
     if (state.selected.kind === 'action') return node.action && node.action.arguments;
     if (state.selected.kind === 'semantic') {
       const operation = node.semanticOperations.find((item) => item.id === state.selected.operationId);
+      return operation && operation.parameters;
+    }
+    if (state.selected.kind === 'menu_candidate') {
+      const candidate = (node.menuCandidates || []).find((item) => item.id === state.selected.trackId);
+      const operation = candidate && candidate.operations.find((item) => item.id === state.selected.operationId);
       return operation && operation.parameters;
     }
     const collection = state.selected.kind === 'menu' ? node.menuTracks : state.selected.kind === 'shortcut' ? node.shortcutTracks : node.mcpTracks;

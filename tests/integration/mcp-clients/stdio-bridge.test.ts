@@ -41,23 +41,44 @@ describe('Claude Desktop stdio bridge', () => {
       { name: 'stdio-bridge-test', version: '0.1.0' },
       { versionNegotiation: { mode: 'auto' } },
     );
+    const stderrChunks: Buffer[] = [];
+    transport.stderr?.on('data', (chunk: Buffer | string) => {
+      stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    let stage = 'connect';
 
     try {
-      await client.connect(transport);
-      expect(client.getProtocolEra()).toBe('modern');
-      expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
-      expect(client.getInstructions()).toContain('Guide proposals never permit host execution');
-      const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toContain('operatingline.health');
-      const health = await client.callTool({ name: 'operatingline.health', arguments: {} });
-      expect(health.isError).not.toBe(true);
-      expect(health.content).toEqual([
-        expect.objectContaining({ type: 'text', text: expect.stringContaining('"phase":"ready"') }),
-      ]);
-      const prompts = await client.listPrompts();
-      expect(prompts.prompts.map((prompt) => prompt.name)).toContain(
-        'operatingline.plan_and_propose',
-      );
+      try {
+        await client.connect(transport);
+        stage = 'protocol negotiation assertions';
+        expect(client.getProtocolEra()).toBe('modern');
+        expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
+        expect(client.getInstructions()).toContain('Guide proposals never permit host execution');
+        stage = 'tools/list';
+        const tools = await client.listTools();
+        expect(Buffer.byteLength(JSON.stringify(tools), 'utf8')).toBeLessThan(10 * 1024 * 1024);
+        expect(tools.tools.map((tool) => tool.name)).toContain('operatingline.health');
+        stage = 'tools/call operatingline.health';
+        const health = await client.callTool({ name: 'operatingline.health', arguments: {} });
+        expect(health.isError).not.toBe(true);
+        expect(health.content).toEqual([
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('"phase":"ready"'),
+          }),
+        ]);
+        stage = 'prompts/list';
+        const prompts = await client.listPrompts();
+        expect(prompts.prompts.map((prompt) => prompt.name)).toContain(
+          'operatingline.plan_and_propose',
+        );
+      } catch (error) {
+        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
+        throw new Error(
+          `stdio bridge failed during ${stage}${stderr === '' ? '' : `\nchild stderr:\n${stderr}`}`,
+          { cause: error },
+        );
+      }
     } finally {
       await client.close();
     }

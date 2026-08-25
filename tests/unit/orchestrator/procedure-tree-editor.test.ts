@@ -57,6 +57,42 @@ describe('procedure tree editor diff', () => {
     ]);
   });
 
+  it('diffs menu candidates and their operations by stable id', () => {
+    const before = fixture();
+    const after = structuredClone(before);
+    const candidate = {
+      id: 'menu.candidate.test',
+      modality: 'menu' as const,
+      projection: 'candidate_only' as const,
+      equivalence: 'not_equivalent_to_managed_action' as const,
+      executionAuthority: 'none' as const,
+      title: 'Candidate menu path',
+      reason: 'Native in-place behavior is not the managed action.',
+      preconditions: [{ kind: 'mode' as const, label: 'Mode', value: 'EDIT_MESH' }],
+      operations: [
+        {
+          id: 'candidate.configure',
+          order: 1,
+          semanticRefs: ['semantic.create'],
+          description: 'Configure a candidate-only native value.',
+          evidenceRefs: [],
+          intent: 'configure' as const,
+          target: { kind: 'control' as const, hostId: 'mesh.test.value' },
+          path: ['Adjust Last Operation', 'Value'],
+          parameters: { value: 2 },
+        },
+      ],
+      omittedActionArguments: [],
+    };
+    leaf(before).menuCandidates = [structuredClone(candidate)];
+    leaf(after).menuCandidates = [structuredClone(candidate)];
+    leaf(after).menuCandidates![0]!.operations[0]!.parameters['value'] = 3;
+
+    expect(diffProcedureTrees(before, after).map((entry) => entry.path)).toEqual([
+      '$.nodes[id="snowman.head.eyes.left"].menuCandidates[id="menu.candidate.test"].operations[id="candidate.configure"].parameters.value',
+    ]);
+  });
+
   it('rejects unsafe object keys before emitting a stable diff path', () => {
     const before = fixture();
     const after = structuredClone(before);

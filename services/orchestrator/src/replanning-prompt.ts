@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 import {
   plannerReplanDraftSchema,
-  replanningPromptContextSchema,
+  projectReplanningPromptContextForProvider,
+  replanningSourceContextSchema,
   replanningPromptFormatVersion,
   replanningPromptPacketSchema,
   type ReplanningPromptContext,
@@ -28,10 +29,11 @@ const capabilityCoverageInstruction =
 export function buildReplanningPromptPacket(
   contextInput: ReplanningPromptContext,
 ): ReplanningPromptPacket {
-  const context = replanningPromptContextSchema.parse(contextInput);
-  if (context.revisionRequest.revisionThread === undefined) {
+  const sourceContext = replanningSourceContextSchema.parse(contextInput);
+  if (sourceContext.revisionRequest.revisionThread === undefined) {
     throw new Error('A provider replan prompt requires a protocol 1.1 revision thread');
   }
+  const context = projectReplanningPromptContextForProvider(sourceContext);
   const capabilityAware = context.catalog.semanticCapabilities !== undefined;
   const baseInstructions = capabilityAware
     ? [

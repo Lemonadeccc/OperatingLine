@@ -11,7 +11,21 @@ import {
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import {
+  armatureLeafOperationIds,
+  bevelModifierLeafOperationIds,
   canonicalizeProtocolJsonValue,
+  editBevelLeafOperationIds,
+  editExtrudeRegionLeafOperationIds,
+  editInsetLeafOperationIds,
+  editTriangulateLeafOperationIds,
+  editPokeLeafOperationIds,
+  lightTrailsLeafOperationIds,
+  materialPaletteLeafOperationIds,
+  mirrorLeafOperationIds,
+  poseAnimationLeafOperationIds,
+  singleMaterialLeafOperationIds,
+  solidifyLeafOperationIds,
+  skinWeightsLeafOperationIds,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureTreeSchema,
@@ -121,6 +135,269 @@ function icosphereCandidate(
     parameters: { resourceId: 'tutorial.icosphere.detail' },
   };
   return tree;
+}
+
+function transformGeometryCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Transform Geometry candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.geometry_nodes.create_transform',
+    arguments: {
+      targetId: 'tutorial.transform.target',
+      modifierId: 'tutorial.transform.modifier',
+      modifierName: 'OperatingLine.Transform Modifier',
+      nodeGroupId: 'tutorial.transform.node_group',
+      nodeGroupName: 'OperatingLine.Transform Geometry',
+      translation: [1, 2, 3],
+      rotation: [0.1, 0.2, 0.3],
+      scale: [1.5, 2, 2.5],
+    },
+  };
+  leaf.semanticOperations = [
+    {
+      id: 'semantic.transform_geometry',
+      order: 1,
+      semanticAction: 'node.transform_geometry',
+      description: 'Configure the accepted Transform Geometry values.',
+      parameters: { translation: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      evidenceRefs: ['evidence.prompt'],
+    },
+  ];
+  return procedureAuthoringCandidateTreeSchema.parse(tree);
+}
+
+function lightTrailsCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Light Trails candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.geometry_nodes.create_light_trails',
+    arguments: {
+      targetId: 'tutorial.light_trails.target',
+      modifierId: 'tutorial.light_trails.modifier',
+      modifierName: 'OperatingLine.Light Trails Modifier',
+      nodeGroupId: 'tutorial.light_trails.node_group',
+      nodeGroupName: 'OperatingLine.Light Trails',
+      trailCount: 9,
+      pointsPerTrail: 48,
+      tileLength: 12,
+      trailSpacing: 0.4,
+      noiseScale: 1.75,
+      noiseDetail: 3,
+      noiseRoughness: 0.55,
+      noiseSeed: 8,
+      height: 1.2,
+      profileSides: 4,
+      profileRadius: 0.025,
+      tileRepeatCount: 3,
+    },
+  };
+  leaf.title = 'Create a procedural Light Trails graph';
+  leaf.intent = 'Build the accepted fixed-topology Light Trails node graph without baking.';
+  const semanticParameters: Record<string, Record<string, unknown>> = {
+    'node.light_trails.half_tile_line': { tileLength: 0 },
+    'node.light_trails.trail_resolution': { pointsPerTrail: 0 },
+    'node.light_trails.trail_rows': { trailCount: 0, trailSpacing: 0 },
+    'node.light_trails.terrain_noise': {
+      noiseScale: 0,
+      noiseDetail: 0,
+      noiseRoughness: 0,
+      noiseSeed: 0,
+    },
+    'node.light_trails.scale_height': { height: 0 },
+    'node.light_trails.trail_profile': { profileSides: 0, profileRadius: 0 },
+    'node.light_trails.loop_tiles': { tileRepeatCount: 0 },
+  };
+  leaf.semanticOperations = Object.entries(semanticParameters).map(
+    ([semanticAction, parameters], index) => ({
+      id: `semantic.light_trails.${index + 1}`,
+      order: index + 1,
+      semanticAction,
+      description: `Configure ${semanticAction}.`,
+      parameters,
+      evidenceRefs: ['evidence.prompt'],
+    }),
+  );
+  return procedureAuthoringCandidateTreeSchema.parse(tree);
+}
+
+function poseAnimationCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected pose animation candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.animation.create_pose_keyframes',
+    arguments: {
+      actionId: 'tutorial.pose.action',
+      actionName: 'OperatingLine.PoseAction',
+      armatureId: 'tutorial.pose.rig',
+      interpolation: 'LINEAR',
+      extrapolation: 'CONSTANT',
+      keyframes: [
+        {
+          frame: 1,
+          poses: [
+            { boneName: 'OperatingLine.Root', rotationEuler: [0, 0, 0] },
+            { boneName: 'OperatingLine.Tip', rotationQuaternion: [1, 0, 0, 0] },
+          ],
+        },
+        {
+          frame: 20,
+          poses: [
+            { boneName: 'OperatingLine.Root', rotationEuler: [0, 0.25, 0] },
+            {
+              boneName: 'OperatingLine.Tip',
+              rotationQuaternion: [0.968912421710645, 0, 0.247403959254523, 0],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  leaf.semanticOperations = [
+    {
+      id: 'semantic.pose.create_action',
+      order: 1,
+      semanticAction: 'semantic.create_pose_action',
+      description: 'Create the exact managed Action.',
+      parameters: { actionName: '' },
+      evidenceRefs: ['evidence.prompt'],
+    },
+    {
+      id: 'semantic.pose.keyframes',
+      order: 2,
+      semanticAction: 'operator.insert_keyframe',
+      description: 'Insert the exact per-bone transform keyframes.',
+      parameters: { keyframes: [] },
+      evidenceRefs: ['evidence.prompt'],
+    },
+    {
+      id: 'semantic.pose.interpolation',
+      order: 3,
+      semanticAction: 'control.pose_interpolation',
+      description: 'Set interpolation on every authored key.',
+      parameters: { interpolation: '' },
+      evidenceRefs: ['evidence.prompt'],
+    },
+    {
+      id: 'semantic.pose.extrapolation',
+      order: 4,
+      semanticAction: 'control.pose_extrapolation',
+      description: 'Set extrapolation on every authored curve.',
+      parameters: { extrapolation: '' },
+      evidenceRefs: ['evidence.prompt'],
+    },
+  ];
+  return procedureAuthoringCandidateTreeSchema.parse(tree);
+}
+
+function armatureCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected armature candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.rig.create_armature',
+    arguments: {
+      armatureId: 'tutorial.armature.rig',
+      objectName: 'OperatingLine.ArmatureRig',
+      dataName: 'OperatingLine.ArmatureRigData',
+      collectionId: 'snowman.collection',
+      bones: [
+        {
+          boneName: 'OperatingLine.Root',
+          head: [0, 0, 0],
+          tail: [0, 0, 1],
+          parentName: null,
+        },
+        {
+          boneName: 'OperatingLine.Tip',
+          head: [0, 0, 1],
+          tail: [0.25, 0, 2],
+          parentName: 'OperatingLine.Root',
+        },
+      ],
+      bindings: [{ targetId: 'tutorial.eye.left', boneName: 'OperatingLine.Tip' }],
+    },
+  };
+  leaf.semanticOperations = [
+    {
+      id: 'semantic.armature.create',
+      order: 1,
+      semanticAction: 'menu.add_armature',
+      description: 'Create and name the accepted armature.',
+      parameters: { objectName: '', dataName: '' },
+      evidenceRefs: ['evidence.prompt'],
+    },
+    {
+      id: 'semantic.armature.bones',
+      order: 2,
+      semanticAction: 'mode.edit_bones',
+      description: 'Create the exact ordered bone hierarchy.',
+      parameters: { bones: [] },
+      evidenceRefs: ['evidence.prompt'],
+    },
+    {
+      id: 'semantic.armature.bindings',
+      order: 3,
+      semanticAction: 'semantic.rigid_parent',
+      description: 'Bind the accepted targets to their exact bones.',
+      parameters: { bindings: [] },
+      evidenceRefs: ['evidence.prompt'],
+    },
+  ];
+  return procedureAuthoringCandidateTreeSchema.parse(tree);
+}
+
+function skinWeightsCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Skin Weights candidate leaf');
+  const weights = [
+    {
+      vertexIndex: 0,
+      influences: [{ boneName: 'OperatingLine.Root', weight: 1 }],
+    },
+    {
+      vertexIndex: 1,
+      influences: [{ boneName: 'OperatingLine.Tip', weight: 1 }],
+    },
+  ];
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.rig.bind_skin_weights',
+    arguments: {
+      targetId: 'tutorial.skin.target',
+      armatureId: 'tutorial.skin.rig',
+      modifierId: 'tutorial.skin.modifier',
+      modifierName: 'OperatingLine.SkinArmature',
+      preserveVolume: true,
+      weights,
+    },
+  };
+  leaf.semanticOperations = [
+    {
+      id: 'semantic.skin.weights',
+      order: 1,
+      semanticAction: 'semantic.normalized_weights',
+      description: 'Assign the exact normalized per-vertex weights.',
+      parameters: { weights: [] },
+      evidenceRefs: ['evidence.prompt'],
+    },
+    {
+      id: 'semantic.skin.modifier',
+      order: 2,
+      semanticAction: 'semantic.armature_modifier',
+      description: 'Create and name the exact Armature modifier.',
+      parameters: { preserveVolume: false, modifierName: '' },
+      evidenceRefs: ['evidence.prompt'],
+    },
+  ];
+  return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
 function subdivideCandidate(
@@ -339,6 +616,183 @@ function solidifyCandidate(): ProcedureAuthoringCandidateTree {
   return tree;
 }
 
+function bevelModifierCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Bevel Modifier candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_bevel',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.bevel',
+      modifierName: 'OperatingLine.Cube.Bevel',
+      width: 0.25,
+      segments: 3,
+      angleLimit: Math.PI / 3,
+    },
+  };
+  leaf.title = 'Add a bounded Bevel modifier';
+  leaf.intent = 'Add a managed Bevel modifier with exact width, segments, and angle limit.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'add_bevel_modifier',
+    description: 'Add one Bevel modifier to the accepted Cube.',
+    parameters: { width: 0.25, segments: 3, angleLimit: Math.PI / 3 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Object Mode modifier target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Track the managed Bevel modifier identity and name.',
+    parameters: {
+      modifierId: 'tutorial.cube.bevel',
+      modifierName: 'OperatingLine.Cube.Bevel',
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.bevel',
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'modifier_ready',
+    parameters: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.bevel',
+      modifierType: 'BEVEL',
+      width: 0.25,
+      segments: 3,
+      angleLimit: Math.PI / 3,
+    },
+  };
+  return tree;
+}
+
+function singleMaterialCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Single Material candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.material.create_and_assign',
+    arguments: {
+      materialId: 'tutorial.material.snow',
+      materialName: 'OperatingLine.Snow',
+      targets: ['tutorial.head', 'tutorial.body'],
+      baseColor: [0.82, 0.9, 1, 1],
+      roughness: 0.35,
+      metallic: 0.1,
+    },
+  };
+  leaf.title = 'Create and assign one bounded material';
+  leaf.intent = 'Create one managed Principled surface and assign it to both accepted targets.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_principled_material',
+    description: 'Create one owned Principled material.',
+    parameters: {
+      materialId: 'tutorial.material.snow',
+      materialName: 'OperatingLine.Snow',
+    },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    semanticAction: 'set_principled_surface',
+    description: 'Set the exact accepted surface values.',
+    parameters: {
+      baseColor: [0.82, 0.9, 1, 1],
+      roughness: 0.35,
+      metallic: 0.1,
+    },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    semanticAction: 'assign_material_targets',
+    description: 'Assign the material to both targets in accepted order.',
+    parameters: { targets: ['tutorial.head', 'tutorial.body'] },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Head' },
+    { kind: 'object', objectName: 'OperatingLine.Body' },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'material_assigned',
+    parameters: {
+      materialId: 'tutorial.material.snow',
+      targets: ['tutorial.head', 'tutorial.body'],
+    },
+  };
+  return tree;
+}
+
+function materialPaletteCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Material Palette candidate leaf');
+  const materials = [
+    {
+      materialId: 'tutorial.material.eyes',
+      materialName: 'OperatingLine.Eyes',
+      targets: ['tutorial.eye.left', 'tutorial.eye.right'],
+      baseColor: [0.04, 0.08, 0.14, 1],
+      roughness: 0.31,
+      metallic: 0.17,
+    },
+    {
+      materialId: 'tutorial.material.body',
+      materialName: 'OperatingLine.Body',
+      targets: ['tutorial.body'],
+      baseColor: [0.72, 0.18, 0.09, 1],
+      roughness: 0.66,
+      metallic: 0.02,
+    },
+  ];
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.material.create_palette_and_assign',
+    arguments: { materials },
+  };
+  leaf.title = 'Create and assign an ordered material palette';
+  leaf.intent = 'Create two managed Principled surfaces and assign each accepted target once.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_principled_palette',
+    description: 'Create both owned materials in accepted order.',
+    parameters: { materials },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    semanticAction: 'set_principled_palette_surfaces',
+    description: 'Configure every accepted nested surface value in order.',
+    parameters: { materials },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    semanticAction: 'assign_material_palette_targets',
+    description: 'Assign globally unique targets in accepted nested order.',
+    parameters: { materials },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.EyeLeft' },
+    { kind: 'object', objectName: 'OperatingLine.Body' },
+  ];
+  leaf.expectedObservations = materials.map((material) => ({
+    kind: 'material_assigned' as const,
+    parameters: {
+      materialId: material.materialId,
+      targets: [material.targets[0]!],
+    },
+  }));
+  return tree;
+}
+
 function editBevelCandidate(): ProcedureAuthoringCandidateTree {
   const tree = candidate();
   const leaf = tree.nodes.find((node) => node.kind === 'leaf');
@@ -426,6 +880,100 @@ function editInsetCandidate(): ProcedureAuthoringCandidateTree {
     parameters: {
       targetId: 'tutorial.cube',
       resultMeshId: 'tutorial.cube.inset.mesh',
+    },
+  };
+  return tree;
+}
+
+function editTriangulateCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Edit Mode Triangulate candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_triangulate',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.triangulated.mesh',
+      resultMeshName: 'OperatingLine.Cube.Triangulated',
+    },
+  };
+  leaf.title = 'Triangulate every face of the accepted Cube in Edit Mode';
+  leaf.intent = 'Triangulate every Cube face with the fixed managed methods.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'triangulate_mesh_faces',
+    description: 'Triangulate every face of the accepted Cube.',
+    parameters: { quadMethod: 'FIXED', ngonMethod: 'EAR_CLIP' },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Triangulated' },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.quads_convert_to_tris' },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'mesh_triangulated',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.triangulated.mesh',
+    },
+  };
+  return tree;
+}
+
+function editExtrudeRegionCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Extrude Region candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_extrude_region',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.extruded.mesh',
+      resultMeshName: 'OperatingLine.Cube.Extruded',
+      polygonIndices: [1],
+      translation: [0, 0, 1],
+    },
+  };
+  leaf.title = 'Extrude one accepted Cube face in Edit Mode';
+  leaf.intent = 'Extrude Cube face 1 by the exact accepted local-space translation.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'extrude_mesh_face_region',
+    description: 'Extrude the accepted connected face region.',
+    parameters: { polygonIndices: [1], translation: [0, 0, 1] },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Extruded' },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.extrude_region_move' },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'mesh_region_extruded',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.extruded.mesh',
+      polygonIndices: [1],
+      translation: [0, 0, 1],
     },
   };
   return tree;
@@ -1605,7 +2153,7 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
-  it('materializes the exact Edit Mode Subdivide candidate shortcut and preserves managed IDs only on the action', () => {
+  it('materializes the non-executable Edit Mode Subdivide menu candidate with concrete values', () => {
     const input = subdivideCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -1618,8 +2166,8 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Subdivide leaf');
     }
 
-    expect(result.formatVersion).toBe('1.4.0');
-    expect(result.tree.formatVersion).toBe('1.1.0');
+    expect(result.formatVersion).toBe('1.6.0');
+    expect(result.tree.formatVersion).toBe('1.2.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
@@ -1645,6 +2193,90 @@ describe('procedure authoring materialization', () => {
           "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent executable menu track.",
       }),
     ]);
+    expect(leaf.menuCandidates).toHaveLength(1);
+    const menuCandidate = leaf.menuCandidates?.[0];
+    if (menuCandidate === undefined) throw new Error('expected Subdivide menu candidate');
+    expect(menuCandidate).toMatchObject({
+      id: 'blender.mesh.edit_subdivide.semantic.menu-candidate',
+      modality: 'menu',
+      projection: 'candidate_only',
+      equivalence: 'not_equivalent_to_managed_action',
+      executionAuthority: 'none',
+    });
+    expect(menuCandidate.operations.map(({ id, order }) => ({ id, order }))).toEqual([
+      { id: 'candidate.workspace_layout', order: 1 },
+      { id: 'candidate.use_accepted_active_mesh', order: 2 },
+      { id: 'candidate.enter_edit_mode', order: 3 },
+      { id: 'candidate.open_select_menu', order: 4 },
+      { id: 'candidate.select_all_mesh_elements', order: 5 },
+      { id: 'candidate.open_edge_menu', order: 6 },
+      { id: 'candidate.execute_subdivide', order: 7 },
+      { id: 'candidate.open_adjust_last_operation', order: 8 },
+      { id: 'candidate.set_number_of_cuts', order: 9 },
+      { id: 'candidate.set_smoothness', order: 10 },
+      { id: 'candidate.return_to_object_mode', order: 11 },
+    ]);
+    expect(menuCandidate.operations[4]).toMatchObject({
+      target: { kind: 'operator', hostId: 'mesh.select_all' },
+      path: ['Layout', '3D Viewport Header', 'Select', 'All'],
+      parameters: { action: 'SELECT' },
+    });
+    expect(menuCandidate.operations.slice(8, 10)).toMatchObject([
+      {
+        target: { kind: 'control', hostId: 'mesh.subdivide.number_cuts' },
+        path: ['Adjust Last Operation', 'Number of Cuts'],
+        parameters: { value: 2 },
+      },
+      {
+        target: { kind: 'control', hostId: 'mesh.subdivide.smoothness' },
+        path: ['Adjust Last Operation', 'Smoothness'],
+        parameters: { value: 0.25 },
+      },
+    ]);
+    expect(menuCandidate.omittedActionArguments.map(({ argumentName }) => argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+    ]);
+    expect(menuCandidate.nativeEvidence).toEqual({
+      kind: 'bounded_blender_ui_probe',
+      executorId: 'blender.mesh_edit_subdivide_candidate_menu_f9.event_simulate.v1',
+      hostVersions: ['4.5.3', '5.1.1'],
+      managedActionExecuted: false,
+      managedReceiptCreated: false,
+      managedReplacementMeshCreated: false,
+      nativeMutationKind: 'in_place_edit_mesh_subdivide',
+      operationIds: menuCandidate.operations.map((operation) => operation.id),
+      nativeUndoCheckpointRequired: true,
+      nativeUndoDepth: 4,
+      nativeRedoDepth: 4,
+    });
+    expect(
+      menuCandidate.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toEqual(expect.arrayContaining(['targetId', 'resultMeshId', 'resultMeshName']));
+    expect(leaf.parameterProjection).toMatchObject({
+      formatVersion: '1.1.0',
+      bindings: expect.arrayContaining([
+        expect.objectContaining({
+          actionArgument: 'cuts',
+          target: {
+            modality: 'menu_candidate',
+            trackId: menuCandidate.id,
+            operationId: 'candidate.set_number_of_cuts',
+            path: [{ kind: 'field', name: 'value' }],
+          },
+        }),
+        expect.objectContaining({
+          actionArgument: 'smooth',
+          target: {
+            modality: 'menu_candidate',
+            trackId: menuCandidate.id,
+            operationId: 'candidate.set_smoothness',
+            path: [{ kind: 'field', name: 'value' }],
+          },
+        }),
+      ]),
+    });
     const shortcutTrack = leaf.shortcutTracks[0];
     if (shortcutTrack?.availability !== 'available') {
       throw new Error('expected available Subdivide shortcut track');
@@ -1777,7 +2409,7 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
-  it('materializes only the exact accepted Mirror action through action-level MCP', () => {
+  it('materializes Mirror as exactly seven ordered fixed-tool MCP operations', () => {
     const input = mirrorCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -1788,7 +2420,7 @@ describe('procedure authoring materialization', () => {
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     if (leaf?.kind !== 'leaf') throw new Error('expected materialized Mirror leaf');
 
-    expect(result.formatVersion).toBe('1.4.0');
+    expect(result.formatVersion).toBe('1.5.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
@@ -1817,41 +2449,49 @@ describe('procedure authoring materialization', () => {
       availability: 'unavailable',
       reason: expect.stringContaining('Shift+A'),
     });
-    expect(leaf.mcpTracks).toEqual([
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected Mirror MCP track');
+    expect(track).toMatchObject({
+      id: 'blender.modifier.add_mirror.semantic.mcp',
+      title: 'Add a bounded Mirror modifier operation-level MCP projection',
+      preconditions: [],
+      modality: 'mcp',
+    });
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      mirrorLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.modifier.mirror.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
       {
-        id: 'blender.modifier.add_mirror.semantic.mcp',
-        availability: 'available',
-        title: 'Add a bounded Mirror modifier action-level MCP projection',
-        preconditions: [],
-        modality: 'mcp',
-        operations: [
-          expect.objectContaining({
-            id: 'blender.modifier.add_mirror.semantic.mcp.execute',
-            serverName: 'operating-line',
-            toolName: 'operatingline.blender.action.execute',
-            arguments: {
-              formatVersion: '1.0.0',
-              requestId: '$runtime.requestId',
-              replayId: '$runtime.replayId',
-              expectedState: '$runtime.expectedState',
-            },
-            argumentSource: 'accepted_leaf_action',
-            actionArguments: {
-              targetId: 'tutorial.cube',
-              modifierId: 'tutorial.cube.mirror',
-              modifierName: 'OperatingLine.Cube.Mirror',
-              axis: 'Y',
-            },
-            resultBinding: `${leaf.id}.companion_state_report`,
-          }),
-        ],
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.mirror',
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        modifierName: 'OperatingLine.Cube.Mirror',
+        axis: 'Y',
       },
     ]);
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
     expect(input).toEqual(inputSnapshot);
   });
 
-  it('materializes only the exact accepted Solidify action through action-level MCP', () => {
+  it('materializes Solidify as exactly four ordered fixed-tool MCP operations', () => {
     const input = solidifyCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -1862,7 +2502,7 @@ describe('procedure authoring materialization', () => {
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     if (leaf?.kind !== 'leaf') throw new Error('expected materialized Solidify leaf');
 
-    expect(result.formatVersion).toBe('1.4.0');
+    expect(result.formatVersion).toBe('1.5.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
@@ -1896,36 +2536,249 @@ describe('procedure authoring materialization', () => {
       availability: 'unavailable',
       reason: expect.stringContaining('accepted Solidify parameters'),
     });
-    expect(leaf.mcpTracks).toEqual([
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected Solidify MCP track');
+    expect(track).toMatchObject({
+      id: 'blender.modifier.add_solidify.semantic.mcp',
+      title: 'Add a bounded Solidify modifier operation-level MCP projection',
+      preconditions: [],
+      modality: 'mcp',
+    });
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      solidifyLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4]);
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.modifier.solidify.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
       {
-        id: 'blender.modifier.add_solidify.semantic.mcp',
-        availability: 'available',
-        title: 'Add a bounded Solidify modifier action-level MCP projection',
-        preconditions: [],
-        modality: 'mcp',
-        operations: [
-          expect.objectContaining({
-            id: 'blender.modifier.add_solidify.semantic.mcp.execute',
-            serverName: 'operating-line',
-            toolName: 'operatingline.blender.action.execute',
-            arguments: {
-              formatVersion: '1.0.0',
-              requestId: '$runtime.requestId',
-              replayId: '$runtime.replayId',
-              expectedState: '$runtime.expectedState',
-            },
-            argumentSource: 'accepted_leaf_action',
-            actionArguments: {
-              targetId: 'tutorial.cube',
-              modifierId: 'tutorial.cube.solidify',
-              modifierName: 'OperatingLine.Cube.Solidify',
-              thickness: 0.25,
-              offset: -0.5,
-            },
-            resultBinding: `${leaf.id}.companion_state_report`,
-          }),
-        ],
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.solidify',
       },
+      {},
+      {},
+      {
+        modifierName: 'OperatingLine.Cube.Solidify',
+        thickness: 0.25,
+        offset: -0.5,
+      },
+    ]);
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+  });
+
+  it('materializes Bevel Modifier as exactly four ordered fixed-tool MCP operations', () => {
+    const input = bevelModifierCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected materialized Bevel Modifier leaf');
+
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.modifier.add_bevel.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'materialized',
+      },
+    ]);
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'modifier_ready',
+        parameters: {
+          targetId: 'tutorial.cube',
+          modifierId: 'tutorial.cube.bevel',
+          modifierType: 'BEVEL',
+          width: 0.25,
+          segments: 3,
+          angleLimit: Math.PI / 3,
+        },
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: expect.stringContaining('managed modifier identity'),
+    });
+    expect(leaf.shortcutTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: expect.stringContaining('accepted Bevel Modifier parameters'),
+    });
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected Bevel Modifier MCP track');
+    expect(track).toMatchObject({
+      id: 'blender.modifier.add_bevel.semantic.mcp',
+      title: 'Add a bounded Bevel modifier operation-level MCP projection',
+      preconditions: [],
+      modality: 'mcp',
+    });
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      bevelModifierLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4]);
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.modifier.bevel.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.bevel',
+      },
+      {},
+      {},
+      {
+        modifierName: 'OperatingLine.Cube.Bevel',
+        width: 0.25,
+        segments: 3,
+        angleLimit: Math.PI / 3,
+      },
+    ]);
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+  });
+
+  it('materializes Single Material as exactly four ordered fixed-tool MCP operations', () => {
+    const input = singleMaterialCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected materialized Single Material leaf');
+
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.material.create_and_assign.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'materialized',
+      },
+    ]);
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'material_assigned',
+        parameters: {
+          materialId: 'tutorial.material.snow',
+          targets: ['tutorial.head', 'tutorial.body'],
+        },
+      },
+    ]);
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected Single Material MCP track');
+    expect(track).toMatchObject({
+      id: 'blender.material.create_and_assign.semantic.mcp',
+      title: 'Create and assign one Principled material operation-level MCP projection',
+      preconditions: [],
+      modality: 'mcp',
+    });
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      singleMaterialLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4]);
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.material.single.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+      { materialId: 'tutorial.material.snow' },
+      {},
+      {},
+      {
+        materialName: 'OperatingLine.Snow',
+        baseColor: [0.82, 0.9, 1, 1],
+        roughness: 0.35,
+        metallic: 0.1,
+        targets: ['tutorial.head', 'tutorial.body'],
+      },
+    ]);
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+  });
+
+  it('materializes Material Palette as one exact nested parameter operation and atomic assignment', () => {
+    const input = materialPaletteCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected materialized Material Palette leaf');
+
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.material.create_palette_and_assign.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'materialized',
+      },
+    ]);
+    expect(leaf.expectedObservations).toEqual(
+      inputSnapshot.nodes.find((node) => node.kind === 'leaf')?.expectedObservations,
+    );
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected Material Palette MCP track');
+    expect(track).toMatchObject({
+      id: 'blender.material.create_palette_and_assign.semantic.mcp',
+      title: 'Create and assign a Principled material palette operation-level MCP projection',
+      preconditions: [],
+      modality: 'mcp',
+    });
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      materialPaletteLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4]);
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.material.palette.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    const materials = materialPaletteCandidate().nodes.find((node) => node.kind === 'leaf')?.action
+      ?.arguments['materials'];
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+      {},
+      {},
+      { materials },
+      {},
     ]);
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
     expect(input).toEqual(inputSnapshot);
@@ -2140,7 +2993,7 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Edit Mode Bevel leaf');
     }
 
-    expect(result.formatVersion).toBe('1.4.0');
+    expect(result.formatVersion).toBe('1.5.0');
     expect(result.tree.formatVersion).toBe('1.1.0');
     expect(result.coverage).toEqual([
       {
@@ -2170,6 +3023,36 @@ describe('procedure authoring materialization', () => {
       availability: 'available',
       modality: 'mcp',
     });
+    const mcp = leaf.mcpTracks[0];
+    if (mcp?.availability !== 'available') {
+      throw new Error('expected available Edit Mode Bevel MCP track');
+    }
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editBevelLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(
+      mcp.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.mesh.edit-bevel-edges.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.beveled.mesh',
+      },
+      {},
+      {},
+      {},
+      { width: 0.2, segments: 3, profile: 0.6 },
+      { resultMeshName: 'OperatingLine.Cube.Beveled' },
+    ]);
     const shortcut = leaf.shortcutTracks[0];
     if (shortcut?.availability !== 'available') {
       throw new Error('expected available Edit Mode Bevel shortcut track');
@@ -2313,7 +3196,7 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Edit Mode Inset leaf');
     }
 
-    expect(result.formatVersion).toBe('1.4.0');
+    expect(result.formatVersion).toBe('1.5.0');
     expect(result.tree.formatVersion).toBe('1.1.0');
     expect(result.coverage).toEqual([
       {
@@ -2351,6 +3234,36 @@ describe('procedure authoring materialization', () => {
       availability: 'available',
       modality: 'mcp',
     });
+    const mcp = leaf.mcpTracks[0];
+    if (mcp?.availability !== 'available') {
+      throw new Error('expected available Edit Mode Inset MCP track');
+    }
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editInsetLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(
+      mcp.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.mesh.edit-inset-faces.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.inset.mesh',
+      },
+      {},
+      {},
+      {},
+      { thickness: 0.2, depth: 0.1 },
+      { resultMeshName: 'OperatingLine.Cube.Inset' },
+    ]);
     const shortcut = leaf.shortcutTracks[0];
     if (shortcut?.availability !== 'available') {
       throw new Error('expected available Edit Mode Inset shortcut track');
@@ -2471,6 +3384,150 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
+  it('materializes the exact six-step Edit Triangulate operation MCP rail', () => {
+    const input = editTriangulateCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Edit Mode Triangulate leaf');
+    }
+
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_triangulate.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'materialized',
+      },
+    ]);
+    expect(leaf.action.arguments).toEqual({
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.triangulated.mesh',
+      resultMeshName: 'OperatingLine.Cube.Triangulated',
+    });
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'mesh_triangulated',
+        parameters: {
+          targetId: 'tutorial.cube',
+          resultMeshId: 'tutorial.cube.triangulated.mesh',
+        },
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+    expect(leaf.shortcutTracks[0]).toMatchObject({ availability: 'unavailable' });
+    const mcp = leaf.mcpTracks[0];
+    if (mcp?.availability !== 'available') {
+      throw new Error('expected available Edit Mode Triangulate MCP track');
+    }
+    expect(mcp).toMatchObject({
+      id: 'blender.mesh.edit_triangulate.semantic.mcp',
+      modality: 'mcp',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editTriangulateLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+      { targetId: 'tutorial.cube', resultMeshId: 'tutorial.cube.triangulated.mesh' },
+      {},
+      {},
+      {},
+      {},
+      { resultMeshName: 'OperatingLine.Cube.Triangulated' },
+    ]);
+    expect(
+      mcp.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.mesh.edit-triangulate.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState',
+      ),
+    ).toBe(true);
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact six-step Extrude Region operation MCP rail with ordered selection and translation parameters', () => {
+    const input = editExtrudeRegionCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Extrude Region leaf');
+    }
+
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_extrude_region.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'materialized',
+      },
+    ]);
+    expect(leaf.action.arguments).toEqual({
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.extruded.mesh',
+      resultMeshName: 'OperatingLine.Cube.Extruded',
+      polygonIndices: [1],
+      translation: [0, 0, 1],
+    });
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'mesh_region_extruded',
+        parameters: {
+          targetId: 'tutorial.cube',
+          resultMeshId: 'tutorial.cube.extruded.mesh',
+          polygonIndices: [1],
+          translation: [0, 0, 1],
+        },
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+    expect(leaf.shortcutTracks[0]).toMatchObject({ availability: 'unavailable' });
+    const mcp = leaf.mcpTracks[0];
+    if (mcp?.availability !== 'available') {
+      throw new Error('expected available Extrude Region MCP track');
+    }
+    expect(mcp).toMatchObject({
+      id: 'blender.mesh.edit_extrude_region.semantic.mcp',
+      modality: 'mcp',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editExtrudeRegionLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+      { targetId: 'tutorial.cube', resultMeshId: 'tutorial.cube.extruded.mesh' },
+      {},
+      {},
+      { polygonIndices: [1] },
+      { translation: [0, 0, 1] },
+      { resultMeshName: 'OperatingLine.Cube.Extruded' },
+    ]);
+    expect(
+      mcp.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.mesh.edit-extrude-region.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState',
+      ),
+    ).toBe(true);
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
   it('materializes the exact Edit Mode Poke Faces search/F9 shortcut', () => {
     const input = editPokeCandidate();
     const inputSnapshot = structuredClone(input);
@@ -2484,7 +3541,7 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Edit Mode Poke leaf');
     }
 
-    expect(result).toMatchObject({ formatVersion: '1.4.0' });
+    expect(result).toMatchObject({ formatVersion: '1.5.0' });
     expect(result.tree.formatVersion).toBe('1.1.0');
     expect(result.coverage).toEqual([
       {
@@ -2516,6 +3573,36 @@ describe('procedure authoring materialization', () => {
       availability: 'available',
       modality: 'mcp',
     });
+    const mcp = leaf.mcpTracks[0];
+    if (mcp?.availability !== 'available') {
+      throw new Error('expected available Edit Mode Poke MCP track');
+    }
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editPokeLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.order)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(
+      mcp.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.mesh.edit-poke-faces.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(mcp.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.poked.mesh',
+      },
+      {},
+      {},
+      {},
+      { offset: 0.2 },
+      { resultMeshName: 'OperatingLine.Cube.Poked' },
+    ]);
     const shortcut = leaf.shortcutTracks[0];
     if (shortcut?.availability !== 'available') {
       throw new Error('expected available Edit Mode Poke shortcut track');
@@ -3714,5 +4801,377 @@ describe('procedure authoring materialization', () => {
         blenderInteractionCatalog,
       ),
     ).toThrow('action arguments violate blender.mesh.create_uv_sphere');
+  });
+
+  it('materializes Transform Geometry as exactly eleven ordered catalog-bound MCP operations', () => {
+    const result = materializeProcedureAuthoringCandidate(
+      transformGeometryCandidate(),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    expect(result.formatVersion).toBe('1.5.0');
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected Transform Geometry leaf');
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected operation MCP track');
+
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual([
+      'semantic.preflight_transform_geometry_resources',
+      'semantic.new_geometry_modifier',
+      'node.group_input',
+      'node.transform_geometry',
+      'projection.semantic.transform_geometry.translation',
+      'projection.semantic.transform_geometry.rotation',
+      'projection.semantic.transform_geometry.scale',
+      'node.group_output',
+      'semantic.connect_group_input_geometry_to_transform',
+      'semantic.connect_transform_geometry_to_group_output',
+      'semantic.verify_node_links',
+    ]);
+    expect(track.operations.map((operation) => operation.order)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    ]);
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.geometry-nodes.transform.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined,
+      ),
+    ).toBe(true);
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        targetId: 'tutorial.transform.target',
+        modifierId: 'tutorial.transform.modifier',
+        modifierName: 'OperatingLine.Transform Modifier',
+        nodeGroupId: 'tutorial.transform.node_group',
+        nodeGroupName: 'OperatingLine.Transform Geometry',
+      },
+      {},
+      {},
+      {},
+      { translation: [1, 2, 3] },
+      { rotation: [0.1, 0.2, 0.3] },
+      { scale: [1.5, 2, 2.5] },
+      {},
+      {},
+      {},
+      {},
+    ]);
+    expect(
+      track.operations.every((operation) =>
+        operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+  });
+
+  it('materializes Light Trails as exactly 54 ordered fixed-tool MCP operations', () => {
+    const result = materializeProcedureAuthoringCandidate(
+      lightTrailsCandidate(),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected Light Trails leaf');
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected operation MCP track');
+
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      lightTrailsLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual(
+      lightTrailsLeafOperationIds.map((_, index) => index + 1),
+    );
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.geometry-nodes.light-trails.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    const expectedParameters: Record<number, Record<string, unknown>> = {
+      0: {
+        targetId: 'tutorial.light_trails.target',
+        modifierId: 'tutorial.light_trails.modifier',
+        modifierName: 'OperatingLine.Light Trails Modifier',
+        nodeGroupId: 'tutorial.light_trails.node_group',
+        nodeGroupName: 'OperatingLine.Light Trails',
+      },
+      4: { tileLength: 12 },
+      6: { pointsPerTrail: 48 },
+      8: { trailCount: 9 },
+      9: { trailSpacing: 0.4 },
+      14: { noiseScale: 1.75 },
+      15: { noiseDetail: 3 },
+      16: { noiseRoughness: 0.55 },
+      17: { noiseSeed: 8 },
+      20: { height: 1.2 },
+      26: { profileSides: 4 },
+      27: { profileRadius: 0.025 },
+      30: { tileRepeatCount: 3 },
+    };
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual(
+      lightTrailsLeafOperationIds.map((_, index) => expectedParameters[index] ?? {}),
+    );
+  });
+
+  it('materializes exact structured pose keyframes into the visible semantic tree', () => {
+    const result = materializeProcedureAuthoringCandidate(
+      poseAnimationCandidate(),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected pose animation leaf');
+    }
+
+    expect(leaf.semanticOperations.map((operation) => operation.parameters)).toEqual([
+      { actionName: 'OperatingLine.PoseAction' },
+      { keyframes: leaf.action.arguments['keyframes'] },
+      { interpolation: 'LINEAR' },
+      { extrapolation: 'CONSTANT' },
+    ]);
+    expect(
+      leaf.parameterProjection?.bindings.map((binding) => ({
+        actionArgument: binding.actionArgument,
+        transform: binding.transform,
+        operationId: binding.target.operationId,
+      })),
+    ).toEqual([
+      {
+        actionArgument: 'actionName',
+        transform: 'identity',
+        operationId: 'semantic.pose.create_action',
+      },
+      {
+        actionArgument: 'keyframes',
+        transform: 'json_identity',
+        operationId: 'semantic.pose.keyframes',
+      },
+      {
+        actionArgument: 'interpolation',
+        transform: 'identity',
+        operationId: 'semantic.pose.interpolation',
+      },
+      {
+        actionArgument: 'extrapolation',
+        transform: 'identity',
+        operationId: 'semantic.pose.extrapolation',
+      },
+      {
+        actionArgument: 'actionId',
+        transform: 'identity',
+        operationId: 'blender.animation.create_pose_keyframes.semantic.mcp.01',
+      },
+      {
+        actionArgument: 'armatureId',
+        transform: 'identity',
+        operationId: 'blender.animation.create_pose_keyframes.semantic.mcp.01',
+      },
+      {
+        actionArgument: 'actionName',
+        transform: 'identity',
+        operationId: 'blender.animation.create_pose_keyframes.semantic.mcp.05',
+      },
+      {
+        actionArgument: 'keyframes',
+        transform: 'json_identity',
+        operationId: 'blender.animation.create_pose_keyframes.semantic.mcp.07',
+      },
+      {
+        actionArgument: 'interpolation',
+        transform: 'identity',
+        operationId: 'blender.animation.create_pose_keyframes.semantic.mcp.09',
+      },
+      {
+        actionArgument: 'extrapolation',
+        transform: 'identity',
+        operationId: 'blender.animation.create_pose_keyframes.semantic.mcp.11',
+      },
+    ]);
+    expect(leaf.menuTracks).toEqual([
+      expect.objectContaining({ availability: 'unavailable', modality: 'menu' }),
+    ]);
+    expect(leaf.shortcutTracks).toEqual([
+      expect.objectContaining({ availability: 'unavailable', modality: 'shortcut' }),
+    ]);
+    const mcpTrack = leaf.mcpTracks[0];
+    if (mcpTrack?.availability !== 'available') throw new Error('expected pose MCP track');
+    expect(mcpTrack.operations).toHaveLength(12);
+    expect(mcpTrack.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      poseAnimationLeafOperationIds,
+    );
+    expect(
+      mcpTrack.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.animation.pose-keyframes.execute-next',
+      ),
+    ).toBe(true);
+    expect(mcpTrack.operations.map((operation) => operation.operationParameters)).toEqual(
+      poseAnimationLeafOperationIds.map((_, index) => {
+        const expected: Record<number, Record<string, unknown>> = {
+          0: {
+            actionId: leaf.action!.arguments['actionId'],
+            armatureId: leaf.action!.arguments['armatureId'],
+          },
+          4: { actionName: leaf.action!.arguments['actionName'] },
+          6: { keyframes: leaf.action!.arguments['keyframes'] },
+          8: { interpolation: leaf.action!.arguments['interpolation'] },
+          10: { extrapolation: leaf.action!.arguments['extrapolation'] },
+        };
+        return expected[index] ?? {};
+      }),
+    );
+    expect(() => validateProcedureTree(result.tree)).not.toThrow();
+  });
+
+  it('materializes Armature as exactly nine ordered fixed-tool MCP operations', () => {
+    const result = materializeProcedureAuthoringCandidate(
+      armatureCandidate(),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected armature leaf');
+    }
+
+    expect(leaf.semanticOperations.map((operation) => operation.parameters)).toEqual([
+      {
+        objectName: leaf.action.arguments['objectName'],
+        dataName: leaf.action.arguments['dataName'],
+      },
+      { bones: leaf.action.arguments['bones'] },
+      { bindings: leaf.action.arguments['bindings'] },
+    ]);
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected Armature MCP track');
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      armatureLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual(
+      armatureLeafOperationIds.map((_, index) => index + 1),
+    );
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.rig.armature.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        armatureId: leaf.action.arguments['armatureId'],
+        collectionId: leaf.action.arguments['collectionId'],
+      },
+      {},
+      { objectName: leaf.action.arguments['objectName'] },
+      { dataName: leaf.action.arguments['dataName'] },
+      {},
+      { bones: leaf.action.arguments['bones'] },
+      {},
+      { bindings: leaf.action.arguments['bindings'] },
+      {},
+    ]);
+    expect(() => validateProcedureTree(result.tree)).not.toThrow();
+  });
+
+  it('materializes Skin Weights as exactly nine ordered fixed-tool MCP operations', () => {
+    const result = materializeProcedureAuthoringCandidate(
+      skinWeightsCandidate(),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected Skin Weights leaf');
+    }
+
+    expect(leaf.semanticOperations.map((operation) => operation.parameters)).toEqual([
+      { weights: leaf.action.arguments['weights'] },
+      {
+        preserveVolume: leaf.action.arguments['preserveVolume'],
+        modifierName: leaf.action.arguments['modifierName'],
+      },
+    ]);
+    const track = leaf.mcpTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected Skin Weights MCP track');
+    expect(track.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      skinWeightsLeafOperationIds,
+    );
+    expect(track.operations.map((operation) => operation.order)).toEqual(
+      skinWeightsLeafOperationIds.map((_, index) => index + 1),
+    );
+    expect(
+      track.operations.every(
+        (operation) =>
+          operation.toolName === 'operatingline.blender.rig.skin-weights.execute-next' &&
+          Object.keys(operation.arguments).join(',') ===
+            'formatVersion,requestId,replayId,expectedState' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
+    expect(track.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        targetId: leaf.action.arguments['targetId'],
+        armatureId: leaf.action.arguments['armatureId'],
+        modifierId: leaf.action.arguments['modifierId'],
+      },
+      {},
+      {},
+      {},
+      { weights: leaf.action.arguments['weights'] },
+      {},
+      { preserveVolume: leaf.action.arguments['preserveVolume'] },
+      { modifierName: leaf.action.arguments['modifierName'] },
+      {},
+    ]);
+    expect(() => validateProcedureTree(result.tree)).not.toThrow();
+  });
+
+  it.each([
+    ['reordered', (operations: Array<{ sourceOperationId: string }>) => operations.reverse()],
+    [
+      'duplicate',
+      (operations: Array<{ sourceOperationId: string }>) => {
+        operations[1]!.sourceOperationId = operations[0]!.sourceOperationId;
+      },
+    ],
+    [
+      'tampered source',
+      (operations: Array<{ sourceOperationId: string }>) => {
+        operations[10]!.sourceOperationId = 'semantic.execute_python';
+      },
+    ],
+  ])('rejects %s Transform Geometry MCP catalog operations', (_label, mutate) => {
+    const hostile = structuredClone(blenderInteractionCatalog);
+    const transform = hostile.recipes.find(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_transform',
+    );
+    const mcp = transform?.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('expected operation MCP declaration');
+    }
+    mutate(mcp.operations);
+    expect(() =>
+      materializeProcedureAuthoringCandidate(
+        transformGeometryCandidate(),
+        blenderActionCatalog,
+        hostile,
+      ),
+    ).toThrow('exact ordered Transform Geometry operation contract');
   });
 });

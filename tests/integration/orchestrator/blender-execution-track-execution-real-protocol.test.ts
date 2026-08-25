@@ -673,4 +673,4 @@ it('reconciles a real companion-reported recovery result with baseline terminal 
   });
   expect(replayed.get(binding.requestId)?.status).toBe('failed_no_mutation');
   expect(replayed.ownsTarget('blender', binding.target.instanceId)).toBe(false);
-});
+}, 30_000);

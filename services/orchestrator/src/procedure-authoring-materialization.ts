@@ -8,16 +8,21 @@ import {
   procedureAuthoringExtendedShortcutMaterializedTreeSchema,
   procedureAuthoringMaterializationExtendedShortcutFormatVersion,
   procedureAuthoringMaterializationMcpFormatVersion,
+  procedureAuthoringMaterializationOperationMcpFormatVersion,
+  procedureAuthoringMaterializationMenuCandidateFormatVersion,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializedTreeSchema,
   procedureAuthoringMcpMaterializedTreeSchema,
+  procedureAuthoringOperationMcpMaterializedTreeSchema,
+  procedureAuthoringMenuCandidateMaterializedTreeSchema,
   procedureParameterProjectionFormatVersion,
   projectProcedureParameter,
   procedureTreeExtendedShortcutFormatVersion,
   procedureTreeFormatVersion,
+  procedureTreeMenuCandidateFormatVersion,
   stableProcedureLeafOrder,
   validateActionArguments,
   validateActionCatalog,
@@ -30,6 +35,8 @@ import {
   type ProcedureAuthoringMaterializedTree,
   type ProcedureAuthoringExtendedShortcutMaterializedTree,
   type ProcedureAuthoringMcpMaterializedTree,
+  type ProcedureAuthoringOperationMcpMaterializedTree,
+  type ProcedureAuthoringMenuCandidateMaterializedTree,
   type ProcedureAuthoringMaterializationResult,
   type ProcedureLeafNode,
   type ProcedureParameterBinding,
@@ -48,11 +55,15 @@ export interface ProcedureAuthoringMaterialization {
     | typeof procedureAuthoringMaterializationOrderedMenuFormatVersion
     | typeof procedureAuthoringMaterializationFormatVersion
     | typeof procedureAuthoringMaterializationExtendedShortcutFormatVersion
-    | typeof procedureAuthoringMaterializationMcpFormatVersion;
+    | typeof procedureAuthoringMaterializationMcpFormatVersion
+    | typeof procedureAuthoringMaterializationOperationMcpFormatVersion
+    | typeof procedureAuthoringMaterializationMenuCandidateFormatVersion;
   readonly tree:
     | ProcedureAuthoringMaterializedTree
     | ProcedureAuthoringExtendedShortcutMaterializedTree
-    | ProcedureAuthoringMcpMaterializedTree;
+    | ProcedureAuthoringMcpMaterializedTree
+    | ProcedureAuthoringOperationMcpMaterializedTree
+    | ProcedureAuthoringMenuCandidateMaterializedTree;
   readonly coverage: MaterializationCoverage;
   readonly inputTreeContentSha256: string;
   readonly outputTreeContentSha256: string;
@@ -71,6 +82,7 @@ interface MaterializationParameterAssignment {
         readonly argumentName: string;
         readonly transform:
           | 'identity'
+          | 'json_identity'
           | 'uniform_vector3'
           | 'divide_by_two'
           | 'vector3_x'
@@ -258,7 +270,7 @@ function materializeParameters(
         `Ordered parameter ${assignment.name} references missing action argument ${source.argumentName}`,
       );
     }
-    if (source.transform === 'identity') {
+    if (source.transform === 'identity' || source.transform === 'json_identity') {
       defineParameter(assignment.name, structuredClone(argument));
       continue;
     }
@@ -302,7 +314,7 @@ function materializeParameters(
 
 function directParameterBinding(
   id: string,
-  modality: 'menu' | 'shortcut',
+  modality: 'menu' | 'menu_candidate' | 'shortcut' | 'mcp',
   trackId: string,
   operationId: string,
   assignment: MaterializationParameterAssignment,
@@ -333,17 +345,18 @@ function materializeParameterProjection(
 ): ProcedureParameterProjection | undefined {
   const declaration = recipe?.procedureMaterialization;
   const semantic = declaration?.semantic;
+  const menuCandidate = declaration?.menuCandidate;
   if (
     leaf.action === null ||
     recipe === undefined ||
     declaration === undefined ||
-    semantic === undefined
+    (semantic === undefined && menuCandidate === undefined)
   ) {
     return undefined;
   }
 
   const bindings: ProcedureParameterBinding[] = [];
-  for (const projection of semantic.projections) {
+  for (const projection of semantic?.projections ?? []) {
     const operations = leaf.semanticOperations.filter(
       (operation) => operation.semanticAction === projection.semanticAction,
     );
@@ -362,6 +375,22 @@ function materializeParameterProjection(
         path: structuredClone(projection.path),
       },
     });
+  }
+
+  if (menuCandidate !== undefined) {
+    const trackId = `${recipe.id}.menu-candidate`;
+    for (const operation of menuCandidate.operations) {
+      for (const assignment of operation.parameters) {
+        const binding = directParameterBinding(
+          `binding.menu_candidate.${operation.id}.${assignment.name}`,
+          'menu_candidate',
+          trackId,
+          operation.id,
+          assignment,
+        );
+        if (binding !== null) bindings.push(binding);
+      }
+    }
   }
 
   const menu = declaration.menu;
@@ -429,6 +458,24 @@ function materializeParameterProjection(
     }
   }
 
+  const mcp = declaration.mcp;
+  if (mcp.availability === 'available' && mcp.source === 'catalog.operation_level_mcp') {
+    const trackId = `${recipe.id}.mcp`;
+    for (const [index, operation] of mcp.operations.entries()) {
+      const operationId = `${recipe.id}.mcp.${String(index + 1).padStart(2, '0')}`;
+      for (const assignment of operation.parameters) {
+        const binding = directParameterBinding(
+          `binding.mcp.${operation.sourceOperationId}.${assignment.name}`,
+          'mcp',
+          trackId,
+          operationId,
+          assignment,
+        );
+        if (binding !== null) bindings.push(binding);
+      }
+    }
+  }
+
   const bindingIdsByArgument = new Map<string, string[]>();
   for (const binding of bindings) {
     bindingIdsByArgument.set(binding.actionArgument, [
@@ -436,9 +483,15 @@ function materializeParameterProjection(
       binding.id,
     ]);
   }
-  const semanticOmissions = new Map(
-    semantic.omittedActionArguments.map((omission) => [omission.argumentName, omission.reason]),
-  );
+  const omissionReasons = new Map<string, string>();
+  for (const omission of semantic?.omittedActionArguments ?? []) {
+    omissionReasons.set(omission.argumentName, omission.reason);
+  }
+  for (const omission of menuCandidate?.omittedActionArguments ?? []) {
+    if (!omissionReasons.has(omission.argumentName)) {
+      omissionReasons.set(omission.argumentName, omission.reason);
+    }
+  }
   const argumentsCoverage = Object.keys(leaf.action.arguments)
     .sort()
     .map((actionArgument) => {
@@ -450,7 +503,7 @@ function materializeParameterProjection(
           bindingIds: bindingIds.sort(),
         };
       }
-      const reason = semanticOmissions.get(actionArgument);
+      const reason = omissionReasons.get(actionArgument);
       if (reason === undefined) {
         throw new Error(
           `Interaction recipe ${recipe.id} does not prove complete parameter projection for ${actionArgument}`,
@@ -465,7 +518,8 @@ function materializeParameterProjection(
     });
 
   return {
-    formatVersion: procedureParameterProjectionFormatVersion,
+    formatVersion:
+      menuCandidate === undefined ? ('1.0.0' as const) : procedureParameterProjectionFormatVersion,
     provenance: {
       kind: 'interaction_catalog_materialization',
       interactionCatalogVersion,
@@ -554,6 +608,13 @@ function mutableProjectionParameters(
     if (operation === undefined) throw new Error(`Missing menu operation ${target.operationId}`);
     return operation.parameters;
   }
+  if (target.modality === 'menu_candidate') {
+    const candidate = leaf.menuCandidates?.find((item) => item.id === target.trackId);
+    const operation = candidate?.operations.find((item) => item.id === target.operationId);
+    if (operation === undefined)
+      throw new Error(`Missing menu candidate operation ${target.operationId}`);
+    return operation.parameters;
+  }
   if (target.modality === 'shortcut') {
     const track = leaf.shortcutTracks.find((candidate) => candidate.id === target.trackId);
     const operation =
@@ -570,7 +631,7 @@ function mutableProjectionParameters(
       ? track.operations.find((candidate) => candidate.id === target.operationId)
       : undefined;
   if (operation === undefined) throw new Error(`Missing MCP operation ${target.operationId}`);
-  return operation.arguments;
+  return operation.operationParameters ?? operation.arguments;
 }
 
 /** Apply only catalog-proven action-argument projections to an editor candidate clone. */
@@ -644,6 +705,7 @@ function materializeLeaf(
     declaration.menu.parameterBinding === 'ordered_parameter_operations'
       ? declaration.menu
       : undefined;
+  const menuCandidateDeclaration = declaration?.menuCandidate;
   const shortcutDeclaration =
     declaration?.shortcut.availability === 'available' ? declaration.shortcut : undefined;
   const mcpDeclaration =
@@ -656,6 +718,39 @@ function materializeLeaf(
   const evidenceRefs = [
     ...new Set(semanticOperations.flatMap((operation) => operation.evidenceRefs)),
   ];
+
+  const menuCandidates =
+    menuCandidateDeclaration === undefined
+      ? undefined
+      : [
+          {
+            id: `${recipe!.id}.menu-candidate`,
+            modality: 'menu' as const,
+            projection: menuCandidateDeclaration.projection,
+            equivalence: menuCandidateDeclaration.equivalence,
+            executionAuthority: menuCandidateDeclaration.executionAuthority,
+            title: `${recipe!.title} menu candidate`,
+            reason: menuCandidateDeclaration.reason,
+            preconditions: structuredClone(menuCandidateDeclaration.preconditions),
+            operations: menuCandidateDeclaration.operations.map((operation, index) => ({
+              id: operation.id,
+              order: index + 1,
+              semanticRefs: [...semanticRefs],
+              description: operation.label,
+              evidenceRefs: [...evidenceRefs],
+              intent: operation.intent,
+              target: structuredClone(operation.target),
+              path: [...operation.path],
+              parameters: materializeParameters(operation.parameters, leaf.action?.arguments ?? {}),
+            })),
+            omittedActionArguments: structuredClone(
+              menuCandidateDeclaration.omittedActionArguments,
+            ),
+            ...(menuCandidateDeclaration.nativeEvidence === undefined
+              ? {}
+              : { nativeEvidence: structuredClone(menuCandidateDeclaration.nativeEvidence) }),
+          },
+        ];
 
   const menuTracks = menuAvailable
     ? (() => {
@@ -810,19 +905,19 @@ function materializeLeaf(
                 : 'The InteractionCatalog recipe does not declare MCP materialization.',
           ),
         ]
-      : [
-          {
-            id: `${recipe!.id}.mcp`,
-            availability: 'available' as const,
-            title: `${recipe!.title} action-level MCP projection`,
-            preconditions: [],
-            modality: 'mcp' as const,
-            operations: [
-              {
-                id: `${recipe!.id}.mcp.execute`,
-                order: 1,
+      : mcpDeclaration.source === 'catalog.operation_level_mcp'
+        ? [
+            {
+              id: `${recipe!.id}.mcp`,
+              availability: 'available' as const,
+              title: `${recipe!.title} operation-level MCP projection`,
+              preconditions: [],
+              modality: 'mcp' as const,
+              operations: mcpDeclaration.operations.map((operation, index) => ({
+                id: `${recipe!.id}.mcp.${String(index + 1).padStart(2, '0')}`,
+                order: index + 1,
                 semanticRefs: [...semanticRefs],
-                description: `Execute ${leaf.action!.name} as the accepted replay next step`,
+                description: `Execute ${operation.sourceOperationId} as the accepted replay next operation`,
                 evidenceRefs: [...evidenceRefs],
                 serverName: mcpDeclaration.serverName,
                 toolName: mcpDeclaration.toolName,
@@ -832,13 +927,44 @@ function materializeLeaf(
                   replayId: '$runtime.replayId',
                   expectedState: '$runtime.expectedState',
                 },
-                argumentSource: 'accepted_leaf_action' as const,
-                actionArguments: structuredClone(leaf.action!.arguments),
-                resultBinding: `${leaf.id}.companion_state_report`,
-              },
-            ],
-          },
-        ];
+                sourceOperationId: operation.sourceOperationId,
+                operationParameters: materializeParameters(
+                  operation.parameters,
+                  leaf.action!.arguments,
+                ),
+                resultBinding: `${leaf.id}.${operation.sourceOperationId}.companion_leaf_operation_progress`,
+              })),
+            },
+          ]
+        : [
+            {
+              id: `${recipe!.id}.mcp`,
+              availability: 'available' as const,
+              title: `${recipe!.title} action-level MCP projection`,
+              preconditions: [],
+              modality: 'mcp' as const,
+              operations: [
+                {
+                  id: `${recipe!.id}.mcp.execute`,
+                  order: 1,
+                  semanticRefs: [...semanticRefs],
+                  description: `Execute ${leaf.action!.name} as the accepted replay next step`,
+                  evidenceRefs: [...evidenceRefs],
+                  serverName: mcpDeclaration.serverName,
+                  toolName: mcpDeclaration.toolName,
+                  arguments: {
+                    formatVersion: '1.0.0',
+                    requestId: '$runtime.requestId',
+                    replayId: '$runtime.replayId',
+                    expectedState: '$runtime.expectedState',
+                  },
+                  argumentSource: 'accepted_leaf_action' as const,
+                  actionArguments: structuredClone(leaf.action!.arguments),
+                  resultBinding: `${leaf.id}.companion_state_report`,
+                },
+              ],
+            },
+          ];
 
   const baseCoverage: Omit<MaterializationCoverage[number], 'mcp'> = menuAvailable
     ? shortcutDeclaration === undefined
@@ -883,6 +1009,7 @@ function materializeLeaf(
       ...leaf,
       action: structuredClone(leaf.action),
       semanticOperations: projectedSemanticOperations,
+      ...(menuCandidates === undefined ? {} : { menuCandidates }),
       menuTracks,
       shortcutTracks,
       mcpTracks,
@@ -966,6 +1093,17 @@ export function materializeProcedureAuthoringCandidate(
     const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
     return recipe?.procedureMaterialization?.mcp.availability === 'available';
   });
+  const usesOperationMcpMaterialization = orderedCandidateLeaves.some((leaf) => {
+    const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
+    return (
+      recipe?.procedureMaterialization?.mcp.availability === 'available' &&
+      recipe.procedureMaterialization.mcp.source === 'catalog.operation_level_mcp'
+    );
+  });
+  const usesMenuCandidateMaterialization = orderedCandidateLeaves.some((leaf) => {
+    const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
+    return recipe?.procedureMaterialization?.menuCandidate !== undefined;
+  });
   for (const leaf of orderedCandidateLeaves) {
     if (leaf.action === null) continue;
     const action = actionsByName.get(leaf.action.name);
@@ -991,16 +1129,18 @@ export function materializeProcedureAuthoringCandidate(
         leaf,
         recipe,
         interactionCatalog.catalogVersion,
-        usesExtendedShortcutMaterialization,
+        usesExtendedShortcutMaterialization || usesMenuCandidateMaterialization,
       ),
     );
   }
 
   const parsedTree = parseProcedureTree({
     ...candidate,
-    formatVersion: usesExtendedShortcutMaterialization
-      ? procedureTreeExtendedShortcutFormatVersion
-      : procedureTreeFormatVersion,
+    formatVersion: usesMenuCandidateMaterialization
+      ? procedureTreeMenuCandidateFormatVersion
+      : usesExtendedShortcutMaterialization
+        ? procedureTreeExtendedShortcutFormatVersion
+        : procedureTreeFormatVersion,
     actionCatalogVersion: actionCatalog.catalogVersion,
     interactionCatalogVersion: interactionCatalog.catalogVersion,
     nodes: validatedCandidate.nodes.map((node) =>
@@ -1008,25 +1148,33 @@ export function materializeProcedureAuthoringCandidate(
     ),
   });
   validateProcedureTreeParameterProjectionCatalog(parsedTree, interactionCatalog);
-  const tree = usesMcpMaterialization
-    ? procedureAuthoringMcpMaterializedTreeSchema.parse(parsedTree)
-    : usesExtendedShortcutMaterialization
-      ? procedureAuthoringExtendedShortcutMaterializedTreeSchema.parse(parsedTree)
-      : procedureAuthoringMaterializedTreeSchema.parse(parsedTree);
+  const tree = usesMenuCandidateMaterialization
+    ? procedureAuthoringMenuCandidateMaterializedTreeSchema.parse(parsedTree)
+    : usesOperationMcpMaterialization
+      ? procedureAuthoringOperationMcpMaterializedTreeSchema.parse(parsedTree)
+      : usesMcpMaterialization
+        ? procedureAuthoringMcpMaterializedTreeSchema.parse(parsedTree)
+        : usesExtendedShortcutMaterialization
+          ? procedureAuthoringExtendedShortcutMaterializedTreeSchema.parse(parsedTree)
+          : procedureAuthoringMaterializedTreeSchema.parse(parsedTree);
   const coverage = stableProcedureLeafOrder(tree).map(
     (leaf) => materializedByLeafId.get(leaf.id)!.coverage,
   );
 
   return {
-    formatVersion: usesMcpMaterialization
-      ? procedureAuthoringMaterializationMcpFormatVersion
-      : usesExtendedShortcutMaterialization
-        ? procedureAuthoringMaterializationExtendedShortcutFormatVersion
-        : usesShortcutMaterialization
-          ? procedureAuthoringMaterializationFormatVersion
-          : usesOrderedParameterOperations
-            ? procedureAuthoringMaterializationOrderedMenuFormatVersion
-            : procedureAuthoringMaterializationLegacyFormatVersion,
+    formatVersion: usesMenuCandidateMaterialization
+      ? procedureAuthoringMaterializationMenuCandidateFormatVersion
+      : usesOperationMcpMaterialization
+        ? procedureAuthoringMaterializationOperationMcpFormatVersion
+        : usesMcpMaterialization
+          ? procedureAuthoringMaterializationMcpFormatVersion
+          : usesExtendedShortcutMaterialization
+            ? procedureAuthoringMaterializationExtendedShortcutFormatVersion
+            : usesShortcutMaterialization
+              ? procedureAuthoringMaterializationFormatVersion
+              : usesOrderedParameterOperations
+                ? procedureAuthoringMaterializationOrderedMenuFormatVersion
+                : procedureAuthoringMaterializationLegacyFormatVersion,
     tree,
     coverage,
     inputTreeContentSha256: sha256(candidate),

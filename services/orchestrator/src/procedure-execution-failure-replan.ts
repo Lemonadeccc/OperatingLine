@@ -15,6 +15,7 @@ import {
   interactionCatalogSchema,
   plannerReplanGenerationResultSchema,
   planningQualityEvaluationRequestSchema,
+  projectGuidePlanForProvider,
   semanticReplanConfidenceThreshold,
   validateActionArguments,
   validateActionCatalog,
@@ -36,6 +37,7 @@ import {
 } from './guide-validation.js';
 import { evaluateLocalReplanScope, localReplanCoverageStepIds } from './local-replan-scope.js';
 import { evaluatePlanningQuality } from './planning-quality.js';
+import { restoreHostOwnedCandidateMenuProjections } from './replanning-service.js';
 
 const failureReplanEventType = 'procedure.execution-failure-replan.completed' as const;
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -846,19 +848,27 @@ function outcomeFor(
       return { kind: 'no_repair_available', reason: 'deterministic_options_exhausted' };
     }
     const candidate = semantic.data;
+    // Failure-replan evidence does not carry the trusted three-way merge context required to
+    // restore host-owned projections from an expected merged plan. Using basePlan here would
+    // silently attach target-branch guidance to an unverified merge, so merge candidates fail closed.
+    if (candidate.revisionRequest.revisionOperation?.kind === 'merge') {
+      return { kind: 'no_repair_available', reason: 'deterministic_options_exhausted' };
+    }
     const generationResult = candidate.generationResult as PlannerReplanGenerationResult;
-    let locality: ReturnType<typeof evaluateLocalReplanScope>;
-    let recomputedPlanningQuality: PlannerReplanGenerationResult['planningQuality'];
+    const providerRevisionRequest = guideRevisionRequestSchema.parse({
+      ...candidate.revisionRequest,
+      basePlan: projectGuidePlanForProvider(candidate.revisionRequest.basePlan),
+    });
+    let rawLocality: ReturnType<typeof evaluateLocalReplanScope>;
+    let rawPlanningQuality: PlannerReplanGenerationResult['planningQuality'];
     try {
-      validateProposalTarget(candidate.candidatePlan, execution.target.adapterId);
-      validateGuidePlanAgainstActionCatalog(candidate.candidatePlan, resolution.actionCatalog);
-      locality = evaluateLocalReplanScope(
-        candidate.revisionRequest as GuideRevisionRequest,
+      rawLocality = evaluateLocalReplanScope(
+        providerRevisionRequest as GuideRevisionRequest,
         candidate.candidatePlan as GuidePlan,
       );
-      recomputedPlanningQuality = evaluatePlanningQuality(
+      rawPlanningQuality = evaluatePlanningQuality(
         planningQualityEvaluationRequestSchema.parse({
-          targetAdapterId: candidate.revisionRequest.adapterId,
+          targetAdapterId: providerRevisionRequest.adapterId,
           catalogVersion: generationResult.draft.catalogVersion,
           goal: generationResult.draft.planning.goal,
           requiredPhaseIds: generationResult.draft.planning.requiredPhaseIds,
@@ -870,7 +880,7 @@ function outcomeFor(
         resolution.actionCatalog,
         {
           allowedCoverageStepIds: localReplanCoverageStepIds(
-            candidate.revisionRequest as GuideRevisionRequest,
+            providerRevisionRequest as GuideRevisionRequest,
             generationResult.draft.plan,
           ),
         },
@@ -878,7 +888,7 @@ function outcomeFor(
     } catch {
       return { kind: 'no_repair_available', reason: 'deterministic_options_exhausted' };
     }
-    const candidatePlanContentSha256 = sha256(candidate.candidatePlan);
+    const rawEvidencePlanContentSha256 = sha256(candidate.candidatePlan);
     const canonicalGenerationResultSha256 = sha256(generationResult);
     const generation = candidate.generationEvidence;
     const consumption = candidate.authorizationConsumption.event as DecisionConsumptionEvent;
@@ -933,7 +943,7 @@ function outcomeFor(
       confidence.generationRequestId === generation.generationRequestId &&
       confidence.revisionRequestId === candidate.revisionRequest.requestId &&
       confidence.generationResultSha256 === generation.generationResultSha256 &&
-      confidence.candidatePlanContentSha256 === candidatePlanContentSha256 &&
+      confidence.candidatePlanContentSha256 === rawEvidencePlanContentSha256 &&
       confidence.receiptSha256 === confidenceReceiptSha256 &&
       Date.parse(consumption.consumedAt) > Date.parse(envelope.terminalAt) &&
       Date.parse(generation.generatedAt) > Date.parse(envelope.terminalAt) &&
@@ -949,22 +959,68 @@ function outcomeFor(
       candidate.revisionRequest.references.some(
         (reference) => reference.nodeId === envelope.stepId,
       ) &&
-      locality.locality.valid &&
+      rawLocality.locality.valid &&
       generationResult.locality.valid &&
-      isDeepStrictEqual(generationResult.locality, locality.locality) &&
-      isDeepStrictEqual(generationResult.planDiff, locality.planDiff) &&
-      recomputedPlanningQuality.valid &&
-      isDeepStrictEqual(generationResult.planningQuality, recomputedPlanningQuality) &&
-      isDeepStrictEqual(locality.locality.scopeRootIds, allowedScopeRootIds) &&
+      isDeepStrictEqual(generationResult.locality, rawLocality.locality) &&
+      isDeepStrictEqual(generationResult.planDiff, rawLocality.planDiff) &&
+      rawPlanningQuality.valid &&
+      isDeepStrictEqual(generationResult.planningQuality, rawPlanningQuality) &&
+      isDeepStrictEqual(rawLocality.locality.scopeRootIds, allowedScopeRootIds) &&
       confidence.confidence >= semanticReplanConfidenceThreshold
     ) {
+      const canonicalPlan = restoreHostOwnedCandidateMenuProjections(
+        generationResult.draft.plan,
+        candidate.revisionRequest.basePlan,
+      );
+      let canonicalLocality: ReturnType<typeof evaluateLocalReplanScope>;
+      let canonicalPlanningQuality: PlannerReplanGenerationResult['planningQuality'];
+      try {
+        validateProposalTarget(canonicalPlan, execution.target.adapterId);
+        validateGuidePlanAgainstActionCatalog(canonicalPlan, resolution.actionCatalog);
+        canonicalLocality = evaluateLocalReplanScope(
+          candidate.revisionRequest as GuideRevisionRequest,
+          canonicalPlan,
+        );
+        canonicalPlanningQuality = evaluatePlanningQuality(
+          planningQualityEvaluationRequestSchema.parse({
+            targetAdapterId: candidate.revisionRequest.adapterId,
+            catalogVersion: generationResult.draft.catalogVersion,
+            goal: generationResult.draft.planning.goal,
+            requiredPhaseIds: generationResult.draft.planning.requiredPhaseIds,
+            ...(generationResult.draft.planning.capabilityCoverage === undefined
+              ? {}
+              : { capabilityCoverage: generationResult.draft.planning.capabilityCoverage }),
+            plan: canonicalPlan,
+          }),
+          resolution.actionCatalog,
+          {
+            allowedCoverageStepIds: localReplanCoverageStepIds(
+              candidate.revisionRequest as GuideRevisionRequest,
+              canonicalPlan,
+            ),
+          },
+        );
+      } catch {
+        return { kind: 'no_repair_available', reason: 'deterministic_options_exhausted' };
+      }
+      if (
+        !canonicalLocality.locality.valid ||
+        !canonicalPlanningQuality.valid ||
+        !isDeepStrictEqual(canonicalLocality.planDiff, generationResult.planDiff) ||
+        !isDeepStrictEqual(canonicalLocality.locality, generationResult.locality) ||
+        !isDeepStrictEqual(canonicalPlanningQuality, generationResult.planningQuality) ||
+        !isDeepStrictEqual(canonicalLocality.locality.scopeRootIds, allowedScopeRootIds)
+      ) {
+        return { kind: 'no_repair_available', reason: 'deterministic_options_exhausted' };
+      }
+      const canonicalProposalPlanContentSha256 = sha256(canonicalPlan);
       const proposal = procedureExecutionFailureProposalSchema.parse(
         proposalWithIntegrity({
           ...common,
           kind: 'semantic_replan' as const,
           diff: {
-            candidatePlanContentSha256,
-            localScopeStepIds: locality.locality.scopeRootIds,
+            candidatePlanContentSha256: canonicalProposalPlanContentSha256,
+            localScopeStepIds: canonicalLocality.locality.scopeRootIds,
             confidence: confidence.confidence,
             threshold: semanticReplanConfidenceThreshold,
           },

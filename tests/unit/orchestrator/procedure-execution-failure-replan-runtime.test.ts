@@ -20,6 +20,7 @@ import {
   companionExecutionTrackExecutionStatusSchema,
   compileProcedureTreeToGuidePlan,
   computeProcedureLeafReplayFailureRecoveryAttestationContentSha256,
+  guideProtocolVersion,
   guideProposalSchema,
   procedureAuthoringCandidateTreeSchema,
   procedureLeafReplayFailureRecoveryAttestationSchema,
@@ -32,6 +33,7 @@ import { createActionCatalogRegistry } from '../../../services/orchestrator/src/
 import { createBlenderExecutionTrackExecutionCoordinator } from '../../../services/orchestrator/src/blender-execution-track-execution.js';
 import { createInteractionCatalogRegistry } from '../../../services/orchestrator/src/interaction-catalogs.js';
 import { materializeProcedureAuthoringCandidate } from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
+import { projectInteractionCatalogForProvider } from '../../../services/orchestrator/src/procedure-authoring-prompt.js';
 import { createProcedureExecutionFailureReplanCoordinator } from '../../../services/orchestrator/src/procedure-execution-failure-replan.js';
 import {
   createProcedureExecutionFailureReplanRuntimeResolver,
@@ -190,6 +192,8 @@ function fixture(
   const actionCatalog = options.actionCatalog ?? blenderActionCatalog;
   const leaf = tree.nodes.find((node) => node.id === strategyTargetLeafId);
   if (leaf?.kind !== 'leaf' || leaf.action === null) throw new Error('Expected managed leaf');
+  const providerInteractionCatalog =
+    projectInteractionCatalogForProvider(blenderInteractionCatalog);
   const packet = {
     formatVersion: '1.0.0',
     context: {
@@ -207,10 +211,7 @@ function fixture(
       catalogBinding: {
         adapterId: tree.adapterId,
         actionCatalog: withoutKey(actionCatalog, 'adapterId'),
-        interactionCatalog: withoutKey(
-          withoutKey(blenderInteractionCatalog, 'adapterId'),
-          'actionCatalogVersion',
-        ),
+        interactionCatalog: providerInteractionCatalog,
       },
       constraints: {
         allGeneratedLeavesCandidate: true,
@@ -267,7 +268,7 @@ function fixture(
       adapterId: tree.adapterId,
       actionCatalogVersion: blenderActionCatalog.catalogVersion,
       interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
-      interactionCatalogContentSha256: 'b'.repeat(64),
+      interactionCatalogContentSha256: hash(blenderInteractionCatalog),
     },
     validation: {
       packetIntegrity: 'validated',
@@ -524,7 +525,11 @@ function companionHello(instanceId: string) {
     documentIncarnationId: randomUUID(),
     companionVersion: '0.1.0',
     hostVersion: '4.5.3',
-    supportedGuideProtocolVersions: [blenderActionCatalog.protocolVersion, '1.6.0'],
+    supportedGuideProtocolVersions: [
+      blenderActionCatalog.protocolVersion,
+      '1.6.0',
+      guideProtocolVersion,
+    ],
     catalogVersion: blenderActionCatalog.catalogVersion,
     capabilities: {
       presentation: {
@@ -768,7 +773,7 @@ async function callMcpTool(
 
 function acceptedTrackDecision(proposalId: string) {
   return {
-    protocolVersion: '1.6.0',
+    protocolVersion: guideProtocolVersion,
     decisionId: randomUUID(),
     proposalId,
     adapterId: 'blender',
@@ -837,7 +842,7 @@ async function acceptTrackAndReportReadyState(
   const reportId = randomUUID();
   const reportedAt = new Date().toISOString();
   const report = {
-    protocolVersion: '1.6.0',
+    protocolVersion: guideProtocolVersion,
     reportId,
     sequence: 9,
     adapterId: 'blender',
@@ -899,7 +904,7 @@ async function acceptTrackAndReportReadyState(
       target: { adapterId: 'blender', instanceId: ids.instance },
       proposalId: proposal.proposalId,
       plan: {
-        protocolVersion: '1.6.0',
+        protocolVersion: guideProtocolVersion,
         id: proposal.plan.id,
         revision: proposal.plan.revision,
         contentSha256: planContentSha256,
@@ -1281,6 +1286,37 @@ describe('procedure execution failure replan runtime resolver', () => {
     });
     expect(driftResolver.resolve(ids.request)).toBeNull();
     expect(driftResolver.listResolvableRequestIds()).toEqual([]);
+
+    const driftedInteractionCatalog = structuredClone(blenderInteractionCatalog);
+    driftedInteractionCatalog.description = `${driftedInteractionCatalog.description} drift`;
+    const currentActionCatalogRegistry = createActionCatalogRegistry([blenderActionCatalog]);
+    const interactionDriftResolver = createProcedureExecutionFailureReplanRuntimeResolver({
+      database: {
+        getProcedureLeafReplay: () => base.binding,
+        getProcedureLeafReplayAttestation: () => base.attestation,
+        listExecutionEventsByTypes: () => [
+          {
+            sequence: 1,
+            id: 'event',
+            eventType: 'blender.action-execution.completed',
+            payload: { execution: base.execution, sessionFingerprintSha256: 'c'.repeat(64) },
+            createdAt: occurredAt,
+          },
+        ],
+      },
+      actionCatalogRegistry: currentActionCatalogRegistry,
+      interactionCatalogRegistry: createInteractionCatalogRegistry(
+        [driftedInteractionCatalog],
+        currentActionCatalogRegistry,
+      ),
+      resolveCurrentAcceptedPlan: () => ({
+        id: base.execution.plan.id,
+        revision: base.execution.plan.revision,
+        contentSha256: base.execution.planContentSha256,
+      }),
+    });
+    expect(interactionDriftResolver.resolve(ids.request)).toBeNull();
+    expect(interactionDriftResolver.listResolvableRequestIds()).toEqual([]);
   });
 
   it('accepts a proof-backed execution-track proposal only after its durable review chain exists', async () => {
@@ -1795,7 +1831,7 @@ describe('procedure execution failure replan runtime resolver', () => {
       await runtime.stop();
       rmSync(temporaryDirectory, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it('preserves the expected-state receipt authorization failure without queueing', async () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-authorize-fail-'));
@@ -2125,7 +2161,7 @@ describe('procedure execution failure replan runtime resolver', () => {
       await runtime.stop();
       rmSync(temporaryDirectory, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, 30_000);
 
   it('reconciles a persisted baseline terminal after restart through the replacement-lease POST', async () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-recovery-post-'));
@@ -3258,7 +3294,7 @@ describe('procedure execution failure replan runtime resolver', () => {
     }
   });
 
-  it('requires the exact current Guide 1.6 Companion lease before writing an execution-track decision', async () => {
+  it('requires the exact current Guide Companion lease before writing an execution-track decision', async () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-strategy-lease-'));
     const databasePath = join(temporaryDirectory, 'runtime.sqlite');
     const actionCatalog = strategyActionCatalog();

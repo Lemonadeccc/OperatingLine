@@ -4,7 +4,9 @@ import { resolve } from 'node:path';
 
 import {
   blenderActionCatalog,
+  blenderActionCatalogs,
   blenderInteractionCatalog,
+  blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import {
   canonicalizeProtocolJsonValue,
@@ -18,8 +20,10 @@ import {
   procedureAuthoringMaterializationResultSchema,
   procedureShortcutProofBindingSchema,
   procedureShortcutProofProposalRecordSchema,
+  subdivisionSurfaceLeafOperationIds,
   type ActionCatalog,
   type CompanionStateReport,
+  type InteractionCatalog,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringMaterializationResult,
   type ProcedureShortcutProofProposalRequest,
@@ -52,15 +56,17 @@ function sha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
 
-function candidate(): ProcedureAuthoringCandidateTree {
+function candidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
   const tree = JSON.parse(
     readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
   ) as Record<string, unknown>;
   tree['id'] = 'tutorial.modifier.subdivision';
   tree['revision'] = 1;
-  tree['actionCatalogVersion'] = blenderActionCatalog.catalogVersion;
-  tree['interactionCatalogVersion'] = blenderInteractionCatalog.catalogVersion;
-  tree['hostVersionRange'] = blenderInteractionCatalog.hostVersionRange;
+  tree['actionCatalogVersion'] = interactionCatalog.actionCatalogVersion;
+  tree['interactionCatalogVersion'] = interactionCatalog.catalogVersion;
+  tree['hostVersionRange'] = interactionCatalog.hostVersionRange;
 
   const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
     (node) => node['kind'] === 'leaf',
@@ -129,8 +135,10 @@ function candidate(): ProcedureAuthoringCandidateTree {
   return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
-function editSubdivideCandidate(): ProcedureAuthoringCandidateTree {
-  const tree = structuredClone(candidate()) as unknown as {
+function editSubdivideCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = structuredClone(candidate(interactionCatalog)) as unknown as {
     id: string;
     rootNodeId: string;
     nodes: Array<Record<string, unknown>>;
@@ -174,8 +182,20 @@ function editSubdivideCandidate(): ProcedureAuthoringCandidateTree {
   return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
-function fixture(profile: 'subdivision_surface' | 'edit_subdivide' = 'subdivision_surface') {
-  const tree = profile === 'edit_subdivide' ? editSubdivideCandidate() : candidate();
+function fixture(
+  profile: 'subdivision_surface' | 'edit_subdivide' = 'subdivision_surface',
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+) {
+  const actionCatalog = blenderActionCatalogs.find(
+    (catalog) => catalog.catalogVersion === interactionCatalog.actionCatalogVersion,
+  );
+  if (actionCatalog === undefined) {
+    throw new Error(`expected ActionCatalog ${interactionCatalog.actionCatalogVersion}`);
+  }
+  const tree =
+    profile === 'edit_subdivide'
+      ? editSubdivideCandidate(interactionCatalog)
+      : candidate(interactionCatalog);
   const goal =
     profile === 'edit_subdivide'
       ? 'Subdivide the factory Cube with two cuts and 0.25 smoothing.'
@@ -183,29 +203,25 @@ function fixture(profile: 'subdivision_surface' | 'edit_subdivide' = 'subdivisio
   const packet = buildProcedureAuthoringPromptPacket(
     {
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderActionCatalog.catalogVersion,
-      interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+      actionCatalogVersion: actionCatalog.catalogVersion,
+      interactionCatalogVersion: interactionCatalog.catalogVersion,
       goal,
       treeId: tree.id,
       revision: tree.revision,
       locale: 'en',
     },
-    blenderActionCatalog,
-    blenderInteractionCatalog,
+    actionCatalog,
+    interactionCatalog,
   );
-  const grounded = materializeProcedureAuthoringCandidate(
-    tree,
-    blenderActionCatalog,
-    blenderInteractionCatalog,
-  );
+  const grounded = materializeProcedureAuthoringCandidate(tree, actionCatalog, interactionCatalog);
   const { interactionCatalogContentSha256, ...materialized } = grounded;
   const materialization = procedureAuthoringMaterializationResultSchema.parse({
     ...materialized,
     packetContentSha256: packet.integrity.contentSha256,
     catalogBinding: {
       adapterId: 'blender',
-      actionCatalogVersion: blenderActionCatalog.catalogVersion,
-      interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+      actionCatalogVersion: actionCatalog.catalogVersion,
+      interactionCatalogVersion: interactionCatalog.catalogVersion,
       interactionCatalogContentSha256,
     },
     validation: {
@@ -245,11 +261,7 @@ function fixture(profile: 'subdivision_surface' | 'edit_subdivide' = 'subdivisio
     packet,
     tree,
   };
-  const prepared = prepareProcedureShortcutProofProposal(
-    request,
-    materialization,
-    blenderActionCatalog,
-  );
+  const prepared = prepareProcedureShortcutProofProposal(request, materialization, actionCatalog);
   const proposal = guideProposalSchema.parse({
     protocolVersion: '1.5.0',
     proposalId: ids.proposal,
@@ -257,7 +269,7 @@ function fixture(profile: 'subdivision_surface' | 'edit_subdivide' = 'subdivisio
     targetInstanceId: ids.instance,
     plan: materialization.compilation.plan,
     planDiff: null,
-    catalogVersion: blenderActionCatalog.catalogVersion,
+    catalogVersion: actionCatalog.catalogVersion,
     proposedAt: '2026-08-20T10:00:00Z',
   });
   const planContentSha256 = sha256(proposal.plan);
@@ -322,6 +334,40 @@ function mutateEditSubdivideMaterialization(
 describe('procedure shortcut proof service', () => {
   it('prepares the exact catalog-authorized Subdivision Surface shortcut proof', () => {
     const value = fixture();
+    const leaf = value.materialization.tree.nodes[0];
+    if (leaf?.kind !== 'leaf') throw new Error('expected Subdivision Surface leaf');
+
+    expect(value.materialization.coverage[0]?.mcp).toBe('materialized');
+    const mcpTrack = leaf.mcpTracks[0];
+    if (mcpTrack?.availability !== 'available') {
+      throw new Error('expected operation-level Subdivision Surface MCP track');
+    }
+    expect(mcpTrack.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      subdivisionSurfaceLeafOperationIds,
+    );
+    expect(mcpTrack.operations.map((operation) => operation.operationParameters)).toEqual([
+      {
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.subdivision_surface',
+      },
+      {},
+      {},
+      {
+        modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+        viewportLevel: 3,
+      },
+    ]);
+    expect(
+      mcpTrack.operations.every(
+        (operation) =>
+          operation.serverName === 'operating-line' &&
+          operation.toolName ===
+            'operatingline.blender.modifier.subdivision-surface.execute-next' &&
+          operation.argumentSource === undefined &&
+          operation.actionArguments === undefined &&
+          operation.resultBinding?.endsWith('.companion_leaf_operation_progress'),
+      ),
+    ).toBe(true);
 
     expect(value.prepared).toEqual({
       actionName: 'blender.modifier.add_subdivision_surface',
@@ -337,6 +383,77 @@ describe('procedure shortcut proof service', () => {
       },
     });
   });
+
+  it('preserves the exact frozen InteractionCatalog 1.47 Subdivision shortcut proof while MCP remains unavailable', () => {
+    const historicalInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.47.0',
+    );
+    if (historicalInteractionCatalog === undefined) {
+      throw new Error('expected immutable InteractionCatalog 1.47.0');
+    }
+
+    const value = fixture('subdivision_surface', historicalInteractionCatalog);
+    const leaf = value.materialization.tree.nodes[0];
+    if (leaf?.kind !== 'leaf') throw new Error('expected Subdivision Surface leaf');
+
+    expect(value.materialization.coverage[0]?.mcp).toBe('unavailable');
+    expect(leaf.mcpTracks).toEqual([
+      {
+        id: 'blender.modifier.add_subdivision_surface.semantic.mcp',
+        availability: 'unavailable',
+        title: 'Add a bounded Subdivision Surface modifier',
+        reason: 'No approved action-level MCP tool is available.',
+        modality: 'mcp',
+      },
+    ]);
+    expect(value.prepared).toMatchObject({
+      actionName: 'blender.modifier.add_subdivision_surface',
+      recipeId: 'blender.modifier.add_subdivision_surface.semantic',
+      targetId: 'tutorial.cube',
+    });
+  });
+
+  it.each([
+    [
+      'tool name',
+      0,
+      (operation: Record<string, unknown>) => (operation['toolName'] = 'forged.tool'),
+    ],
+    [
+      'result binding',
+      0,
+      (operation: Record<string, unknown>) =>
+        (operation['resultBinding'] = 'forged.companion_state_report'),
+    ],
+    [
+      'operation parameters',
+      3,
+      (operation: Record<string, unknown>) =>
+        (operation['operationParameters'] = {
+          modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+          viewportLevel: 2,
+        }),
+    ],
+  ])(
+    'rejects a Subdivision Surface operation-level MCP track with forged %s',
+    (_, operationIndex, forge) => {
+      const base = fixture();
+      const materialization = mutateMaterialization((value) => {
+        const leaf = value.tree.nodes[0];
+        const track = leaf?.kind === 'leaf' ? leaf.mcpTracks[0] : undefined;
+        const operation =
+          track?.availability === 'available' ? track.operations[operationIndex] : undefined;
+        if (operation === undefined) {
+          throw new Error('expected operation-level MCP track');
+        }
+        forge(operation as unknown as Record<string, unknown>);
+      });
+
+      expect(() =>
+        prepareProcedureShortcutProofProposal(base.request, materialization, blenderActionCatalog),
+      ).toThrowError(/exact catalog-authorized factory Cube shortcut proof track/);
+    },
+  );
 
   it('builds a canonically integrity-bound proposal record', () => {
     const { record } = fixture();

@@ -80,6 +80,34 @@ function sha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
 
+function omitProofExecution<T extends object>(track: T): Omit<T, 'proofExecution'> {
+  return Object.fromEntries(
+    Object.entries(track).filter(([key]) => key !== 'proofExecution'),
+  ) as Omit<T, 'proofExecution'>;
+}
+
+export function projectInteractionCatalogForProvider(interactionCatalog: InteractionCatalog) {
+  const { adapterId, actionCatalogVersion, ...catalog } = interactionCatalog;
+  void adapterId;
+  void actionCatalogVersion;
+  return {
+    ...catalog,
+    recipes: catalog.recipes.map((recipe) => {
+      if (recipe.procedureMaterialization === undefined) return recipe;
+      const { menuCandidate, ...procedureMaterialization } = recipe.procedureMaterialization;
+      void menuCandidate;
+      return {
+        ...recipe,
+        procedureMaterialization: {
+          ...procedureMaterialization,
+          menu: omitProofExecution(procedureMaterialization.menu),
+          shortcut: omitProofExecution(procedureMaterialization.shortcut),
+        },
+      };
+    }),
+  };
+}
+
 export function procedureAuthoringPromptPacketContent(
   packetInput: ProcedureAuthoringPromptPacket,
 ): ProcedureAuthoringPromptPacketContent {
@@ -106,9 +134,9 @@ export function validateProcedureAuthoringPromptPacketIntegrity(
     throw new Error('Procedure authoring packet integrity check failed');
   }
   const canonicalBytes = canonicalizeProtocolJsonValue(packet).byteLength;
-  if (canonicalBytes > procedureAuthoringPromptPacketMaxCanonicalBytes) {
+  if (canonicalBytes > packet.limits.maxCanonicalBytes) {
     throw new Error(
-      `Procedure authoring packet exceeds ${procedureAuthoringPromptPacketMaxCanonicalBytes} canonical bytes`,
+      `Procedure authoring packet exceeds ${packet.limits.maxCanonicalBytes} canonical bytes`,
     );
   }
   return packet;
@@ -466,11 +494,7 @@ export function buildProcedureAuthoringPromptPacket(
       actionCatalog: Object.fromEntries(
         Object.entries(actionCatalog).filter(([key]) => key !== 'adapterId'),
       ),
-      interactionCatalog: Object.fromEntries(
-        Object.entries(interactionCatalog).filter(
-          ([key]) => key !== 'adapterId' && key !== 'actionCatalogVersion',
-        ),
-      ),
+      interactionCatalog: projectInteractionCatalogForProvider(interactionCatalog),
     },
     constraints: {
       allGeneratedLeavesCandidate: true,

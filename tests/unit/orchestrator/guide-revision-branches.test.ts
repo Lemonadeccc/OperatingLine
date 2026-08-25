@@ -34,6 +34,36 @@ function actionStep(plan: GuidePlan, stepId: string) {
   return step;
 }
 
+function candidateMenuProjection(
+  suffix: string,
+): NonNullable<GuidePlan['steps'][number]['candidateMenuProjection']> {
+  return {
+    projection: 'candidate_only',
+    interactionCatalogVersion: '1.49.0',
+    id: `candidate.${suffix}.menu`,
+    modality: 'menu',
+    equivalence: 'not_equivalent_to_managed_action',
+    executionAuthority: 'none',
+    title: `Candidate ${suffix} menu projection`,
+    reason: 'Display-only native menu guidance has no managed execution authority.',
+    preconditions: [{ kind: 'workspace', label: 'Workspace', value: 'Layout' }],
+    operations: [
+      {
+        id: `candidate.${suffix}.operation`,
+        order: 1,
+        semanticRefs: [`semantic.${suffix}`],
+        description: `Perform candidate ${suffix} operation.`,
+        evidenceRefs: [],
+        intent: 'navigate',
+        target: { kind: 'menu', hostId: 'VIEW3D_MT_object' },
+        path: ['Layout', 'Object'],
+        parameters: {},
+      },
+    ],
+    omittedActionArguments: [],
+  };
+}
+
 function request(
   requestId: string,
   instanceId: string,
@@ -138,6 +168,94 @@ describe('revision branch three-way merge', () => {
     expect(result.conflicts).toEqual([]);
     expect(result.changed).toBe(false);
     expect(result.plan).toEqual(target);
+  });
+
+  it('preserves the exact target candidate when the visible merge equals the target step', () => {
+    const target = structuredClone(basePlan);
+    target.revision += 1;
+    const targetStep = actionStep(target, 'snowman.model.head');
+    targetStep.title = 'Target head';
+    targetStep.candidateMenuProjection = candidateMenuProjection('target');
+    const source = structuredClone(basePlan);
+    source.revision += 2;
+
+    const result = computeGuidePlanThreeWayMerge(basePlan, target, source);
+
+    expect(result.conflicts).toEqual([]);
+    expect(actionStep(result.plan, 'snowman.model.head').candidateMenuProjection).toEqual(
+      targetStep.candidateMenuProjection,
+    );
+  });
+
+  it('preserves the exact source candidate when the visible merge equals the source step', () => {
+    const target = structuredClone(basePlan);
+    target.revision += 1;
+    const source = structuredClone(basePlan);
+    source.revision += 2;
+    const sourceStep = actionStep(source, 'snowman.model.head');
+    sourceStep.title = 'Source head';
+    sourceStep.candidateMenuProjection = candidateMenuProjection('source');
+
+    const result = computeGuidePlanThreeWayMerge(basePlan, target, source);
+
+    expect(result.conflicts).toEqual([]);
+    expect(actionStep(result.plan, 'snowman.model.head').candidateMenuProjection).toEqual(
+      sourceStep.candidateMenuProjection,
+    );
+  });
+
+  it('removes candidates when the visible merge combines changes from both branches', () => {
+    const target = structuredClone(basePlan);
+    target.revision += 1;
+    const targetStep = actionStep(target, 'snowman.model.head');
+    targetStep.title = 'Target head';
+    targetStep.candidateMenuProjection = candidateMenuProjection('target');
+    const source = structuredClone(basePlan);
+    source.revision += 2;
+    const sourceStep = actionStep(source, 'snowman.model.head');
+    sourceStep.explanation = 'Source explanation';
+    sourceStep.candidateMenuProjection = candidateMenuProjection('source');
+
+    const result = computeGuidePlanThreeWayMerge(basePlan, target, source);
+
+    expect(result.conflicts).toEqual([]);
+    expect(actionStep(result.plan, 'snowman.model.head')).toMatchObject({
+      title: 'Target head',
+      explanation: 'Source explanation',
+    });
+    expect(actionStep(result.plan, 'snowman.model.head').candidateMenuProjection).toBeUndefined();
+  });
+
+  it('prefers the target candidate when both branches have the same visible step', () => {
+    const target = structuredClone(basePlan);
+    target.revision += 1;
+    const targetCandidate = candidateMenuProjection('target');
+    actionStep(target, 'snowman.model.head').candidateMenuProjection = targetCandidate;
+    const source = structuredClone(basePlan);
+    source.revision += 2;
+    actionStep(source, 'snowman.model.head').candidateMenuProjection =
+      candidateMenuProjection('source');
+
+    const result = computeGuidePlanThreeWayMerge(basePlan, target, source);
+
+    expect(result.conflicts).toEqual([]);
+    expect(actionStep(result.plan, 'snowman.model.head').candidateMenuProjection).toEqual(
+      targetCandidate,
+    );
+  });
+
+  it('does not import a source-only candidate when the visible target is unchanged', () => {
+    const target = structuredClone(basePlan);
+    target.revision += 1;
+    const source = structuredClone(basePlan);
+    source.revision += 2;
+    actionStep(source, 'snowman.model.head').candidateMenuProjection =
+      candidateMenuProjection('source');
+
+    const result = computeGuidePlanThreeWayMerge(basePlan, target, source);
+
+    expect(result.conflicts).toEqual([]);
+    expect(actionStep(result.plan, 'snowman.model.head').candidateMenuProjection).toBeUndefined();
   });
 
   it('reports the exact field when both branches change it differently', () => {

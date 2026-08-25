@@ -402,11 +402,48 @@ describe('OperatingLine runtime', () => {
                 'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
-            { name: 'operatingline.blender.execution-track.execute' },
+            {
+              name: 'operatingline.blender.execution-track.execute',
+              description: expect.stringContaining(
+                'seven event-simulated UI-control receipts across eight native mutation stages',
+              ),
+            },
             { name: 'operatingline.blender.execution-track.status' },
+            { name: 'operatingline.blender.geometry-nodes.transform.execute-next' },
+            { name: 'operatingline.blender.geometry-nodes.transform.status' },
+            { name: 'operatingline.blender.geometry-nodes.light-trails.execute-next' },
+            { name: 'operatingline.blender.geometry-nodes.light-trails.status' },
+            { name: 'operatingline.blender.animation.pose-keyframes.execute-next' },
+            { name: 'operatingline.blender.animation.pose-keyframes.status' },
+            { name: 'operatingline.blender.rig.armature.execute-next' },
+            { name: 'operatingline.blender.rig.armature.status' },
+            { name: 'operatingline.blender.rig.skin-weights.execute-next' },
+            { name: 'operatingline.blender.rig.skin-weights.status' },
+            { name: 'operatingline.blender.modifier.solidify.execute-next' },
+            { name: 'operatingline.blender.modifier.solidify.status' },
+            { name: 'operatingline.blender.modifier.subdivision-surface.execute-next' },
+            { name: 'operatingline.blender.modifier.subdivision-surface.status' },
+            { name: 'operatingline.blender.modifier.mirror.execute-next' },
+            { name: 'operatingline.blender.modifier.mirror.status' },
+            { name: 'operatingline.blender.mesh.edit-bevel-edges.execute-next' },
+            { name: 'operatingline.blender.mesh.edit-bevel-edges.status' },
+            { name: 'operatingline.blender.mesh.edit-inset-faces.execute-next' },
+            { name: 'operatingline.blender.mesh.edit-inset-faces.status' },
+            { name: 'operatingline.blender.mesh.edit-triangulate.execute-next' },
+            { name: 'operatingline.blender.mesh.edit-triangulate.status' },
+            { name: 'operatingline.blender.mesh.edit-poke-faces.execute-next' },
+            { name: 'operatingline.blender.mesh.edit-poke-faces.status' },
+            { name: 'operatingline.blender.mesh.edit-extrude-region.execute-next' },
+            { name: 'operatingline.blender.mesh.edit-extrude-region.status' },
+            { name: 'operatingline.blender.modifier.bevel.execute-next' },
+            { name: 'operatingline.blender.modifier.bevel.status' },
+            { name: 'operatingline.blender.material.single.execute-next' },
+            { name: 'operatingline.blender.material.single.status' },
+            { name: 'operatingline.blender.material.palette.execute-next' },
+            { name: 'operatingline.blender.material.palette.status' },
             {
               name: 'operatingline.blender.action.execute',
-              description: expect.stringContaining('six replacement-mesh Edit actions'),
+              description: expect.stringContaining('current 9-action whole-leaf set'),
             },
             { name: 'operatingline.blender.action.status' },
             { name: 'operatingline.blender.shortcut-proof.execute' },
@@ -445,7 +482,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.authoring.materialize' },
             {
               name: 'operatingline.procedure.replay.propose',
-              description: expect.stringContaining('18-action set'),
+              description: expect.stringContaining('25-action set'),
             },
             { name: 'operatingline.procedure.shortcut-proof.propose' },
             { name: 'operatingline.procedure.menu-control-proof.propose' },
@@ -601,12 +638,269 @@ describe('OperatingLine runtime', () => {
       });
       expect(
         toolsPayload.result?.tools?.find(
-          (tool) => tool.name === 'operatingline.blender.shortcut-proof.execute',
+          (tool) => tool.name === 'operatingline.blender.geometry-nodes.transform.execute-next',
         )?.inputSchema,
       ).toMatchObject({
         type: 'object',
         required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
         additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.geometry-nodes.transform.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.geometry-nodes.light-trails.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.animation.pose-keyframes.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.animation.pose-keyframes.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.rig.armature.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.rig.armature.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.rig.skin-weights.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.rig.skin-weights.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.modifier.bevel.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.modifier.bevel.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.material.single.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.material.single.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.material.palette.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.material.palette.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.modifier.subdivision-surface.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.modifier.subdivision-surface.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-bevel-edges.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-inset-faces.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-triangulate.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-triangulate.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-extrude-region.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.mesh.edit-poke-faces.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.shortcut-proof.execute',
+        ),
+      ).toMatchObject({
+        description: expect.stringContaining(
+          'exact versioned InteractionCatalog proof declaration',
+        ),
+        inputSchema: {
+          type: 'object',
+          required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+          additionalProperties: false,
+        },
       });
       expect(
         toolsPayload.result?.tools?.find(
@@ -667,6 +961,13 @@ describe('OperatingLine runtime', () => {
           ?.map((tool) => tool.name)
           .filter((name) => name?.startsWith('operatingline.procedure.failure-replan.review')),
       ).toEqual(['operatingline.procedure.failure-replan.review.get']);
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.shortcut-proof.propose',
+        ),
+      ).toMatchObject({
+        description: expect.stringContaining('exact versioned InteractionCatalog'),
+      });
       expect(
         toolsPayload.result?.tools?.find(
           (tool) => tool.name === 'operatingline.procedure.shortcut-proof.propose',
@@ -909,7 +1210,7 @@ describe('OperatingLine runtime', () => {
         planningPhases?: Array<{ id?: string }>;
       };
       expect(catalog).toMatchObject({ catalogVersion });
-      expect(catalog.actions).toHaveLength(27);
+      expect(catalog.actions).toHaveLength(29);
       expect(catalog.actions?.map((action) => action.name)).toEqual(
         blenderActionCatalog.actions.map((action) => action.name),
       );

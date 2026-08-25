@@ -198,6 +198,18 @@ describe('companion lease manager', () => {
       sessionId: request.sessionId,
     });
     manager.establish(replacementDocument, blenderActionCatalog);
+    expect(
+      manager.lookupDocumentSessionIdentityForReceiptFingerprint(
+        firstFingerprint,
+        'blender',
+        request.instanceId,
+      ),
+    ).toEqual({
+      adapterId: 'blender',
+      instanceId: request.instanceId,
+      sessionId: request.sessionId,
+      documentIncarnationId: request.documentIncarnationId,
+    });
     expectConflict(
       () =>
         manager.authorizeDocumentSessionForReceiptFingerprint(
@@ -217,6 +229,18 @@ describe('companion lease manager', () => {
 
     const restarted = createCompanionLeaseManager();
     restarted.rememberDocumentSessionFingerprint(receiptFingerprint, {
+      adapterId: request.adapterId,
+      instanceId: request.instanceId,
+      sessionId: request.sessionId,
+      documentIncarnationId: request.documentIncarnationId,
+    });
+    expect(
+      restarted.lookupDocumentSessionIdentityForReceiptFingerprint(
+        receiptFingerprint,
+        'blender',
+        request.instanceId,
+      ),
+    ).toEqual({
       adapterId: request.adapterId,
       instanceId: request.instanceId,
       sessionId: request.sessionId,

@@ -9,6 +9,7 @@ import {
   procedureShortcutProofFormatVersion,
   procedureShortcutProofProposalRecordSchema,
   protocolJsonValueCanonicalization,
+  subdivisionSurfaceLeafOperationIds,
   subdivisionSurfaceShortcutProofOperationIds,
   type ActionCatalog,
   type CompanionStateReport,
@@ -30,6 +31,9 @@ const meshEditSubdivideTargetProfile = 'factory_cube_single_user_mesh_8_12_6' as
 const targetId = 'tutorial.cube' as const;
 const modifierId = 'tutorial.cube.subdivision_surface' as const;
 const modifierName = 'OperatingLine.Cube.SubdivisionSurface' as const;
+const subdivisionSurfaceRecipeTitle = 'Add a bounded Subdivision Surface modifier' as const;
+const meshEditSubdivideRecipeTitle =
+  'Subdivide an owned mesh through a bounded Edit Mode operation' as const;
 
 function hasExactFactoryCubeObjectAnchor(
   anchors: readonly { readonly kind: string; readonly objectName?: string }[],
@@ -145,16 +149,22 @@ export function prepareProcedureShortcutProofProposal(
       'Native shortcut proof requires exactly one materialized leaf matching leafId',
     );
   }
+  const action = leaf.action;
+  if (action === null) {
+    throw new ProcedureShortcutProofError(
+      'Native shortcut proof requires one executable catalog-authorized action',
+    );
+  }
   const isSubdivisionSurface =
-    leaf.action?.adapterId === 'blender' &&
-    leaf.action.name === subdivisionSurfaceActionName &&
-    isExactSubdivisionSurfaceArguments(leaf.action.arguments) &&
+    action.adapterId === 'blender' &&
+    action.name === subdivisionSurfaceActionName &&
+    isExactSubdivisionSurfaceArguments(action.arguments) &&
     hasExactFactoryCubeObjectAnchor(leaf.anchors) &&
     hasNoOperatorAnchor(leaf.anchors);
   const isMeshEditSubdivide =
-    leaf.action?.adapterId === 'blender' &&
-    leaf.action.name === meshEditSubdivideActionName &&
-    isExactMeshEditSubdivideArguments(leaf.action.arguments) &&
+    action.adapterId === 'blender' &&
+    action.name === meshEditSubdivideActionName &&
+    isExactMeshEditSubdivideArguments(action.arguments) &&
     hasExactFactoryCubeObjectAnchor(leaf.anchors) &&
     hasExactMeshSubdivideOperatorAnchor(leaf.anchors);
   if (!isSubdivisionSurface && !isMeshEditSubdivide) {
@@ -176,8 +186,9 @@ export function prepareProcedureShortcutProofProposal(
   const expectedOperationIds = isSubdivisionSurface
     ? subdivisionSurfaceShortcutProofOperationIds
     : meshEditSubdivideShortcutProofOperationIds;
-  const expectedMcpAvailability = isSubdivisionSurface ? 'unavailable' : 'materialized';
-  const expectedMcpTrackAvailability = isSubdivisionSurface ? 'unavailable' : 'available';
+  const expectedRecipeTitle = isSubdivisionSurface
+    ? subdivisionSurfaceRecipeTitle
+    : meshEditSubdivideRecipeTitle;
 
   const executableSteps = materialization.compilation.plan.steps.filter(
     (step) => step.action !== null,
@@ -195,19 +206,108 @@ export function prepareProcedureShortcutProofProposal(
 
   const coverage = materialization.coverage[0];
   const shortcut = leaf.shortcutTracks[0];
+  const mcpTrack = leaf.mcpTracks[0];
+  const orderedSemanticOperations = [...leaf.semanticOperations].sort(
+    (left, right) => left.order - right.order,
+  );
+  const semanticRefs = orderedSemanticOperations.map((operation) => operation.id);
+  const evidenceRefs = [
+    ...new Set(orderedSemanticOperations.flatMap((operation) => operation.evidenceRefs)),
+  ];
+  const exactActionLevelMcpTrack =
+    coverage?.mcp === 'materialized' &&
+    sameCanonicalValue(mcpTrack, {
+      id: `${recipeId}.mcp`,
+      availability: 'available',
+      title: `${expectedRecipeTitle} action-level MCP projection`,
+      preconditions: [],
+      modality: 'mcp',
+      operations: [
+        {
+          id: `${recipeId}.mcp.execute`,
+          order: 1,
+          semanticRefs,
+          description: `Execute ${action.name} as the accepted replay next step`,
+          evidenceRefs,
+          serverName: 'operating-line',
+          toolName: 'operatingline.blender.action.execute',
+          arguments: {
+            formatVersion: '1.0.0',
+            requestId: '$runtime.requestId',
+            replayId: '$runtime.replayId',
+            expectedState: '$runtime.expectedState',
+          },
+          argumentSource: 'accepted_leaf_action',
+          actionArguments: action.arguments,
+          resultBinding: `${leaf.id}.companion_state_report`,
+        },
+      ],
+    });
+  const subdivisionSurfaceOperationParameters = [
+    {
+      targetId: action.arguments['targetId'],
+      modifierId: action.arguments['modifierId'],
+    },
+    {},
+    {},
+    {
+      modifierName: action.arguments['modifierName'],
+      viewportLevel: action.arguments['viewportLevel'],
+    },
+  ] as const;
+  const exactSubdivisionSurfaceOperationMcpTrack =
+    isSubdivisionSurface &&
+    coverage?.mcp === 'materialized' &&
+    sameCanonicalValue(mcpTrack, {
+      id: `${recipeId}.mcp`,
+      availability: 'available',
+      title: `${expectedRecipeTitle} operation-level MCP projection`,
+      preconditions: [],
+      modality: 'mcp',
+      operations: subdivisionSurfaceLeafOperationIds.map((sourceOperationId, index) => ({
+        id: `${recipeId}.mcp.${String(index + 1).padStart(2, '0')}`,
+        order: index + 1,
+        semanticRefs,
+        description: `Execute ${sourceOperationId} as the accepted replay next operation`,
+        evidenceRefs,
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+        arguments: {
+          formatVersion: '1.0.0',
+          requestId: '$runtime.requestId',
+          replayId: '$runtime.replayId',
+          expectedState: '$runtime.expectedState',
+        },
+        sourceOperationId,
+        operationParameters: subdivisionSurfaceOperationParameters[index],
+        resultBinding: `${leaf.id}.${sourceOperationId}.companion_leaf_operation_progress`,
+      })),
+    });
+  const exactUnavailableMcpTrack =
+    coverage?.mcp === 'unavailable' &&
+    sameCanonicalValue(mcpTrack, {
+      id: `${recipeId}.mcp`,
+      availability: 'unavailable',
+      title: expectedRecipeTitle,
+      reason: 'No approved action-level MCP tool is available.',
+      modality: 'mcp',
+    });
+  const exactMcpTrack =
+    exactActionLevelMcpTrack ||
+    exactSubdivisionSurfaceOperationMcpTrack ||
+    (isSubdivisionSurface && exactUnavailableMcpTrack);
   if (
     materialization.coverage.length !== 1 ||
     coverage?.leafId !== leaf.id ||
     coverage.recipeId !== recipeId ||
     coverage.menu !== 'unavailable' ||
     coverage.shortcut !== 'materialized' ||
-    coverage.mcp !== expectedMcpAvailability ||
+    !exactMcpTrack ||
     leaf.menuTracks.length !== 1 ||
     leaf.menuTracks[0]?.availability !== 'unavailable' ||
     leaf.shortcutTracks.length !== 1 ||
     shortcut?.availability !== 'available' ||
     leaf.mcpTracks.length !== 1 ||
-    leaf.mcpTracks[0]?.availability !== expectedMcpTrackAvailability ||
     shortcut.proofExecution?.targetProfile !== targetProfile ||
     shortcut.proofExecution.executorId !== expectedExecutorId ||
     shortcut.proofExecution.executionBoundary !== 'blender_window_event_simulate' ||

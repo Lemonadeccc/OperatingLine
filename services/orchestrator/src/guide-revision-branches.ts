@@ -112,6 +112,39 @@ function cloneMergeValue<T extends MergeValue>(value: T): T {
   return value === MISSING ? value : (structuredClone(value) as T);
 }
 
+function providerVisibleStep(step: GuideStep | undefined): GuideStep | undefined {
+  if (step === undefined) return undefined;
+  const { candidateMenuProjection, ...visibleStep } = step;
+  void candidateMenuProjection;
+  return structuredClone(visibleStep) as GuideStep;
+}
+
+function restoreTrustedCandidateMenuProjection(
+  merged: GuideStep | undefined,
+  target: GuideStep | undefined,
+  source: GuideStep | undefined,
+): GuideStep | undefined {
+  if (merged === undefined) return undefined;
+  const visibleMerged = providerVisibleStep(merged)!;
+  const visibleTarget = providerVisibleStep(target);
+  const visibleSource = providerVisibleStep(source);
+  const matchesTarget =
+    visibleTarget !== undefined && isDeepStrictEqual(visibleMerged, visibleTarget);
+  const matchesSource =
+    visibleSource !== undefined && isDeepStrictEqual(visibleMerged, visibleSource);
+
+  if (matchesTarget) {
+    if (target?.candidateMenuProjection !== undefined) {
+      visibleMerged.candidateMenuProjection = structuredClone(target.candidateMenuProjection);
+    }
+    return visibleMerged;
+  }
+  if (matchesSource && source?.candidateMenuProjection !== undefined) {
+    visibleMerged.candidateMenuProjection = structuredClone(source.candidateMenuProjection);
+  }
+  return visibleMerged;
+}
+
 function mergeStep(
   stepId: string,
   ancestor: GuideStep | undefined,
@@ -119,34 +152,45 @@ function mergeStep(
   source: GuideStep | undefined,
   conflicts: GuidePlanMergeConflict[],
 ): GuideStep | undefined {
+  const visibleAncestor = providerVisibleStep(ancestor);
+  const visibleTarget = providerVisibleStep(target);
+  const visibleSource = providerVisibleStep(source);
   if (ancestor === undefined) {
     const merged = mergeValue(
       `steps.${stepId}`,
       MISSING,
-      target ?? MISSING,
-      source ?? MISSING,
+      visibleTarget ?? MISSING,
+      visibleSource ?? MISSING,
       conflicts,
     );
-    return merged === MISSING ? undefined : (merged as GuideStep);
+    return restoreTrustedCandidateMenuProjection(
+      merged === MISSING ? undefined : (merged as GuideStep),
+      target,
+      source,
+    );
   }
   if (target === undefined || source === undefined) {
     const merged = mergeValue(
       `steps.${stepId}`,
-      ancestor,
-      target ?? MISSING,
-      source ?? MISSING,
+      visibleAncestor!,
+      visibleTarget ?? MISSING,
+      visibleSource ?? MISSING,
       conflicts,
     );
-    return merged === MISSING ? undefined : (merged as GuideStep);
+    return restoreTrustedCandidateMenuProjection(
+      merged === MISSING ? undefined : (merged as GuideStep),
+      target,
+      source,
+    );
   }
 
-  const merged = structuredClone(target);
+  const merged = visibleTarget!;
   for (const field of stepFields) {
     const value = mergeValue(
       `steps.${stepId}.${field}`,
-      recordValue(ancestor, field),
-      recordValue(target, field),
-      recordValue(source, field),
+      recordValue(visibleAncestor!, field),
+      recordValue(visibleTarget!, field),
+      recordValue(visibleSource!, field),
       conflicts,
     );
     if (value === MISSING) {
@@ -155,7 +199,7 @@ function mergeStep(
       merged[field] = value as never;
     }
   }
-  return merged;
+  return restoreTrustedCandidateMenuProjection(merged, target, source);
 }
 
 export function computeGuidePlanThreeWayMerge(

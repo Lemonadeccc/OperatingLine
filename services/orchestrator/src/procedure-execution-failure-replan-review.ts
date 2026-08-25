@@ -520,7 +520,7 @@ function strategyArtifactsFor(
 ): z.infer<typeof reviewArtifactsSchema> | null {
   const { currentPlan, actionCatalog, interactionCatalog } = evidence;
   if (
-    currentPlan.protocolVersion !== '1.6.0' ||
+    (currentPlan.protocolVersion !== '1.6.0' && currentPlan.protocolVersion !== '1.7.0') ||
     evidence.targetAdapterId !== actionCatalog.adapterId ||
     interactionCatalog.adapterId !== actionCatalog.adapterId ||
     interactionCatalog.actionCatalogVersion !== actionCatalog.catalogVersion ||
@@ -690,7 +690,8 @@ export function createProcedureExecutionFailureReplanReviewCoordinator(
                 : ({ status: 'available', artifacts } as const);
             })()
           : proposal.kind === 'strategy_switch'
-            ? evidence.currentPlan.protocolVersion !== '1.6.0'
+            ? evidence.currentPlan.protocolVersion !== '1.6.0' &&
+              evidence.currentPlan.protocolVersion !== '1.7.0'
               ? ({
                   status: 'unavailable',
                   reason: 'legacy_strategy_binding_not_execution_authoritative',

@@ -30,6 +30,25 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  companionLeafOperationCreateRequestSchema,
+  companionLeafOperationPollDeliverySchema,
+  companionLeafOperationPollRequestSchema,
+  companionLeafOperationRecoveryAckResponseSchema,
+  companionLeafOperationRecoveryAckSchema,
+  companionLeafOperationRecoveryPollDeliverySchema,
+  companionLeafOperationRecoveryPollRequestSchema,
+  companionLeafOperationResultAckSchema,
+  companionLeafOperationResultSchema,
+  companionLeafOperationStatusRequestSchema,
+  companionLeafOperationStatusSchema,
+  companionPokeCompoundPollDeliverySchema,
+  companionPokeCompoundPollRequestSchema,
+  companionPokeCompoundRecoveryAckResponseSchema,
+  companionPokeCompoundRecoveryAckSchema,
+  companionPokeCompoundRecoveryPollDeliverySchema,
+  companionPokeCompoundRecoveryPollRequestSchema,
+  companionPokeCompoundResultAckSchema,
+  companionPokeCompoundResultSchema,
   companionExecutionTrackPreflightBindingSchema,
   companionExecutionTrackPreflightCreateRequestSchema,
   companionExecutionTrackPreflightPollDeliverySchema,
@@ -210,6 +229,60 @@ import {
   protocolJsonValueCanonicalization,
   storedProcedureTreeSchema,
   compileProcedureTreeToGuidePlan,
+  computeCompanionLeafOperationBindingSha256,
+  companionLeafOperationEditBevelMeshOperationsSchema,
+  companionLeafOperationEditInsetMeshOperationsSchema,
+  companionLeafOperationEditTriangulateMeshOperationsSchema,
+  companionLeafOperationEditExtrudeRegionMeshOperationsSchema,
+  companionLeafOperationEditPokeMeshOperationsSchema,
+  companionLeafOperationMaterialRnaMutationsSchema,
+  companionLeafOperationMaterialPaletteRnaMutationsSchema,
+  guidedLeafOperationIdsSchema,
+  armatureLeafOperationActionName,
+  armatureLeafOperationIds,
+  armatureLeafOperationRecipeId,
+  bevelModifierLeafOperationActionName,
+  bevelModifierLeafOperationIds,
+  bevelModifierLeafOperationRecipeId,
+  editBevelLeafOperationActionName,
+  editBevelLeafOperationIds,
+  editBevelLeafOperationRecipeId,
+  editInsetLeafOperationActionName,
+  editInsetLeafOperationIds,
+  editInsetLeafOperationRecipeId,
+  editTriangulateLeafOperationActionName,
+  editTriangulateLeafOperationIds,
+  editTriangulateLeafOperationRecipeId,
+  editExtrudeRegionLeafOperationActionName,
+  editExtrudeRegionLeafOperationIds,
+  editExtrudeRegionLeafOperationRecipeId,
+  editPokeLeafOperationActionName,
+  editPokeLeafOperationIds,
+  editPokeLeafOperationRecipeId,
+  lightTrailsLeafOperationActionName,
+  lightTrailsLeafOperationIds,
+  lightTrailsLeafOperationRecipeId,
+  materialPaletteLeafOperationActionName,
+  materialPaletteLeafOperationIds,
+  materialPaletteLeafOperationRecipeId,
+  mirrorLeafOperationActionName,
+  mirrorLeafOperationIds,
+  mirrorLeafOperationRecipeId,
+  poseAnimationLeafOperationActionName,
+  poseAnimationLeafOperationIds,
+  poseAnimationLeafOperationRecipeId,
+  singleMaterialLeafOperationActionName,
+  singleMaterialLeafOperationIds,
+  singleMaterialLeafOperationRecipeId,
+  skinWeightsLeafOperationActionName,
+  skinWeightsLeafOperationIds,
+  skinWeightsLeafOperationRecipeId,
+  solidifyLeafOperationActionName,
+  solidifyLeafOperationIds,
+  solidifyLeafOperationRecipeId,
+  subdivisionSurfaceLeafOperationActionName,
+  subdivisionSurfaceLeafOperationIds,
+  subdivisionSurfaceLeafOperationRecipeId,
   parseProcedureTree,
   replanningPromptPacketSchema,
   replanningPromptRequestSchema,
@@ -217,6 +290,11 @@ import {
   type CompanionActionExecutionCreateRequest,
   type CompanionActionExecutionResult,
   type CompanionActionExecutionStatus,
+  type CompanionLeafOperationCreateRequest,
+  type CompanionLeafOperationRecoveryAck,
+  type CompanionLeafOperationResult,
+  type CompanionLeafOperationStatus,
+  type CompanionPokeCompoundCreateRequest,
   type CompanionExecutionTrackExecutionResult,
   type CompanionMenuControlProofCreateRequest,
   type CompanionMenuControlProofStatus,
@@ -235,6 +313,9 @@ import {
   type ProcedureTutorialAuthoringBinding,
   type ProcedureTutorialMediaAuthoringBinding,
   type RuntimeStatus,
+  transformGeometryLeafOperationActionName,
+  transformGeometryLeafOperationIds,
+  transformGeometryLeafOperationRecipeId,
   uvSphereMenuControlProofOperationIds,
 } from '@operatingline/protocol';
 import { z } from 'zod';
@@ -243,11 +324,175 @@ type CompanionExecutionTrackExecutionStatus = z.infer<
   typeof companionExecutionTrackExecutionStatusSchema
 >;
 
+const blenderLeafOperationProfiles = [
+  {
+    actionName: transformGeometryLeafOperationActionName,
+    recipeId: transformGeometryLeafOperationRecipeId,
+    operationIds: transformGeometryLeafOperationIds,
+    executeToolName: 'operatingline.blender.geometry-nodes.transform.execute-next',
+    statusToolName: 'operatingline.blender.geometry-nodes.transform.status',
+    title: 'Transform Geometry',
+    mutatingOrdinals: Array.from(
+      { length: transformGeometryLeafOperationIds.length - 2 },
+      (_value, index) => index + 2,
+    ),
+  },
+  {
+    actionName: lightTrailsLeafOperationActionName,
+    recipeId: lightTrailsLeafOperationRecipeId,
+    operationIds: lightTrailsLeafOperationIds,
+    executeToolName: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+    statusToolName: 'operatingline.blender.geometry-nodes.light-trails.status',
+    title: 'Light Trails',
+    mutatingOrdinals: Array.from(
+      { length: lightTrailsLeafOperationIds.length - 2 },
+      (_value, index) => index + 2,
+    ),
+  },
+  {
+    actionName: poseAnimationLeafOperationActionName,
+    recipeId: poseAnimationLeafOperationRecipeId,
+    operationIds: poseAnimationLeafOperationIds,
+    executeToolName: 'operatingline.blender.animation.pose-keyframes.execute-next',
+    statusToolName: 'operatingline.blender.animation.pose-keyframes.status',
+    title: 'Pose Animation',
+    mutatingOrdinals: [4, 5, 7, 9, 11],
+  },
+  {
+    actionName: armatureLeafOperationActionName,
+    recipeId: armatureLeafOperationRecipeId,
+    operationIds: armatureLeafOperationIds,
+    executeToolName: 'operatingline.blender.rig.armature.execute-next',
+    statusToolName: 'operatingline.blender.rig.armature.status',
+    title: 'Armature',
+    mutatingOrdinals: [2, 3, 4, 6, 8],
+  },
+  {
+    actionName: skinWeightsLeafOperationActionName,
+    recipeId: skinWeightsLeafOperationRecipeId,
+    operationIds: skinWeightsLeafOperationIds,
+    executeToolName: 'operatingline.blender.rig.skin-weights.execute-next',
+    statusToolName: 'operatingline.blender.rig.skin-weights.status',
+    title: 'Skin Weights',
+    mutatingOrdinals: [5, 7, 8],
+  },
+  {
+    actionName: solidifyLeafOperationActionName,
+    recipeId: solidifyLeafOperationRecipeId,
+    operationIds: solidifyLeafOperationIds,
+    executeToolName: 'operatingline.blender.modifier.solidify.execute-next',
+    statusToolName: 'operatingline.blender.modifier.solidify.status',
+    title: 'Solidify Modifier',
+    mutatingOrdinals: [3, 4],
+  },
+  {
+    actionName: subdivisionSurfaceLeafOperationActionName,
+    recipeId: subdivisionSurfaceLeafOperationRecipeId,
+    operationIds: subdivisionSurfaceLeafOperationIds,
+    executeToolName: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+    statusToolName: 'operatingline.blender.modifier.subdivision-surface.status',
+    title: 'Subdivision Surface Modifier',
+    mutatingOrdinals: [3, 4],
+  },
+  {
+    actionName: mirrorLeafOperationActionName,
+    recipeId: mirrorLeafOperationRecipeId,
+    operationIds: mirrorLeafOperationIds,
+    executeToolName: 'operatingline.blender.modifier.mirror.execute-next',
+    statusToolName: 'operatingline.blender.modifier.mirror.status',
+    title: 'Mirror Modifier',
+    mutatingOrdinals: [6, 7],
+  },
+  {
+    actionName: editBevelLeafOperationActionName,
+    recipeId: editBevelLeafOperationRecipeId,
+    operationIds: editBevelLeafOperationIds,
+    executeToolName: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+    statusToolName: 'operatingline.blender.mesh.edit-bevel-edges.status',
+    title: 'Edit Bevel Edges',
+    mutatingOrdinals: [5, 6],
+  },
+  {
+    actionName: editInsetLeafOperationActionName,
+    recipeId: editInsetLeafOperationRecipeId,
+    operationIds: editInsetLeafOperationIds,
+    executeToolName: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+    statusToolName: 'operatingline.blender.mesh.edit-inset-faces.status',
+    title: 'Individual Inset Faces',
+    mutatingOrdinals: [5, 6],
+  },
+  {
+    actionName: editTriangulateLeafOperationActionName,
+    recipeId: editTriangulateLeafOperationRecipeId,
+    operationIds: editTriangulateLeafOperationIds,
+    executeToolName: 'operatingline.blender.mesh.edit-triangulate.execute-next',
+    statusToolName: 'operatingline.blender.mesh.edit-triangulate.status',
+    title: 'Triangulate Faces',
+    mutatingOrdinals: [5, 6],
+  },
+  {
+    actionName: editPokeLeafOperationActionName,
+    recipeId: editPokeLeafOperationRecipeId,
+    operationIds: editPokeLeafOperationIds,
+    executeToolName: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+    statusToolName: 'operatingline.blender.mesh.edit-poke-faces.status',
+    title: 'Poke Faces',
+    mutatingOrdinals: [5, 6],
+  },
+  {
+    actionName: editExtrudeRegionLeafOperationActionName,
+    recipeId: editExtrudeRegionLeafOperationRecipeId,
+    operationIds: editExtrudeRegionLeafOperationIds,
+    executeToolName: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+    statusToolName: 'operatingline.blender.mesh.edit-extrude-region.status',
+    title: 'Extrude Region',
+    mutatingOrdinals: [5, 6],
+  },
+  {
+    actionName: bevelModifierLeafOperationActionName,
+    recipeId: bevelModifierLeafOperationRecipeId,
+    operationIds: bevelModifierLeafOperationIds,
+    executeToolName: 'operatingline.blender.modifier.bevel.execute-next',
+    statusToolName: 'operatingline.blender.modifier.bevel.status',
+    title: 'Bevel Modifier',
+    mutatingOrdinals: [3, 4],
+  },
+  {
+    actionName: singleMaterialLeafOperationActionName,
+    recipeId: singleMaterialLeafOperationRecipeId,
+    operationIds: singleMaterialLeafOperationIds,
+    executeToolName: 'operatingline.blender.material.single.execute-next',
+    statusToolName: 'operatingline.blender.material.single.status',
+    title: 'Single Material',
+    mutatingOrdinals: [3, 4],
+  },
+  {
+    actionName: materialPaletteLeafOperationActionName,
+    recipeId: materialPaletteLeafOperationRecipeId,
+    operationIds: materialPaletteLeafOperationIds,
+    executeToolName: 'operatingline.blender.material.palette.execute-next',
+    statusToolName: 'operatingline.blender.material.palette.status',
+    title: 'Material Palette',
+    mutatingOrdinals: [4],
+  },
+] as const;
+
+type BlenderLeafOperationProfile = (typeof blenderLeafOperationProfiles)[number];
+
 import { createActionCatalogRegistry } from './action-catalogs.js';
 import {
   BlenderActionExecutionError,
   createBlenderActionExecutionCoordinator,
 } from './blender-action-execution.js';
+import {
+  BlenderLeafOperationExecutionError,
+  continuesAuthorizedLeafOperationCheckpoint,
+  createBlenderLeafOperationExecutionCoordinator,
+} from './blender-leaf-operation-execution.js';
+import {
+  BlenderPokeCompoundExecutionError,
+  createBlenderPokeCompoundExecutionCoordinator,
+} from './blender-poke-compound-execution.js';
 import {
   BlenderExecutionTrackExecutionError,
   createBlenderExecutionTrackExecutionCoordinator,
@@ -487,6 +732,11 @@ export interface StartRuntimeOptions {
   youtubeCaptionSource?: ProcedureTutorialYoutubeCaptionSource;
   tutorialMediaRuntime?: ProcedureTutorialMediaRuntime;
   companionLeases?: CompanionLeaseManagerOptions;
+  pokeCompoundProofTransport?: {
+    readonly resolveRequest: (
+      session: ActiveCompanionDocumentSession,
+    ) => CompanionPokeCompoundCreateRequest | null;
+  };
   port?: number;
 }
 
@@ -504,11 +754,20 @@ const companionExecutionTrackExecutionStatusMcpSchema = withMcpJsonSchemaReferen
 const companionShortcutProofStatusMcpSchema = withMcpJsonSchemaReferences(
   companionShortcutProofStatusSchema,
 );
+const companionLeafOperationStatusMcpSchema = withMcpJsonSchemaReferences(
+  companionLeafOperationStatusSchema,
+);
 const procedureShortcutProofProposalRequestMcpSchema = deferMcpInputValidation(
   withMcpJsonSchemaReferences(procedureShortcutProofProposalRequestSchema),
 );
 const procedureShortcutProofProposalResultMcpSchema = withMcpJsonSchemaReferences(
   procedureShortcutProofProposalResultSchema,
+);
+const procedureTutorialMediaAuthoringCurrentRunStatusMcpSchema = withMcpJsonSchemaReferences(
+  procedureTutorialMediaAuthoringCurrentRunStatusSchema,
+);
+const procedureTutorialAuthoringRunStatusMcpSchema = withMcpJsonSchemaReferences(
+  procedureTutorialAuthoringRunStatusSchema,
 );
 const companionDocumentSessionFingerprintEventType = 'companion.document-session-fingerprint.bound';
 const companionDocumentSessionFingerprintEventSchema = z.strictObject({
@@ -545,6 +804,36 @@ function menuDocumentAuthoritySha256(input: {
     .update(input.instanceId)
     .update('\0')
     .update(input.sessionId)
+    .update('\0')
+    .update(input.documentIncarnationId)
+    .digest('hex');
+}
+
+function leafOperationDocumentAuthoritySha256(input: {
+  readonly adapterId: 'blender';
+  readonly instanceId: string;
+  readonly documentIncarnationId: string;
+}): string {
+  return createHash('sha256')
+    .update('operatingline:blender-leaf-operation-document-authority:v1\0')
+    .update(input.adapterId)
+    .update('\0')
+    .update(input.instanceId)
+    .update('\0')
+    .update(input.documentIncarnationId)
+    .digest('hex');
+}
+
+function pokeCompoundDocumentAuthoritySha256(input: {
+  readonly adapterId: 'blender';
+  readonly instanceId: string;
+  readonly documentIncarnationId: string;
+}): string {
+  return createHash('sha256')
+    .update('operatingline:blender-poke-compound-document-authority:v1\0')
+    .update(input.adapterId)
+    .update('\0')
+    .update(input.instanceId)
     .update('\0')
     .update(input.documentIncarnationId)
     .digest('hex');
@@ -1818,9 +2107,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       readonly managedActionReplayAuthority?: {
         readonly replayId: string;
         readonly leafId: string;
-        readonly actionName: 'blender.modifier.add_mirror' | 'blender.modifier.add_solidify';
-        readonly targetId: string;
-      };
+      } & (
+        | {
+            readonly actionName:
+              | 'blender.modifier.add_bevel'
+              | 'blender.modifier.add_mirror'
+              | 'blender.modifier.add_solidify'
+              | 'blender.modifier.add_subdivision_surface';
+            readonly targetId: string;
+          }
+        | {
+            readonly actionName:
+              'blender.material.create_and_assign' | 'blender.material.create_palette_and_assign';
+            readonly targetIds: readonly string[];
+          }
+      );
     };
 
     const getPlanningQuality = (
@@ -2431,28 +2732,84 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       const plan = materialization.compilation.plan;
       const planContentSha256 = computePlanContentSha256(plan);
       const replayLeaf = materialization.tree.nodes.find((node) => node.id === request.leafId);
-      const replayPlanningOptions: InternalPlanningQualityOptions =
-        (prepared.actionName === 'blender.modifier.add_mirror' ||
-          prepared.actionName === 'blender.modifier.add_solidify') &&
-        replayLeaf?.kind === 'leaf' &&
-        replayLeaf.action?.name === prepared.actionName &&
-        typeof replayLeaf.action.arguments['targetId'] === 'string'
-          ? {
-              verifiedExternalResourceConsumers: [
-                {
-                  consumerStepId: replayLeaf.id,
-                  resourceId: replayLeaf.action.arguments['targetId'],
-                  resourceType: 'OBJECT',
-                },
-              ],
-              managedActionReplayAuthority: {
-                replayId: request.replayId,
-                leafId: replayLeaf.id,
-                actionName: prepared.actionName,
-                targetId: replayLeaf.action.arguments['targetId'],
+      const replayPlanningOptions: InternalPlanningQualityOptions = (() => {
+        if (replayLeaf?.kind !== 'leaf' || replayLeaf.action?.name !== prepared.actionName) {
+          return {};
+        }
+        if (
+          (prepared.actionName === 'blender.modifier.add_bevel' ||
+            prepared.actionName === 'blender.modifier.add_mirror' ||
+            prepared.actionName === 'blender.modifier.add_solidify' ||
+            prepared.actionName === 'blender.modifier.add_subdivision_surface') &&
+          typeof replayLeaf.action.arguments['targetId'] === 'string'
+        ) {
+          return {
+            verifiedExternalResourceConsumers: [
+              {
+                consumerStepId: replayLeaf.id,
+                resourceId: replayLeaf.action.arguments['targetId'],
+                resourceType: 'OBJECT',
               },
+            ],
+            managedActionReplayAuthority: {
+              replayId: request.replayId,
+              leafId: replayLeaf.id,
+              actionName: prepared.actionName,
+              targetId: replayLeaf.action.arguments['targetId'],
+            },
+          };
+        }
+        const targets = replayLeaf.action.arguments['targets'];
+        if (
+          prepared.actionName === 'blender.material.create_and_assign' &&
+          Array.isArray(targets) &&
+          targets.every((targetId): targetId is string => typeof targetId === 'string')
+        ) {
+          return {
+            verifiedExternalResourceConsumers: targets.map((resourceId) => ({
+              consumerStepId: replayLeaf.id,
+              resourceId,
+              resourceType: 'OBJECT[]',
+            })),
+            managedActionReplayAuthority: {
+              replayId: request.replayId,
+              leafId: replayLeaf.id,
+              actionName: prepared.actionName,
+              targetIds: [...targets],
+            },
+          };
+        }
+        const paletteMaterials = replayLeaf.action.arguments['materials'];
+        if (
+          prepared.actionName === 'blender.material.create_palette_and_assign' &&
+          Array.isArray(paletteMaterials)
+        ) {
+          const paletteTargets = paletteMaterials.flatMap((material) => {
+            if (material === null || typeof material !== 'object' || Array.isArray(material)) {
+              return [];
             }
-          : {};
+            const materialTargets = (material as Record<string, unknown>)['targets'];
+            return Array.isArray(materialTargets) &&
+              materialTargets.every((targetId): targetId is string => typeof targetId === 'string')
+              ? materialTargets
+              : [];
+          });
+          return {
+            verifiedExternalResourceConsumers: paletteTargets.map((resourceId) => ({
+              consumerStepId: replayLeaf.id,
+              resourceId,
+              resourceType: 'OBJECT[]',
+            })),
+            managedActionReplayAuthority: {
+              replayId: request.replayId,
+              leafId: replayLeaf.id,
+              actionName: prepared.actionName,
+              targetIds: [...paletteTargets],
+            },
+          };
+        }
+        return {};
+      })();
       let binding: ProcedureLeafReplayBinding | undefined;
       let persistenceResult: 'accepted' | 'duplicate' | undefined;
       createProposalCore(
@@ -3306,6 +3663,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const compoundHistoryLockOwner = createPokeCompoundHistoryLockOwnerReader(database);
     const executionCoordinatorRefs: {
       action: ReturnType<typeof createBlenderActionExecutionCoordinator> | null;
+      leafOperation: ReturnType<typeof createBlenderLeafOperationExecutionCoordinator> | null;
+      pokeCompound: ReturnType<typeof createBlenderPokeCompoundExecutionCoordinator> | null;
       shortcut: ReturnType<typeof createBlenderShortcutProofExecutionCoordinator> | null;
       menuControl: ReturnType<typeof createBlenderMenuControlProofExecutionCoordinator> | null;
       executionTrackPreflight: ReturnType<
@@ -3316,6 +3675,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       > | null;
     } = {
       action: null,
+      leafOperation: null,
+      pokeCompound: null,
       shortcut: null,
       menuControl: null,
       executionTrackPreflight: null,
@@ -3324,6 +3685,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const externalTargetLockOwner = (
       excluding:
         | 'action'
+        | 'leaf-operation'
+        | 'poke-compound'
         | 'shortcut'
         | 'menu-control'
         | 'execution-track-preflight'
@@ -3338,6 +3701,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         executionCoordinatorRefs.action?.ownsTarget(adapterId, instanceId) === true
       ) {
         return 'blender.action';
+      }
+      if (
+        excluding !== 'leaf-operation' &&
+        executionCoordinatorRefs.leafOperation?.ownsTarget(adapterId, instanceId) === true
+      ) {
+        return 'blender.leaf-operation';
+      }
+      if (
+        excluding !== 'poke-compound' &&
+        executionCoordinatorRefs.pokeCompound?.ownsTarget(adapterId, instanceId) === true
+      ) {
+        return 'blender.poke-compound';
       }
       if (
         excluding !== 'shortcut' &&
@@ -3371,6 +3746,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         externalTargetLockOwner('action', adapterId, instanceId),
     });
     executionCoordinatorRefs.action = actionExecutionCoordinator;
+    const leafOperationExecutionCoordinator = createBlenderLeafOperationExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: (adapterId, instanceId) =>
+        externalTargetLockOwner('leaf-operation', adapterId, instanceId),
+    });
+    executionCoordinatorRefs.leafOperation = leafOperationExecutionCoordinator;
+    const pokeCompoundExecutionCoordinator = createBlenderPokeCompoundExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: (adapterId, instanceId) =>
+        externalTargetLockOwner('poke-compound', adapterId, instanceId),
+    });
+    executionCoordinatorRefs.pokeCompound = pokeCompoundExecutionCoordinator;
     const shortcutProofExecutionCoordinator = createBlenderShortcutProofExecutionCoordinator({
       database,
       externalHistoryLockOwner: (adapterId, instanceId) =>
@@ -3405,6 +3792,26 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       if (peerOwner !== null) {
         throw new Error(
           `Durable execution target lock ${owner.targetKey} conflicts with ${peerOwner}`,
+        );
+      }
+    }
+    for (const owner of leafOperationExecutionCoordinator.listTargetLockOwners()) {
+      const peerOwner = externalTargetLockOwner(
+        'leaf-operation',
+        owner.adapterId,
+        owner.instanceId,
+      );
+      if (peerOwner !== null) {
+        throw new Error(
+          `Durable leaf-operation target lock ${owner.targetKey} conflicts with ${peerOwner}`,
+        );
+      }
+    }
+    for (const owner of pokeCompoundExecutionCoordinator.listTargetLockOwners()) {
+      const peerOwner = externalTargetLockOwner('poke-compound', owner.adapterId, owner.instanceId);
+      if (peerOwner !== null && peerOwner !== owner.compoundId) {
+        throw new Error(
+          `Durable Poke compound target lock ${owner.adapterId}:${owner.instanceId} conflicts with ${peerOwner}`,
         );
       }
     }
@@ -3846,7 +4253,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         request.target.instanceId !== session.hello.instanceId
       ) {
         return executionTrackPreflightRejected(
-          'Execution-track preflight requires the exact current Guide 1.6 document session',
+          'Execution-track preflight requires the exact current Guide document session',
           409,
           'execution_track_preflight_session_identity_mismatch',
         );
@@ -4307,28 +4714,89 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         const replayLeaf = replayBinding.materialization.tree.nodes.find(
           (node) => node.id === replayBinding.leafId,
         );
-        const replayPlanningOptions: InternalPlanningQualityOptions =
-          (preparedReplay.actionName === 'blender.modifier.add_mirror' ||
-            preparedReplay.actionName === 'blender.modifier.add_solidify') &&
-          replayLeaf?.kind === 'leaf' &&
-          replayLeaf.action?.name === preparedReplay.actionName &&
-          typeof replayLeaf.action.arguments['targetId'] === 'string'
-            ? {
-                verifiedExternalResourceConsumers: [
-                  {
-                    consumerStepId: replayLeaf.id,
-                    resourceId: replayLeaf.action.arguments['targetId'],
-                    resourceType: 'OBJECT',
-                  },
-                ],
-                managedActionReplayAuthority: {
-                  replayId: replayBinding.replayId,
-                  leafId: replayLeaf.id,
-                  actionName: preparedReplay.actionName,
-                  targetId: replayLeaf.action.arguments['targetId'],
+        const replayPlanningOptions: InternalPlanningQualityOptions = (() => {
+          if (
+            replayLeaf?.kind !== 'leaf' ||
+            replayLeaf.action?.name !== preparedReplay.actionName
+          ) {
+            return {};
+          }
+          if (
+            (preparedReplay.actionName === 'blender.modifier.add_bevel' ||
+              preparedReplay.actionName === 'blender.modifier.add_mirror' ||
+              preparedReplay.actionName === 'blender.modifier.add_solidify' ||
+              preparedReplay.actionName === 'blender.modifier.add_subdivision_surface') &&
+            typeof replayLeaf.action.arguments['targetId'] === 'string'
+          ) {
+            return {
+              verifiedExternalResourceConsumers: [
+                {
+                  consumerStepId: replayLeaf.id,
+                  resourceId: replayLeaf.action.arguments['targetId'],
+                  resourceType: 'OBJECT',
                 },
+              ],
+              managedActionReplayAuthority: {
+                replayId: replayBinding.replayId,
+                leafId: replayLeaf.id,
+                actionName: preparedReplay.actionName,
+                targetId: replayLeaf.action.arguments['targetId'],
+              },
+            };
+          }
+          const targets = replayLeaf.action.arguments['targets'];
+          if (
+            preparedReplay.actionName === 'blender.material.create_and_assign' &&
+            Array.isArray(targets) &&
+            targets.every((targetId): targetId is string => typeof targetId === 'string')
+          ) {
+            return {
+              verifiedExternalResourceConsumers: targets.map((resourceId) => ({
+                consumerStepId: replayLeaf.id,
+                resourceId,
+                resourceType: 'OBJECT[]',
+              })),
+              managedActionReplayAuthority: {
+                replayId: replayBinding.replayId,
+                leafId: replayLeaf.id,
+                actionName: preparedReplay.actionName,
+                targetIds: [...targets],
+              },
+            };
+          }
+          const paletteMaterials = replayLeaf.action.arguments['materials'];
+          if (
+            preparedReplay.actionName === 'blender.material.create_palette_and_assign' &&
+            Array.isArray(paletteMaterials)
+          ) {
+            const paletteTargets = paletteMaterials.flatMap((material) => {
+              if (material === null || typeof material !== 'object' || Array.isArray(material)) {
+                return [];
               }
-            : {};
+              const materialTargets = (material as Record<string, unknown>)['targets'];
+              return Array.isArray(materialTargets) &&
+                materialTargets.every(
+                  (targetId): targetId is string => typeof targetId === 'string',
+                )
+                ? materialTargets
+                : [];
+            });
+            return {
+              verifiedExternalResourceConsumers: paletteTargets.map((resourceId) => ({
+                consumerStepId: replayLeaf.id,
+                resourceId,
+                resourceType: 'OBJECT[]',
+              })),
+              managedActionReplayAuthority: {
+                replayId: replayBinding.replayId,
+                leafId: replayLeaf.id,
+                actionName: preparedReplay.actionName,
+                targetIds: [...paletteTargets],
+              },
+            };
+          }
+          return {};
+        })();
         validateGuidePlanAgainstActionCatalog(guideProposal!.plan, catalog);
         const planningQuality = evaluatePlanningQuality(
           planningQualityEvaluationRequestSchema.parse({
@@ -4473,6 +4941,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         sessionId: session.hello.sessionId,
         documentIncarnationId: session.hello.documentIncarnationId,
       });
+    const leafOperationDocumentAuthorityFor = (session: ActiveCompanionDocumentSession): string =>
+      leafOperationDocumentAuthoritySha256({
+        adapterId: 'blender',
+        instanceId: session.hello.instanceId,
+        documentIncarnationId: session.hello.documentIncarnationId,
+      });
+    const pokeCompoundDocumentAuthorityFor = (session: ActiveCompanionDocumentSession): string =>
+      pokeCompoundDocumentAuthoritySha256({
+        adapterId: 'blender',
+        instanceId: session.hello.instanceId,
+        documentIncarnationId: session.hello.documentIncarnationId,
+      });
     const executionTrackLiveAuthorityFor = (session: ActiveCompanionDocumentSession) => {
       const target = {
         adapterId: 'blender' as const,
@@ -4528,6 +5008,74 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       code = 'action_execution_not_authorized',
     ): never => {
       throw new BlenderActionExecutionError(code, statusCode, message);
+    };
+
+    const leafOperationExecutionRejected = (
+      message: string,
+      statusCode: number = 409,
+      code = 'leaf_operation_not_authorized',
+    ): never => {
+      throw new BlenderLeafOperationExecutionError(code, statusCode, message);
+    };
+
+    const requireManagedBlenderOperationMcpTrack = (
+      binding: ProcedureLeafReplayBinding,
+      profile: BlenderLeafOperationProfile,
+    ) => {
+      const leaf = binding.materialization.tree.nodes.find(
+        (node) => node.kind === 'leaf' && node.id === binding.leafId,
+      );
+      if (
+        leaf?.kind !== 'leaf' ||
+        leaf.action === null ||
+        leaf.action.adapterId !== 'blender' ||
+        leaf.action.name !== profile.actionName ||
+        binding.actionName !== profile.actionName ||
+        binding.recipeId !== profile.recipeId
+      ) {
+        return leafOperationExecutionRejected(
+          `Leaf-operation execution is restricted to the exact ${profile.title} replay leaf`,
+          422,
+          'leaf_operation_unsupported_action',
+        );
+      }
+      const track = leaf.mcpTracks[0];
+      if (
+        binding.materialization.formatVersion !== '1.5.0' ||
+        leaf.mcpTracks.length !== 1 ||
+        track?.availability !== 'available' ||
+        track.operations.length !== profile.operationIds.length
+      ) {
+        return leafOperationExecutionRejected(
+          `Replay binding lacks the exact operation-level ${profile.title} MCP track`,
+        );
+      }
+      for (const [index, expectedOperationId] of profile.operationIds.entries()) {
+        const operation = track.operations[index];
+        if (
+          operation === undefined ||
+          operation.order !== index + 1 ||
+          operation.serverName !== 'operating-line' ||
+          operation.toolName !== profile.executeToolName ||
+          operation.sourceOperationId !== expectedOperationId ||
+          operation.operationParameters === undefined ||
+          operation.argumentSource !== undefined ||
+          operation.actionArguments !== undefined ||
+          !sameProcedureLeafReplayValue(operation.arguments, {
+            formatVersion: '1.0.0',
+            requestId: '$runtime.requestId',
+            replayId: '$runtime.replayId',
+            expectedState: '$runtime.expectedState',
+          }) ||
+          operation.resultBinding !==
+            `${leaf.id}.${expectedOperationId}.companion_leaf_operation_progress`
+        ) {
+          return leafOperationExecutionRejected(
+            `Replay binding contains a forged or reordered ${profile.title} MCP operation`,
+          );
+        }
+      }
+      return { action: leaf.action, leaf, track };
     };
 
     const requireManagedBlenderActionMcpTrack = (binding: ProcedureLeafReplayBinding) => {
@@ -5091,6 +5639,4800 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       };
     };
 
+    const authorizeBlenderLeafOperationExecution = (
+      request: CompanionLeafOperationCreateRequest,
+      profile: BlenderLeafOperationProfile,
+    ): {
+      execution: CompanionLeafOperationStatus;
+      documentAuthoritySha256: string;
+      sessionFingerprintSha256: string;
+    } => {
+      const { binding, decision, proposalReceipt, decisionReceipt } =
+        loadProcedureLeafReplayEvidence(request.replayId);
+      if (decision.decision !== 'accepted') {
+        return leafOperationExecutionRejected(
+          `The ${profile.title} replay proposal was not accepted by the target user`,
+        );
+      }
+      const { action, leaf, track } = requireManagedBlenderOperationMcpTrack(binding, profile);
+      const proposal = binding.proposal;
+      if (
+        proposal.targetAdapterId !== 'blender' ||
+        proposal.targetInstanceId !== binding.targetInstanceId ||
+        decision.adapterId !== 'blender' ||
+        decision.instanceId !== binding.targetInstanceId ||
+        decision.proposalId !== proposal.proposalId
+      ) {
+        return leafOperationExecutionRejected(
+          `${profile.title} proposal, decision, and target identities differ`,
+        );
+      }
+      if (
+        proposalReceipt.subjectType !== 'replay_proposal' ||
+        proposalReceipt.subjectId !== proposal.proposalId ||
+        proposalReceipt.authentication !== 'orchestrator_internal' ||
+        proposalReceipt.adapterId !== 'blender' ||
+        proposalReceipt.instanceId !== binding.targetInstanceId ||
+        proposalReceipt.sessionFingerprintSha256 !== null ||
+        decisionReceipt.subjectType !== 'guide_proposal_decision' ||
+        decisionReceipt.subjectId !== decision.decisionId ||
+        decisionReceipt.authentication !== 'negotiated_companion_lease' ||
+        decisionReceipt.adapterId !== 'blender' ||
+        decisionReceipt.instanceId !== binding.targetInstanceId ||
+        decisionReceipt.sessionFingerprintSha256 === null
+      ) {
+        return leafOperationExecutionRejected(
+          `The accepted ${profile.title} replay lacks a negotiated Companion receipt`,
+        );
+      }
+      const planContentSha256 = computePlanContentSha256(proposal.plan);
+      const step = proposal.plan.steps.find((candidate) => candidate.id === binding.leafId);
+      if (
+        planContentSha256 !== binding.planContentSha256 ||
+        step === undefined ||
+        step.id !== leaf.id ||
+        step.action?.adapterId !== 'blender' ||
+        step.action.name !== action.name ||
+        !sameProcedureLeafReplayValue(step.action.arguments, action.arguments)
+      ) {
+        return leafOperationExecutionRejected(
+          `Accepted replay does not contain its exact ${profile.title} target leaf`,
+        );
+      }
+
+      let executableSteps: ReturnType<typeof procedureLeafReplayExecutableSteps>;
+      try {
+        executableSteps = procedureLeafReplayExecutableSteps(binding);
+      } catch (error) {
+        if (!(error instanceof ProcedureLeafReplayError)) throw error;
+        return leafOperationExecutionRejected(error.message);
+      }
+      const targetStepIndex = executableSteps.findIndex((candidate) => candidate.id === step.id);
+      if (targetStepIndex < 0) {
+        return leafOperationExecutionRejected(
+          `Accepted replay executable order does not contain the ${profile.title} leaf`,
+        );
+      }
+      const requiredCompletedStepIds = executableSteps
+        .slice(0, targetStepIndex)
+        .map((candidate) => candidate.id);
+      const requiredCompletedStepIdSet = new Set(requiredCompletedStepIds);
+      const latest = listCompanionStates().find(
+        (report) =>
+          report.adapterId === 'blender' && report.instanceId === binding.targetInstanceId,
+      );
+      if (latest === undefined) {
+        return leafOperationExecutionRejected(
+          'The accepted target Companion is not currently present',
+          409,
+          'leaf_operation_companion_unavailable',
+        );
+      }
+      if (
+        latest.reportId !== request.expectedState.reportId ||
+        latest.sequence !== request.expectedState.sequence
+      ) {
+        return leafOperationExecutionRejected(
+          'The expected Companion state is stale; refresh companions and retry with a new requestId',
+          409,
+          'leaf_operation_state_changed',
+        );
+      }
+      const completedDependenciesMatch =
+        latest.completedStepIds.length === requiredCompletedStepIds.length &&
+        latest.completedStepIds.every(
+          (stepId, index) => stepId === requiredCompletedStepIds[index],
+        );
+      const startCheckpoint = latest.nativeUndoCheckpoint;
+      if (
+        latest.plan?.id !== proposal.plan.id ||
+        latest.plan.revision !== proposal.plan.revision ||
+        latest.planContentSha256 !== planContentSha256 ||
+        latest.executionId === null ||
+        latest.phase !== 'running' ||
+        latest.transition !==
+          (requiredCompletedStepIds.length === 0 ? 'walkthrough_started' : 'step_succeeded') ||
+        latest.activeStepId !== (requiredCompletedStepIds.at(-1) ?? null) ||
+        latest.stepId !== (requiredCompletedStepIds.at(-1) ?? null) ||
+        (requiredCompletedStepIds.length === 0 && latest.observations.length !== 0) ||
+        !completedDependenciesMatch ||
+        startCheckpoint === undefined ||
+        startCheckpoint.operation !== (requiredCompletedStepIds.length === 0 ? 'start' : 'next') ||
+        (startCheckpoint.previousCheckpointId === null) !==
+          (requiredCompletedStepIds.length === 0) ||
+        startCheckpoint.session.receiptStepIds.some(
+          (stepId) => !requiredCompletedStepIdSet.has(stepId),
+        ) ||
+        (latest.observationGate !== undefined && latest.observationGate !== null) ||
+        latest.artifactAttestation !== null ||
+        latest.error !== null
+      ) {
+        return leafOperationExecutionRejected(
+          'The target Companion is not at the untouched executable-prefix cursor for this leaf',
+          409,
+          'leaf_operation_state_not_ready',
+        );
+      }
+      const reportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        latest.reportId,
+      );
+      if (
+        reportReceipt === null ||
+        reportReceipt.subjectType !== 'companion_state_report' ||
+        reportReceipt.subjectId !== latest.reportId ||
+        reportReceipt.authentication !== 'negotiated_companion_lease' ||
+        reportReceipt.adapterId !== 'blender' ||
+        reportReceipt.instanceId !== binding.targetInstanceId ||
+        reportReceipt.sessionFingerprintSha256 === null ||
+        proposalReceipt.sequence >= decisionReceipt.sequence ||
+        decisionReceipt.sequence >= reportReceipt.sequence ||
+        Date.parse(proposalReceipt.receivedAt) > Date.parse(decisionReceipt.receivedAt) ||
+        Date.parse(decisionReceipt.receivedAt) > Date.parse(reportReceipt.receivedAt) ||
+        Date.parse(decision.occurredAt) > Date.parse(latest.occurredAt)
+      ) {
+        return leafOperationExecutionRejected(
+          'The expected Companion state is not an ordered receipt after replay acceptance',
+          409,
+          'leaf_operation_evidence_order_invalid',
+        );
+      }
+      let currentDocumentSession: ActiveCompanionDocumentSession;
+      try {
+        currentDocumentSession =
+          companionLeaseManager.authorizeDocumentSessionForReceiptFingerprint(
+            decisionReceipt.sessionFingerprintSha256,
+            'blender',
+            binding.targetInstanceId,
+          );
+        const reportDocumentSession =
+          companionLeaseManager.authorizeDocumentSessionForReceiptFingerprint(
+            reportReceipt.sessionFingerprintSha256,
+            'blender',
+            binding.targetInstanceId,
+          );
+        if (
+          leafOperationDocumentAuthorityFor(reportDocumentSession) !==
+          leafOperationDocumentAuthorityFor(currentDocumentSession)
+        ) {
+          return leafOperationExecutionRejected(
+            `The accepted ${profile.title} receipts belong to different Companion documents`,
+            409,
+            'leaf_operation_document_session_not_current',
+          );
+        }
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return leafOperationExecutionRejected(
+            `The accepted ${profile.title} receipts are not bound to the current Companion process and document`,
+            409,
+            'leaf_operation_document_session_not_current',
+          );
+        }
+        throw error;
+      }
+
+      const completedOperations = leafOperationExecutionCoordinator.successfulExecutionsForReplay(
+        request.replayId,
+      );
+      if (completedOperations.length >= profile.operationIds.length) {
+        return leafOperationExecutionRejected(
+          `The ${profile.title} leaf already completed all ${profile.operationIds.length} operations`,
+          409,
+          'leaf_operation_already_completed',
+        );
+      }
+      const interactionCatalog = interactionCatalogRegistry.get({
+        targetAdapterId: 'blender',
+        actionCatalogVersion: binding.materialization.catalogBinding.actionCatalogVersion,
+        interactionCatalogVersion: binding.materialization.catalogBinding.interactionCatalogVersion,
+      });
+      const interactionRecipe = interactionCatalog.recipes.find(
+        (candidate) => candidate.id === profile.recipeId,
+      );
+      if (
+        computeProcedureTreeContentSha256(interactionCatalog) !==
+          binding.materialization.catalogBinding.interactionCatalogContentSha256 ||
+        interactionRecipe?.actionName !== profile.actionName ||
+        interactionRecipe.procedureMaterialization === undefined ||
+        interactionRecipe.procedureMaterialization.mcp.availability !== 'available' ||
+        interactionRecipe.procedureMaterialization.mcp.source !== 'catalog.operation_level_mcp'
+      ) {
+        return leafOperationExecutionRejected(
+          `Installed ${profile.title} catalog authority differs from the immutable replay`,
+          409,
+          'leaf_operation_catalog_authority_changed',
+        );
+      }
+      const materializationContentSha256 = computeProcedureTreeContentSha256(
+        interactionRecipe.procedureMaterialization,
+      );
+      const mcpTrackContentSha256 = computeProcedureTreeContentSha256(
+        interactionRecipe.procedureMaterialization.mcp,
+      );
+      for (const completed of completedOperations) {
+        if (
+          completed.target.instanceId !== binding.targetInstanceId ||
+          completed.proposalId !== proposal.proposalId ||
+          completed.plan.id !== proposal.plan.id ||
+          completed.plan.revision !== proposal.plan.revision ||
+          completed.planContentSha256 !== planContentSha256 ||
+          completed.executionId !== latest.executionId ||
+          completed.leafId !== leaf.id ||
+          completed.stepId !== leaf.id ||
+          completed.actionName !== profile.actionName ||
+          completed.recipeId !== profile.recipeId ||
+          completed.catalogVersion !==
+            binding.materialization.catalogBinding.interactionCatalogVersion ||
+          completed.interactionCatalogContentSha256 !==
+            binding.materialization.catalogBinding.interactionCatalogContentSha256 ||
+          completed.materializationContentSha256 !== materializationContentSha256 ||
+          completed.mcpTrackContentSha256 !== mcpTrackContentSha256 ||
+          !isDeepStrictEqual(completed.expectedState, request.expectedState)
+        ) {
+          return leafOperationExecutionRejected(
+            `Durable ${profile.title} progress belongs to different replay authority`,
+            409,
+            'leaf_operation_progress_authority_changed',
+          );
+        }
+      }
+      const operationOrdinal = completedOperations.length + 1;
+      const sourceOperationId = profile.operationIds[operationOrdinal - 1]!;
+      const materializedOperation = track.operations[operationOrdinal - 1]!;
+      const requestedAt = new Date().toISOString();
+      const operationIds = guidedLeafOperationIdsSchema.parse(profile.operationIds);
+      const authority = {
+        formatVersion: request.formatVersion,
+        requestId: request.requestId,
+        replayId: request.replayId,
+        target: { adapterId: 'blender' as const, instanceId: binding.targetInstanceId },
+        proposalId: proposal.proposalId,
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256,
+        executionId: latest.executionId,
+        leafId: leaf.id,
+        stepId: leaf.id,
+        actionName: profile.actionName,
+        recipeId: profile.recipeId,
+        catalogVersion: binding.materialization.catalogBinding.interactionCatalogVersion,
+        interactionCatalogContentSha256:
+          binding.materialization.catalogBinding.interactionCatalogContentSha256,
+        materializationContentSha256,
+        mcpTrackContentSha256,
+        expectedState: request.expectedState,
+        operationIds,
+        operationOrdinal,
+        sourceOperationId,
+        operationParameters: structuredClone(materializedOperation.operationParameters!),
+      };
+      return {
+        execution: companionLeafOperationStatusSchema.parse({
+          ...authority,
+          operationBindingSha256: computeCompanionLeafOperationBindingSha256(authority),
+          requestedAt,
+          status: 'queued',
+          updatedAt: requestedAt,
+        }),
+        documentAuthoritySha256: leafOperationDocumentAuthorityFor(currentDocumentSession),
+        sessionFingerprintSha256: decisionReceipt.sessionFingerprintSha256,
+      };
+    };
+
+    const expectedTransformOperationEvidence = (
+      execution: CompanionLeafOperationStatus,
+    ): Record<string, unknown> => {
+      const ordinal = execution.operationOrdinal;
+      const actionArguments = (() => {
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[0],
+        );
+        return action.arguments;
+      })();
+      const translation = actionArguments['translation'];
+      const rotation = actionArguments['rotation'];
+      const scale = actionArguments['scale'];
+      const nodeGroupPresent = ordinal >= 2;
+      const transformPresent = ordinal >= 4;
+      const outputPresent = ordinal >= 8;
+      const rnaControlWrites = (() => {
+        const binding =
+          ordinal === 5
+            ? {
+                actionArgument: 'translation',
+                socketIdentifier: 'Translation',
+                defaultValue: [0, 0, 0],
+              }
+            : ordinal === 6
+              ? {
+                  actionArgument: 'rotation',
+                  socketIdentifier: 'Rotation',
+                  defaultValue: [0, 0, 0],
+                }
+              : ordinal === 7
+                ? {
+                    actionArgument: 'scale',
+                    socketIdentifier: 'Scale',
+                    defaultValue: [1, 1, 1],
+                  }
+                : undefined;
+        if (binding === undefined) return [];
+        const accepted = actionArguments[binding.actionArgument];
+        if (!Array.isArray(accepted) || accepted.length !== 3) {
+          return leafOperationExecutionRejected(
+            'Transform Geometry RNA evidence requires one accepted XYZ vector',
+          );
+        }
+        const componentLabels = ['X', 'Y', 'Z'] as const;
+        return componentLabels.map((componentLabel, componentIndex) => {
+          const acceptedValue = Number(accepted[componentIndex]);
+          return {
+            order: componentIndex + 1,
+            executionMethod: 'blender_rna_property_write',
+            mcpTool: 'operatingline.blender.geometry-nodes.transform.execute-next',
+            sourceOperationId: transformGeometryLeafOperationIds[ordinal - 1],
+            semanticAction: 'node.transform_geometry',
+            actionArgument: binding.actionArgument,
+            nodeGroupId: actionArguments['nodeGroupId'],
+            nodeGroupName: actionArguments['nodeGroupName'],
+            nodeName: 'OperatingLine Transform',
+            nodeType: 'GeometryNodeTransform',
+            socketIdentifier: binding.socketIdentifier,
+            propertyName: 'default_value',
+            componentIndex,
+            componentLabel,
+            beforeValue: binding.defaultValue[componentIndex],
+            acceptedValue,
+            observedValue: Math.fround(acceptedValue),
+            uiPath: [
+              'Geometry Nodes',
+              actionArguments['nodeGroupName'],
+              'OperatingLine Transform',
+              binding.socketIdentifier,
+              componentLabel,
+            ],
+          };
+        });
+      })();
+      const evidence: Record<string, unknown> = {
+        completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+        nodeGroupId: nodeGroupPresent ? actionArguments['nodeGroupId'] : null,
+        modifierId: nodeGroupPresent ? actionArguments['modifierId'] : null,
+        completeGraph: ordinal === 11,
+        preconditionsValidated: ordinal === 1,
+        preflightKind: ordinal === 1 ? 'managed_transform_geometry_resources' : null,
+        preflightTargetId: ordinal === 1 ? actionArguments['targetId'] : null,
+        stage: Math.min(ordinal, 10),
+        nodeCount: ordinal < 3 ? 0 : ordinal < 4 ? 1 : outputPresent ? 3 : 2,
+        interfaceSocketCount: ordinal < 3 ? 0 : outputPresent ? 2 : 1,
+        linkCount: ordinal < 9 ? 0 : ordinal === 9 ? 1 : 2,
+        rnaControlWrites,
+      };
+      if (nodeGroupPresent) {
+        evidence['nodes'] = [
+          ...(ordinal >= 3 ? ['OperatingLine Input'] : []),
+          ...(ordinal >= 4 ? ['OperatingLine Transform'] : []),
+          ...(outputPresent ? ['OperatingLine Output'] : []),
+        ].sort();
+        evidence['interfaceSockets'] = [
+          ...(ordinal >= 3
+            ? [{ name: 'Geometry', inOut: 'INPUT', socketType: 'NodeSocketGeometry' }]
+            : []),
+          ...(outputPresent
+            ? [{ name: 'Geometry', inOut: 'OUTPUT', socketType: 'NodeSocketGeometry' }]
+            : []),
+        ];
+      }
+      if (transformPresent) {
+        evidence['translation'] = ordinal >= 5 ? translation : [0, 0, 0];
+        evidence['rotation'] = ordinal >= 6 ? rotation : [0, 0, 0];
+        evidence['scale'] = ordinal >= 7 ? scale : [1, 1, 1];
+      }
+      return evidence;
+    };
+
+    const lightTrailsNodeStages = [
+      [3, 'OperatingLine Input', 'NodeGroupInput'],
+      [4, 'OperatingLine Half Tile Line', 'GeometryNodeCurvePrimitiveLine'],
+      [6, 'OperatingLine Trail Resolution', 'GeometryNodeResampleCurve'],
+      [8, 'OperatingLine Trail Rows', 'GeometryNodeMeshLine'],
+      [11, 'OperatingLine Trail Instances', 'GeometryNodeInstanceOnPoints'],
+      [12, 'OperatingLine Realize Trails', 'GeometryNodeRealizeInstances'],
+      [13, 'OperatingLine Trail Position', 'GeometryNodeInputPosition'],
+      [14, 'OperatingLine Terrain Noise', 'ShaderNodeTexNoise'],
+      [19, 'OperatingLine Center Noise', 'ShaderNodeMath'],
+      [20, 'OperatingLine Scale Height', 'ShaderNodeMath'],
+      [22, 'OperatingLine Z Offset', 'ShaderNodeCombineXYZ'],
+      [23, 'OperatingLine Displace Trails', 'GeometryNodeSetPosition'],
+      [24, 'OperatingLine Mirror Half Tile', 'GeometryNodeTransform'],
+      [25, 'OperatingLine Mirrored Tile', 'GeometryNodeJoinGeometry'],
+      [26, 'OperatingLine Trail Profile', 'GeometryNodeCurvePrimitiveCircle'],
+      [29, 'OperatingLine Curve To Mesh', 'GeometryNodeCurveToMesh'],
+      [30, 'OperatingLine Loop Tiles', 'GeometryNodeMeshLine'],
+      [32, 'OperatingLine Tile Instances', 'GeometryNodeInstanceOnPoints'],
+      [33, 'OperatingLine Realize Tiles', 'GeometryNodeRealizeInstances'],
+      [34, 'OperatingLine Output', 'NodeGroupOutput'],
+    ] as const;
+
+    const lightTrailsLinkStages = [
+      [
+        35,
+        'OperatingLine Half Tile Line',
+        'GeometryNodeCurvePrimitiveLine',
+        'Curve',
+        'OperatingLine Trail Resolution',
+        'GeometryNodeResampleCurve',
+        'Curve',
+      ],
+      [
+        36,
+        'OperatingLine Trail Rows',
+        'GeometryNodeMeshLine',
+        'Mesh',
+        'OperatingLine Trail Instances',
+        'GeometryNodeInstanceOnPoints',
+        'Points',
+      ],
+      [
+        37,
+        'OperatingLine Trail Resolution',
+        'GeometryNodeResampleCurve',
+        'Curve',
+        'OperatingLine Trail Instances',
+        'GeometryNodeInstanceOnPoints',
+        'Instance',
+      ],
+      [
+        38,
+        'OperatingLine Trail Instances',
+        'GeometryNodeInstanceOnPoints',
+        'Instances',
+        'OperatingLine Realize Trails',
+        'GeometryNodeRealizeInstances',
+        'Geometry',
+      ],
+      [
+        39,
+        'OperatingLine Trail Position',
+        'GeometryNodeInputPosition',
+        'Position',
+        'OperatingLine Terrain Noise',
+        'ShaderNodeTexNoise',
+        'Vector',
+      ],
+      [
+        40,
+        'OperatingLine Terrain Noise',
+        'ShaderNodeTexNoise',
+        'Fac',
+        'OperatingLine Center Noise',
+        'ShaderNodeMath',
+        'Value',
+      ],
+      [
+        41,
+        'OperatingLine Center Noise',
+        'ShaderNodeMath',
+        'Value',
+        'OperatingLine Scale Height',
+        'ShaderNodeMath',
+        'Value',
+      ],
+      [
+        42,
+        'OperatingLine Scale Height',
+        'ShaderNodeMath',
+        'Value',
+        'OperatingLine Z Offset',
+        'ShaderNodeCombineXYZ',
+        'Z',
+      ],
+      [
+        43,
+        'OperatingLine Realize Trails',
+        'GeometryNodeRealizeInstances',
+        'Geometry',
+        'OperatingLine Displace Trails',
+        'GeometryNodeSetPosition',
+        'Geometry',
+      ],
+      [
+        44,
+        'OperatingLine Z Offset',
+        'ShaderNodeCombineXYZ',
+        'Vector',
+        'OperatingLine Displace Trails',
+        'GeometryNodeSetPosition',
+        'Offset',
+      ],
+      [
+        45,
+        'OperatingLine Displace Trails',
+        'GeometryNodeSetPosition',
+        'Geometry',
+        'OperatingLine Mirror Half Tile',
+        'GeometryNodeTransform',
+        'Geometry',
+      ],
+      [
+        46,
+        'OperatingLine Displace Trails',
+        'GeometryNodeSetPosition',
+        'Geometry',
+        'OperatingLine Mirrored Tile',
+        'GeometryNodeJoinGeometry',
+        'Geometry',
+      ],
+      [
+        47,
+        'OperatingLine Mirror Half Tile',
+        'GeometryNodeTransform',
+        'Geometry',
+        'OperatingLine Mirrored Tile',
+        'GeometryNodeJoinGeometry',
+        'Geometry',
+      ],
+      [
+        48,
+        'OperatingLine Mirrored Tile',
+        'GeometryNodeJoinGeometry',
+        'Geometry',
+        'OperatingLine Curve To Mesh',
+        'GeometryNodeCurveToMesh',
+        'Curve',
+      ],
+      [
+        49,
+        'OperatingLine Trail Profile',
+        'GeometryNodeCurvePrimitiveCircle',
+        'Curve',
+        'OperatingLine Curve To Mesh',
+        'GeometryNodeCurveToMesh',
+        'Profile Curve',
+      ],
+      [
+        50,
+        'OperatingLine Loop Tiles',
+        'GeometryNodeMeshLine',
+        'Mesh',
+        'OperatingLine Tile Instances',
+        'GeometryNodeInstanceOnPoints',
+        'Points',
+      ],
+      [
+        51,
+        'OperatingLine Curve To Mesh',
+        'GeometryNodeCurveToMesh',
+        'Mesh',
+        'OperatingLine Tile Instances',
+        'GeometryNodeInstanceOnPoints',
+        'Instance',
+      ],
+      [
+        52,
+        'OperatingLine Tile Instances',
+        'GeometryNodeInstanceOnPoints',
+        'Instances',
+        'OperatingLine Realize Tiles',
+        'GeometryNodeRealizeInstances',
+        'Geometry',
+      ],
+      [
+        53,
+        'OperatingLine Realize Tiles',
+        'GeometryNodeRealizeInstances',
+        'Geometry',
+        'OperatingLine Output',
+        'NodeGroupOutput',
+        'Geometry',
+      ],
+    ] as const;
+
+    const expectedLightTrailsOperationEvidence = (
+      execution: CompanionLeafOperationStatus,
+    ): Record<string, unknown> => {
+      const ordinal = execution.operationOrdinal;
+      const stage = Math.min(ordinal, lightTrailsLeafOperationIds.length - 1);
+      const { action } = requireManagedBlenderOperationMcpTrack(
+        loadProcedureLeafReplayEvidence(execution.replayId).binding,
+        blenderLeafOperationProfiles[1],
+      );
+      const actionArguments = action.arguments;
+      const numberArgument = (name: string): number => Number(actionArguments[name]);
+      const blenderFloat = (value: number): number => Math.fround(value);
+      const nodes = lightTrailsNodeStages
+        .filter(([introducedAt]) => introducedAt <= stage)
+        .map(([_introducedAt, name]) => name)
+        .sort();
+      const interfaceSockets = [
+        ...(stage >= 3
+          ? [{ name: 'Geometry', inOut: 'INPUT', socketType: 'NodeSocketGeometry' }]
+          : []),
+        ...(stage >= 34
+          ? [{ name: 'Geometry', inOut: 'OUTPUT', socketType: 'NodeSocketGeometry' }]
+          : []),
+      ];
+      const controlledValues: Record<string, unknown> = {};
+      if (stage >= 4) {
+        controlledValues['tileLengthHalfStart'] = [
+          blenderFloat(-(stage >= 5 ? numberArgument('tileLength') : 1) / 2),
+          0,
+          0,
+        ];
+      }
+      if (stage >= 6) {
+        controlledValues['pointsPerTrail'] = stage >= 7 ? numberArgument('pointsPerTrail') : 10;
+      }
+      if (stage >= 8) {
+        controlledValues['trailCount'] = stage >= 9 ? numberArgument('trailCount') : 1;
+        controlledValues['trailSpacingOffset'] = [
+          0,
+          blenderFloat(stage >= 10 ? numberArgument('trailSpacing') : 1),
+          0,
+        ];
+      }
+      if (stage >= 14) {
+        controlledValues['noiseScale'] = blenderFloat(
+          stage >= 15 ? numberArgument('noiseScale') : 1,
+        );
+        controlledValues['noiseDetail'] = blenderFloat(
+          stage >= 16 ? numberArgument('noiseDetail') : 2,
+        );
+        controlledValues['noiseRoughness'] = blenderFloat(
+          stage >= 17 ? numberArgument('noiseRoughness') : 0.5,
+        );
+        controlledValues['noiseSeed'] = blenderFloat(stage >= 18 ? numberArgument('noiseSeed') : 0);
+      }
+      if (stage >= 20) {
+        controlledValues['height'] = blenderFloat(stage >= 21 ? numberArgument('height') : 0);
+      }
+      if (stage >= 26) {
+        controlledValues['profileSides'] = stage >= 27 ? numberArgument('profileSides') : 3;
+        controlledValues['profileRadius'] = blenderFloat(
+          stage >= 28 ? numberArgument('profileRadius') : 0.1,
+        );
+      }
+      if (stage >= 30) {
+        controlledValues['tileRepeatCount'] = stage >= 31 ? numberArgument('tileRepeatCount') : 1;
+        controlledValues['tileLengthOffset'] = [blenderFloat(numberArgument('tileLength')), 0, 0];
+      }
+      const rnaResourceMutations =
+        ordinal === 2
+          ? [
+              {
+                order: 1,
+                executionMethod: 'blender_rna_node_group_create',
+                mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+                sourceOperationId: 'semantic.new_geometry_modifier',
+                semanticAction: 'semantic.new_geometry_modifier',
+                targetId: actionArguments['targetId'],
+                mutationKind: 'node_group_create',
+                nodeGroupId: actionArguments['nodeGroupId'],
+                nodeGroupName: actionArguments['nodeGroupName'],
+                nodeTreeType: 'GeometryNodeTree',
+                observedResource: true,
+                uiPath: ['Geometry Nodes', actionArguments['nodeGroupName']],
+              },
+              {
+                order: 2,
+                executionMethod: 'blender_rna_modifier_create',
+                mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+                sourceOperationId: 'semantic.new_geometry_modifier',
+                semanticAction: 'semantic.new_geometry_modifier',
+                targetId: actionArguments['targetId'],
+                mutationKind: 'modifier_create',
+                modifierId: actionArguments['modifierId'],
+                modifierName: actionArguments['modifierName'],
+                modifierType: 'NODES',
+                observedResource: true,
+                uiPath: ['Properties', 'Modifiers', actionArguments['modifierName']],
+              },
+              {
+                order: 3,
+                executionMethod: 'blender_rna_modifier_node_group_bind',
+                mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+                sourceOperationId: 'semantic.new_geometry_modifier',
+                semanticAction: 'semantic.new_geometry_modifier',
+                targetId: actionArguments['targetId'],
+                mutationKind: 'modifier_node_group_bind',
+                modifierId: actionArguments['modifierId'],
+                modifierName: actionArguments['modifierName'],
+                nodeGroupId: actionArguments['nodeGroupId'],
+                nodeGroupName: actionArguments['nodeGroupName'],
+                observedBinding: true,
+                uiPath: [
+                  'Properties',
+                  'Modifiers',
+                  actionArguments['modifierName'],
+                  'Node Group',
+                  actionArguments['nodeGroupName'],
+                ],
+              },
+            ]
+          : [];
+      const rnaControlWrites = (() => {
+        type WriteSpecification = {
+          readonly order: number;
+          readonly semanticAction: string;
+          readonly actionArgument: string;
+          readonly nodeName: string;
+          readonly nodeType: string;
+          readonly socketIdentifier: string;
+          readonly componentIndex: 0 | 1 | 2 | null;
+          readonly componentLabel: 'X' | 'Y' | 'Z' | null;
+          readonly projection:
+            | 'identity'
+            | 'negative_half_x'
+            | 'centered_rows_y_from_count'
+            | 'centered_rows_y_from_spacing'
+            | 'centered_tiles_x_from_count';
+          readonly beforeValue: number;
+          readonly acceptedValue: number;
+          readonly projectedValue: number;
+        };
+        const write = (specification: WriteSpecification): Record<string, unknown> => ({
+          order: specification.order,
+          executionMethod: 'blender_rna_property_write',
+          mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+          sourceOperationId: lightTrailsLeafOperationIds[ordinal - 1],
+          semanticAction: specification.semanticAction,
+          actionArgument: specification.actionArgument,
+          nodeGroupId: actionArguments['nodeGroupId'],
+          nodeGroupName: actionArguments['nodeGroupName'],
+          nodeName: specification.nodeName,
+          nodeType: specification.nodeType,
+          socketIdentifier: specification.socketIdentifier,
+          propertyName: 'default_value',
+          valueKind: specification.componentIndex === null ? 'scalar' : 'vector_component',
+          componentIndex: specification.componentIndex,
+          componentLabel: specification.componentLabel,
+          projection: specification.projection,
+          beforeValue: specification.beforeValue,
+          acceptedValue: specification.acceptedValue,
+          projectedValue: specification.projectedValue,
+          observedValue: blenderFloat(specification.projectedValue),
+          uiPath: [
+            'Geometry Nodes',
+            actionArguments['nodeGroupName'],
+            specification.nodeName,
+            specification.socketIdentifier,
+            specification.componentLabel ?? 'Value',
+          ],
+        });
+
+        switch (ordinal) {
+          case 5: {
+            const acceptedValue = numberArgument('tileLength');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.half_tile_line',
+                actionArgument: 'tileLength',
+                nodeName: 'OperatingLine Half Tile Line',
+                nodeType: 'GeometryNodeCurvePrimitiveLine',
+                socketIdentifier: 'Start',
+                componentIndex: 0,
+                componentLabel: 'X',
+                projection: 'negative_half_x',
+                beforeValue: -0.5,
+                acceptedValue,
+                projectedValue: -acceptedValue / 2,
+              }),
+            ];
+          }
+          case 7: {
+            const acceptedValue = numberArgument('pointsPerTrail');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.trail_resolution',
+                actionArgument: 'pointsPerTrail',
+                nodeName: 'OperatingLine Trail Resolution',
+                nodeType: 'GeometryNodeResampleCurve',
+                socketIdentifier: 'Count',
+                componentIndex: null,
+                componentLabel: null,
+                projection: 'identity',
+                beforeValue: 10,
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+            ];
+          }
+          case 9: {
+            const acceptedValue = numberArgument('trailCount');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.trail_rows',
+                actionArgument: 'trailCount',
+                nodeName: 'OperatingLine Trail Rows',
+                nodeType: 'GeometryNodeMeshLine',
+                socketIdentifier: 'Count',
+                componentIndex: null,
+                componentLabel: null,
+                projection: 'identity',
+                beforeValue: 1,
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+              write({
+                order: 2,
+                semanticAction: 'node.light_trails.trail_rows',
+                actionArgument: 'trailCount',
+                nodeName: 'OperatingLine Trail Rows',
+                nodeType: 'GeometryNodeMeshLine',
+                socketIdentifier: 'Start Location',
+                componentIndex: 1,
+                componentLabel: 'Y',
+                projection: 'centered_rows_y_from_count',
+                beforeValue: 0,
+                acceptedValue,
+                projectedValue: -((acceptedValue - 1) * 1) / 2,
+              }),
+            ];
+          }
+          case 10: {
+            const acceptedValue = numberArgument('trailSpacing');
+            const trailCount = numberArgument('trailCount');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.trail_rows',
+                actionArgument: 'trailSpacing',
+                nodeName: 'OperatingLine Trail Rows',
+                nodeType: 'GeometryNodeMeshLine',
+                socketIdentifier: 'Start Location',
+                componentIndex: 1,
+                componentLabel: 'Y',
+                projection: 'centered_rows_y_from_spacing',
+                beforeValue: blenderFloat(-((trailCount - 1) * 1) / 2),
+                acceptedValue,
+                projectedValue: -((trailCount - 1) * acceptedValue) / 2,
+              }),
+              write({
+                order: 2,
+                semanticAction: 'node.light_trails.trail_rows',
+                actionArgument: 'trailSpacing',
+                nodeName: 'OperatingLine Trail Rows',
+                nodeType: 'GeometryNodeMeshLine',
+                socketIdentifier: 'Offset',
+                componentIndex: 1,
+                componentLabel: 'Y',
+                projection: 'identity',
+                beforeValue: 1,
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+            ];
+          }
+          case 15:
+          case 16:
+          case 17:
+          case 18: {
+            const bindingByOrdinal = {
+              15: ['noiseScale', 'Scale', 1],
+              16: ['noiseDetail', 'Detail', 2],
+              17: ['noiseRoughness', 'Roughness', 0.5],
+              18: ['noiseSeed', 'W', 0],
+            } as const;
+            const binding = bindingByOrdinal[ordinal];
+            const [actionArgument, socketIdentifier, beforeValue] = binding;
+            const acceptedValue = numberArgument(actionArgument);
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.terrain_noise',
+                actionArgument,
+                nodeName: 'OperatingLine Terrain Noise',
+                nodeType: 'ShaderNodeTexNoise',
+                socketIdentifier,
+                componentIndex: null,
+                componentLabel: null,
+                projection: 'identity',
+                beforeValue,
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+            ];
+          }
+          case 21: {
+            const acceptedValue = numberArgument('height');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.scale_height',
+                actionArgument: 'height',
+                nodeName: 'OperatingLine Scale Height',
+                nodeType: 'ShaderNodeMath',
+                socketIdentifier: 'Value_001',
+                componentIndex: null,
+                componentLabel: null,
+                projection: 'identity',
+                beforeValue: 0,
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+            ];
+          }
+          case 27: {
+            const acceptedValue = numberArgument('profileSides');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.trail_profile',
+                actionArgument: 'profileSides',
+                nodeName: 'OperatingLine Trail Profile',
+                nodeType: 'GeometryNodeCurvePrimitiveCircle',
+                socketIdentifier: 'Resolution',
+                componentIndex: null,
+                componentLabel: null,
+                projection: 'identity',
+                beforeValue: 3,
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+            ];
+          }
+          case 28: {
+            const acceptedValue = numberArgument('profileRadius');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.trail_profile',
+                actionArgument: 'profileRadius',
+                nodeName: 'OperatingLine Trail Profile',
+                nodeType: 'GeometryNodeCurvePrimitiveCircle',
+                socketIdentifier: 'Radius',
+                componentIndex: null,
+                componentLabel: null,
+                projection: 'identity',
+                beforeValue: blenderFloat(0.1),
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+            ];
+          }
+          case 31: {
+            const acceptedValue = numberArgument('tileRepeatCount');
+            const tileLength = numberArgument('tileLength');
+            return [
+              write({
+                order: 1,
+                semanticAction: 'node.light_trails.loop_tiles',
+                actionArgument: 'tileRepeatCount',
+                nodeName: 'OperatingLine Loop Tiles',
+                nodeType: 'GeometryNodeMeshLine',
+                socketIdentifier: 'Count',
+                componentIndex: null,
+                componentLabel: null,
+                projection: 'identity',
+                beforeValue: 1,
+                acceptedValue,
+                projectedValue: acceptedValue,
+              }),
+              write({
+                order: 2,
+                semanticAction: 'node.light_trails.loop_tiles',
+                actionArgument: 'tileRepeatCount',
+                nodeName: 'OperatingLine Loop Tiles',
+                nodeType: 'GeometryNodeMeshLine',
+                socketIdentifier: 'Start Location',
+                componentIndex: 0,
+                componentLabel: 'X',
+                projection: 'centered_tiles_x_from_count',
+                beforeValue: blenderFloat(-((1 - 1) * tileLength) / 2),
+                acceptedValue,
+                projectedValue: -((acceptedValue - 1) * tileLength) / 2,
+              }),
+            ];
+          }
+          default:
+            return [];
+        }
+      })();
+      const rnaInitializationWrites = (() => {
+        const sourceOperationId = lightTrailsLeafOperationIds[ordinal - 1]!;
+        const write = (specification: {
+          readonly order: number;
+          readonly nodeName: string;
+          readonly nodeType: string;
+          readonly targetKind: 'node_property' | 'input_socket';
+          readonly socketIdentifier: string | null;
+          readonly propertyName: 'mode' | 'noise_dimensions' | 'operation' | 'default_value';
+          readonly valueKind: 'enum' | 'scalar' | 'vector_component';
+          readonly componentIndex: 0 | 1 | 2 | null;
+          readonly componentLabel: 'X' | 'Y' | 'Z' | null;
+          readonly valueSource: 'catalog_constant' | 'accepted_action_argument';
+          readonly actionArgument: 'tileLength' | null;
+          readonly assignedValue: string | number;
+          readonly uiTarget: string;
+          readonly uiComponent: 'Mode' | 'Dimensions' | 'Operation' | 'Value' | 'X' | 'Y' | 'Z';
+        }): Record<string, unknown> => ({
+          order: specification.order,
+          executionMethod: 'blender_rna_property_write',
+          mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+          sourceOperationId,
+          semanticAction: sourceOperationId,
+          nodeGroupId: actionArguments['nodeGroupId'],
+          nodeGroupName: actionArguments['nodeGroupName'],
+          nodeName: specification.nodeName,
+          nodeType: specification.nodeType,
+          targetKind: specification.targetKind,
+          socketIdentifier: specification.socketIdentifier,
+          propertyName: specification.propertyName,
+          valueKind: specification.valueKind,
+          componentIndex: specification.componentIndex,
+          componentLabel: specification.componentLabel,
+          valueSource: specification.valueSource,
+          actionArgument: specification.actionArgument,
+          assignedValue: specification.assignedValue,
+          observedValue:
+            typeof specification.assignedValue === 'number'
+              ? blenderFloat(specification.assignedValue)
+              : specification.assignedValue,
+          uiPath: [
+            'Geometry Nodes',
+            actionArguments['nodeGroupName'],
+            specification.nodeName,
+            specification.uiTarget,
+            specification.uiComponent,
+          ],
+        });
+        const nodeProperty = (
+          order: number,
+          nodeName: string,
+          nodeType: string,
+          propertyName: 'mode' | 'noise_dimensions' | 'operation',
+          assignedValue: string,
+          uiComponent: 'Mode' | 'Dimensions' | 'Operation',
+        ): Record<string, unknown> =>
+          write({
+            order,
+            nodeName,
+            nodeType,
+            targetKind: 'node_property',
+            socketIdentifier: null,
+            propertyName,
+            valueKind: 'enum',
+            componentIndex: null,
+            componentLabel: null,
+            valueSource: 'catalog_constant',
+            actionArgument: null,
+            assignedValue,
+            uiTarget: 'Node',
+            uiComponent,
+          });
+        const socketValue = (
+          order: number,
+          nodeName: string,
+          nodeType: string,
+          socketIdentifier: string,
+          assignedValue: number,
+          componentIndex: 0 | 1 | 2 | null = null,
+          componentLabel: 'X' | 'Y' | 'Z' | null = null,
+          actionArgument: 'tileLength' | null = null,
+        ): Record<string, unknown> =>
+          write({
+            order,
+            nodeName,
+            nodeType,
+            targetKind: 'input_socket',
+            socketIdentifier,
+            propertyName: 'default_value',
+            valueKind: componentIndex === null ? 'scalar' : 'vector_component',
+            componentIndex,
+            componentLabel,
+            valueSource: actionArgument === null ? 'catalog_constant' : 'accepted_action_argument',
+            actionArgument,
+            assignedValue,
+            uiTarget: socketIdentifier,
+            uiComponent: componentLabel ?? 'Value',
+          });
+        const vectorValues = (
+          firstOrder: number,
+          nodeName: string,
+          nodeType: string,
+          socketIdentifier: string,
+          values: readonly [number, number, number],
+          acceptedArgumentIndex: number | null = null,
+        ): Record<string, unknown>[] =>
+          values.map((assignedValue, componentIndex) =>
+            socketValue(
+              firstOrder + componentIndex,
+              nodeName,
+              nodeType,
+              socketIdentifier,
+              assignedValue,
+              componentIndex as 0 | 1 | 2,
+              (['X', 'Y', 'Z'] as const)[componentIndex],
+              componentIndex === acceptedArgumentIndex ? 'tileLength' : null,
+            ),
+          );
+
+        switch (ordinal) {
+          case 4:
+            return [
+              nodeProperty(
+                1,
+                'OperatingLine Half Tile Line',
+                'GeometryNodeCurvePrimitiveLine',
+                'mode',
+                'POINTS',
+                'Mode',
+              ),
+              ...vectorValues(
+                2,
+                'OperatingLine Half Tile Line',
+                'GeometryNodeCurvePrimitiveLine',
+                'Start',
+                [-0.5, 0, 0],
+              ),
+              ...vectorValues(
+                5,
+                'OperatingLine Half Tile Line',
+                'GeometryNodeCurvePrimitiveLine',
+                'End',
+                [0, 0, 0],
+              ),
+            ];
+          case 6:
+            return [
+              socketValue(
+                1,
+                'OperatingLine Trail Resolution',
+                'GeometryNodeResampleCurve',
+                'Count',
+                10,
+              ),
+            ];
+          case 8:
+            return [
+              nodeProperty(
+                1,
+                'OperatingLine Trail Rows',
+                'GeometryNodeMeshLine',
+                'mode',
+                'OFFSET',
+                'Mode',
+              ),
+              socketValue(2, 'OperatingLine Trail Rows', 'GeometryNodeMeshLine', 'Count', 1),
+              ...vectorValues(
+                3,
+                'OperatingLine Trail Rows',
+                'GeometryNodeMeshLine',
+                'Start Location',
+                [0, 0, 0],
+              ),
+              ...vectorValues(
+                6,
+                'OperatingLine Trail Rows',
+                'GeometryNodeMeshLine',
+                'Offset',
+                [0, 1, 0],
+              ),
+            ];
+          case 14:
+            return [
+              nodeProperty(
+                1,
+                'OperatingLine Terrain Noise',
+                'ShaderNodeTexNoise',
+                'noise_dimensions',
+                '4D',
+                'Dimensions',
+              ),
+              socketValue(2, 'OperatingLine Terrain Noise', 'ShaderNodeTexNoise', 'Scale', 1),
+              socketValue(3, 'OperatingLine Terrain Noise', 'ShaderNodeTexNoise', 'Detail', 2),
+              socketValue(4, 'OperatingLine Terrain Noise', 'ShaderNodeTexNoise', 'Roughness', 0.5),
+              socketValue(5, 'OperatingLine Terrain Noise', 'ShaderNodeTexNoise', 'W', 0),
+            ];
+          case 19:
+            return [
+              nodeProperty(
+                1,
+                'OperatingLine Center Noise',
+                'ShaderNodeMath',
+                'operation',
+                'SUBTRACT',
+                'Operation',
+              ),
+              socketValue(2, 'OperatingLine Center Noise', 'ShaderNodeMath', 'Value_001', 0.5),
+            ];
+          case 20:
+            return [
+              nodeProperty(
+                1,
+                'OperatingLine Scale Height',
+                'ShaderNodeMath',
+                'operation',
+                'MULTIPLY',
+                'Operation',
+              ),
+              socketValue(2, 'OperatingLine Scale Height', 'ShaderNodeMath', 'Value_001', 0),
+            ];
+          case 24:
+            return vectorValues(
+              1,
+              'OperatingLine Mirror Half Tile',
+              'GeometryNodeTransform',
+              'Scale',
+              [-1, 1, 1],
+            );
+          case 26:
+            return [
+              nodeProperty(
+                1,
+                'OperatingLine Trail Profile',
+                'GeometryNodeCurvePrimitiveCircle',
+                'mode',
+                'RADIUS',
+                'Mode',
+              ),
+              socketValue(
+                2,
+                'OperatingLine Trail Profile',
+                'GeometryNodeCurvePrimitiveCircle',
+                'Resolution',
+                3,
+              ),
+              socketValue(
+                3,
+                'OperatingLine Trail Profile',
+                'GeometryNodeCurvePrimitiveCircle',
+                'Radius',
+                0.1,
+              ),
+            ];
+          case 30: {
+            const tileLength = numberArgument('tileLength');
+            return [
+              nodeProperty(
+                1,
+                'OperatingLine Loop Tiles',
+                'GeometryNodeMeshLine',
+                'mode',
+                'OFFSET',
+                'Mode',
+              ),
+              socketValue(2, 'OperatingLine Loop Tiles', 'GeometryNodeMeshLine', 'Count', 1),
+              ...vectorValues(
+                3,
+                'OperatingLine Loop Tiles',
+                'GeometryNodeMeshLine',
+                'Start Location',
+                [-((1 - 1) * tileLength) / 2, 0, 0],
+              ),
+              ...vectorValues(
+                6,
+                'OperatingLine Loop Tiles',
+                'GeometryNodeMeshLine',
+                'Offset',
+                [tileLength, 0, 0],
+                0,
+              ),
+            ];
+          }
+          default:
+            return [];
+        }
+      })();
+      const rnaLinkCreations = (() => {
+        const target = lightTrailsLinkStages.find(([targetOrdinal]) => targetOrdinal === ordinal);
+        if (target === undefined) return [];
+        const [
+          ,
+          fromNodeName,
+          fromNodeType,
+          fromSocketIdentifier,
+          toNodeName,
+          toNodeType,
+          toSocketIdentifier,
+        ] = target;
+        const sourceOperationId = lightTrailsLeafOperationIds[ordinal - 1]!;
+        return [
+          {
+            order: 1,
+            executionMethod: 'blender_rna_node_link_create',
+            mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+            sourceOperationId,
+            semanticAction: sourceOperationId,
+            nodeGroupId: actionArguments['nodeGroupId'],
+            nodeGroupName: actionArguments['nodeGroupName'],
+            fromNodeName,
+            fromNodeType,
+            fromSocketIdentifier,
+            fromSocketDirection: 'OUTPUT',
+            toNodeName,
+            toNodeType,
+            toSocketIdentifier,
+            toSocketDirection: 'INPUT',
+            observedLink: true,
+            uiPath: [
+              'Geometry Nodes',
+              actionArguments['nodeGroupName'],
+              fromNodeName,
+              fromSocketIdentifier,
+              toNodeName,
+              toSocketIdentifier,
+            ],
+          },
+        ];
+      })();
+      const rnaStructureCreations = (() => {
+        const target = lightTrailsNodeStages.find(([targetOrdinal]) => targetOrdinal === ordinal);
+        if (target === undefined) return [];
+        const [, nodeName, nodeType] = target;
+        const sourceOperationId = lightTrailsLeafOperationIds[ordinal - 1]!;
+        const nodeCreation = (order: number): Record<string, unknown> => ({
+          order,
+          executionMethod: 'blender_rna_node_create',
+          mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+          sourceOperationId,
+          semanticAction: sourceOperationId,
+          nodeGroupId: actionArguments['nodeGroupId'],
+          nodeGroupName: actionArguments['nodeGroupName'],
+          structureKind: 'node',
+          nodeName,
+          nodeType,
+          observedNode: true,
+          uiPath: ['Geometry Nodes', actionArguments['nodeGroupName'], 'Nodes', nodeName],
+        });
+        if (ordinal !== 3 && ordinal !== 34) return [nodeCreation(1)];
+        const interfaceDirection = ordinal === 3 ? 'INPUT' : 'OUTPUT';
+        return [
+          {
+            order: 1,
+            executionMethod: 'blender_rna_node_group_interface_socket_create',
+            mcpTool: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+            sourceOperationId,
+            semanticAction: sourceOperationId,
+            nodeGroupId: actionArguments['nodeGroupId'],
+            nodeGroupName: actionArguments['nodeGroupName'],
+            structureKind: 'interface_socket',
+            interfaceSocketName: 'Geometry',
+            interfaceDirection,
+            interfaceSocketType: 'NodeSocketGeometry',
+            observedInterfaceSocket: true,
+            uiPath: [
+              'Geometry Nodes',
+              actionArguments['nodeGroupName'],
+              'Interface',
+              interfaceDirection,
+              'Geometry',
+            ],
+          },
+          nodeCreation(2),
+        ];
+      })();
+      return {
+        completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+        nodeGroupId: ordinal >= 2 ? actionArguments['nodeGroupId'] : null,
+        modifierId: ordinal >= 2 ? actionArguments['modifierId'] : null,
+        completeGraph: ordinal === lightTrailsLeafOperationIds.length,
+        preconditionsValidated: ordinal === 1,
+        preflightKind: ordinal === 1 ? 'managed_light_trails_resources' : null,
+        preflightTargetId: ordinal === 1 ? actionArguments['targetId'] : null,
+        stage,
+        nodes,
+        nodeCount: nodes.length,
+        interfaceSockets,
+        interfaceSocketCount: interfaceSockets.length,
+        linkCount: stage >= 35 ? stage - 34 : 0,
+        controlledValues,
+        rnaResourceMutations,
+        rnaControlWrites,
+        rnaInitializationWrites,
+        rnaLinkCreations,
+        rnaStructureCreations,
+        noBakeNodes: true,
+      };
+    };
+
+    const expectedLeafOperationEvidence = (
+      execution: CompanionLeafOperationStatus,
+      receiptId: string,
+      observedEvidence?: Readonly<Record<string, unknown>>,
+    ): Record<string, unknown> => {
+      if (execution.actionName === transformGeometryLeafOperationActionName) {
+        return expectedTransformOperationEvidence(execution);
+      }
+      if (execution.actionName === lightTrailsLeafOperationActionName) {
+        return expectedLightTrailsOperationEvidence(execution);
+      }
+      if (execution.actionName === poseAnimationLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[2],
+        );
+        const actionArguments = action.arguments;
+        const pendingActionName = `OperatingLine.PendingPose.${receiptId.slice(0, 8)}`;
+        const curveKeys = new Set<string>();
+        const curveTargets = new Map<
+          string,
+          {
+            readonly boneName: string;
+            readonly dataPath:
+              | 'rotation_euler'
+              | 'rotation_quaternion'
+              | 'rotation_axis_angle'
+              | 'location'
+              | 'scale';
+            readonly componentIndex: number;
+            readonly points: Array<{ readonly frame: number; readonly value: number }>;
+          }
+        >();
+        let keyframePointCount = 0;
+        const rnaKeyframeInsertions: Array<Record<string, unknown>> = [];
+        let insertionOrder = 0;
+        const keyframes = actionArguments['keyframes'];
+        if (Array.isArray(keyframes)) {
+          for (const [frameIndex, keyframe] of keyframes.entries()) {
+            if (
+              keyframe === null ||
+              typeof keyframe !== 'object' ||
+              !Array.isArray((keyframe as Record<string, unknown>)['poses'])
+            ) {
+              continue;
+            }
+            const keyframeRecord = keyframe as Record<string, unknown>;
+            const frame = keyframeRecord['frame'];
+            for (const [poseIndex, pose] of (keyframeRecord['poses'] as unknown[]).entries()) {
+              if (pose === null || typeof pose !== 'object') continue;
+              const poseRecord = pose as Record<string, unknown>;
+              const boneName = poseRecord['boneName'];
+              if (typeof boneName !== 'string') continue;
+              const insertionChannels: Array<{
+                readonly dataPath:
+                  | 'rotation_euler'
+                  | 'rotation_quaternion'
+                  | 'rotation_axis_angle'
+                  | 'location'
+                  | 'scale';
+                readonly values: number[];
+              }> = [];
+              for (const channel of [
+                'rotationEuler',
+                'rotationQuaternion',
+                'rotationAxisAngle',
+                'location',
+                'scale',
+              ] as const) {
+                const values = poseRecord[channel];
+                if (!Array.isArray(values)) continue;
+                keyframePointCount += values.length;
+                values.forEach((_value, index) => curveKeys.add(`${boneName}:${channel}:${index}`));
+                const numericValues = values.map(Number);
+                const dataPath =
+                  channel === 'rotationEuler'
+                    ? 'rotation_euler'
+                    : channel === 'rotationQuaternion'
+                      ? 'rotation_quaternion'
+                      : channel === 'rotationAxisAngle'
+                        ? 'rotation_axis_angle'
+                        : channel;
+                insertionChannels.push({
+                  dataPath,
+                  values: numericValues,
+                });
+                if (typeof frame === 'number') {
+                  numericValues.forEach((value, componentIndex) => {
+                    const key = JSON.stringify([boneName, dataPath, componentIndex]);
+                    let target = curveTargets.get(key);
+                    if (target === undefined) {
+                      target = {
+                        boneName,
+                        dataPath,
+                        componentIndex,
+                        points: [],
+                      };
+                      curveTargets.set(key, target);
+                    }
+                    target.points.push({ frame, value });
+                  });
+                }
+              }
+              if (ordinal === 7 && typeof frame === 'number') {
+                for (const [channelIndex, channel] of insertionChannels.entries()) {
+                  insertionOrder += 1;
+                  rnaKeyframeInsertions.push({
+                    order: insertionOrder,
+                    frameOrder: frameIndex + 1,
+                    poseOrder: poseIndex + 1,
+                    channelOrder: channelIndex + 1,
+                    executionMethod: 'blender_rna_pose_bone_keyframe_insert',
+                    mcpTool: 'operatingline.blender.animation.pose-keyframes.execute-next',
+                    sourceOperationId: 'projection.semantic.pose_animation.keyframes',
+                    semanticAction: 'projection.semantic.pose_animation.keyframes',
+                    actionArgument: 'keyframes',
+                    armatureId: actionArguments['armatureId'],
+                    actionId: actionArguments['actionId'],
+                    actionName: actionArguments['actionName'],
+                    frame,
+                    boneName,
+                    dataPath: channel.dataPath,
+                    acceptedValues: channel.values,
+                    observedPoints: channel.values.map((value, componentIndex) => ({
+                      componentIndex,
+                      acceptedValue: value,
+                      observedFrame: frame,
+                      observedValue: Math.fround(value),
+                    })),
+                    observedInserted: true,
+                    uiPath: [
+                      'Animation',
+                      actionArguments['actionName'],
+                      boneName,
+                      channel.dataPath,
+                      `Frame ${frame}`,
+                    ],
+                  });
+                }
+              }
+            }
+          }
+        }
+        const rnaAnimationPropertyWrites: Array<Record<string, unknown>> = [];
+        if (ordinal === 9) {
+          for (const target of curveTargets.values()) {
+            for (const point of target.points) {
+              rnaAnimationPropertyWrites.push({
+                order: rnaAnimationPropertyWrites.length + 1,
+                executionMethod: 'blender_rna_keyframe_interpolation_write',
+                mcpTool: 'operatingline.blender.animation.pose-keyframes.execute-next',
+                sourceOperationId: 'projection.semantic.pose_animation.interpolation',
+                semanticAction: 'projection.semantic.pose_animation.interpolation',
+                actionArgument: 'interpolation',
+                mutationKind: 'keyframe_interpolation_write',
+                armatureId: actionArguments['armatureId'],
+                actionId: actionArguments['actionId'],
+                actionName: actionArguments['actionName'],
+                boneName: target.boneName,
+                dataPath: target.dataPath,
+                componentIndex: target.componentIndex,
+                frame: point.frame,
+                beforeValue: 'BEZIER',
+                acceptedValue: actionArguments['interpolation'],
+                observedValue: actionArguments['interpolation'],
+                observedPointValue: Math.fround(point.value),
+                uiPath: [
+                  'Animation',
+                  actionArguments['actionName'],
+                  target.boneName,
+                  target.dataPath,
+                  `Component ${target.componentIndex}`,
+                  `Frame ${point.frame}`,
+                  'Interpolation',
+                ],
+              });
+            }
+          }
+        } else if (ordinal === 11) {
+          for (const target of curveTargets.values()) {
+            rnaAnimationPropertyWrites.push({
+              order: rnaAnimationPropertyWrites.length + 1,
+              executionMethod: 'blender_rna_fcurve_extrapolation_write',
+              mcpTool: 'operatingline.blender.animation.pose-keyframes.execute-next',
+              sourceOperationId: 'projection.semantic.pose_animation.extrapolation',
+              semanticAction: 'projection.semantic.pose_animation.extrapolation',
+              actionArgument: 'extrapolation',
+              mutationKind: 'fcurve_extrapolation_write',
+              armatureId: actionArguments['armatureId'],
+              actionId: actionArguments['actionId'],
+              actionName: actionArguments['actionName'],
+              boneName: target.boneName,
+              dataPath: target.dataPath,
+              componentIndex: target.componentIndex,
+              beforeValue: 'CONSTANT',
+              acceptedValue: actionArguments['extrapolation'],
+              observedValue: actionArguments['extrapolation'],
+              keyframePointCount: target.points.length,
+              uiPath: [
+                'Animation',
+                actionArguments['actionName'],
+                target.boneName,
+                target.dataPath,
+                `Component ${target.componentIndex}`,
+                'Extrapolation',
+              ],
+            });
+          }
+        }
+        const rnaActionResourceMutations =
+          ordinal === 4
+            ? [
+                {
+                  order: 1,
+                  executionMethod: 'blender_rna_action_create',
+                  mcpTool: 'operatingline.blender.animation.pose-keyframes.execute-next',
+                  sourceOperationId: 'semantic.create_pose_action',
+                  semanticAction: 'semantic.create_pose_action',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'action_create',
+                  armatureId: actionArguments['armatureId'],
+                  actionId: actionArguments['actionId'],
+                  pendingActionName,
+                  resourceType: 'Action',
+                  observedResource: true,
+                  uiPath: ['Animation', pendingActionName],
+                },
+                {
+                  order: 2,
+                  executionMethod: 'blender_rna_armature_action_bind',
+                  mcpTool: 'operatingline.blender.animation.pose-keyframes.execute-next',
+                  sourceOperationId: 'semantic.create_pose_action',
+                  semanticAction: 'semantic.create_pose_action',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'armature_action_bind',
+                  armatureId: actionArguments['armatureId'],
+                  actionId: actionArguments['actionId'],
+                  pendingActionName,
+                  observedBinding: true,
+                  uiPath: ['Animation', actionArguments['armatureId'], 'Action', pendingActionName],
+                },
+              ]
+            : ordinal === 5
+              ? [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_action_name_write',
+                    mcpTool: 'operatingline.blender.animation.pose-keyframes.execute-next',
+                    sourceOperationId: 'projection.semantic.pose_animation.action_name',
+                    semanticAction: 'projection.semantic.pose_animation.action_name',
+                    actionArgument: 'actionName',
+                    mutationKind: 'action_name_write',
+                    armatureId: actionArguments['armatureId'],
+                    actionId: actionArguments['actionId'],
+                    beforeName: pendingActionName,
+                    acceptedName: actionArguments['actionName'],
+                    observedName: actionArguments['actionName'],
+                    uiPath: ['Animation', actionArguments['actionName'], 'Name'],
+                  },
+                ]
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeAnimation: ordinal === poseAnimationLeafOperationIds.length,
+          stage: Math.min(ordinal, poseAnimationLeafOperationIds.length - 1),
+          armatureId: actionArguments['armatureId'],
+          actionId: ordinal >= 4 ? actionArguments['actionId'] : null,
+          actionNameApplied: ordinal >= 5,
+          resolvedActionName: ordinal >= 5 ? actionArguments['actionName'] : null,
+          curveCount: ordinal >= 7 ? curveKeys.size : 0,
+          keyframePointCount: ordinal >= 7 ? keyframePointCount : 0,
+          interpolationApplied: ordinal >= 9,
+          extrapolationApplied: ordinal >= 11,
+          rnaKeyframeInsertions,
+          rnaAnimationPropertyWrites,
+          rnaActionResourceMutations,
+        };
+      }
+      if (execution.actionName === armatureLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[3],
+        );
+        const actionArguments = action.arguments;
+        const bones = actionArguments['bones'];
+        const bindings = actionArguments['bindings'];
+        const armatureId = actionArguments['armatureId'];
+        const objectName = actionArguments['objectName'];
+        const dataName = actionArguments['dataName'];
+        const collectionId = actionArguments['collectionId'];
+        const pendingObjectName = `OperatingLine.PendingArmatureObject.${receiptId.slice(0, 8)}`;
+        const pendingDataName = `OperatingLine.PendingArmatureData.${receiptId.slice(0, 8)}`;
+        const rnaArmatureResourceMutations: Array<Record<string, unknown>> =
+          ordinal === 2
+            ? [
+                {
+                  order: 1,
+                  executionMethod: 'blender_rna_armature_data_create',
+                  mcpTool: 'operatingline.blender.rig.armature.execute-next',
+                  sourceOperationId: 'menu.add_armature',
+                  semanticAction: 'menu.add_armature',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'armature_data_create',
+                  armatureId,
+                  pendingDataName,
+                  resourceType: 'Armature',
+                  observedResource: true,
+                  uiPath: ['Layout', 'Add', 'Armature', 'Data', pendingDataName],
+                },
+                {
+                  order: 2,
+                  executionMethod: 'blender_rna_armature_object_create',
+                  mcpTool: 'operatingline.blender.rig.armature.execute-next',
+                  sourceOperationId: 'menu.add_armature',
+                  semanticAction: 'menu.add_armature',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'armature_object_create',
+                  armatureId,
+                  pendingObjectName,
+                  pendingDataName,
+                  resourceType: 'Object',
+                  objectType: 'ARMATURE',
+                  observedDataBinding: true,
+                  observedResource: true,
+                  uiPath: ['Layout', 'Add', 'Armature', 'Object', pendingObjectName],
+                },
+                {
+                  order: 3,
+                  executionMethod: 'blender_rna_collection_object_link',
+                  mcpTool: 'operatingline.blender.rig.armature.execute-next',
+                  sourceOperationId: 'menu.add_armature',
+                  semanticAction: 'menu.add_armature',
+                  valueSource: 'accepted_action_argument',
+                  actionArgument: 'collectionId',
+                  mutationKind: 'collection_object_link',
+                  armatureId,
+                  collectionId,
+                  pendingObjectName,
+                  observedLink: true,
+                  uiPath: ['Outliner', collectionId, pendingObjectName],
+                },
+              ]
+            : ordinal === 3
+              ? [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_object_name_write',
+                    mcpTool: 'operatingline.blender.rig.armature.execute-next',
+                    sourceOperationId: 'projection.semantic.armature.object_name',
+                    semanticAction: 'projection.semantic.armature.object_name',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'objectName',
+                    mutationKind: 'armature_object_name_write',
+                    armatureId,
+                    beforeName: pendingObjectName,
+                    acceptedName: objectName,
+                    observedName: objectName,
+                    uiPath: ['Layout', objectName, 'Object Properties', 'Name'],
+                  },
+                ]
+              : ordinal === 4
+                ? [
+                    {
+                      order: 1,
+                      executionMethod: 'blender_rna_armature_data_name_write',
+                      mcpTool: 'operatingline.blender.rig.armature.execute-next',
+                      sourceOperationId: 'projection.semantic.armature.data_name',
+                      semanticAction: 'projection.semantic.armature.data_name',
+                      valueSource: 'accepted_action_argument',
+                      actionArgument: 'dataName',
+                      mutationKind: 'armature_data_name_write',
+                      armatureId,
+                      beforeName: pendingDataName,
+                      acceptedName: dataName,
+                      observedName: dataName,
+                      uiPath: ['Layout', objectName, 'Object Data Properties', 'Name'],
+                    },
+                  ]
+                : [];
+        const rnaArmatureBoneMutations: Array<Record<string, unknown>> = [];
+        if (ordinal === 6 && Array.isArray(bones)) {
+          for (const [boneIndex, bone] of bones.entries()) {
+            if (bone === null || typeof bone !== 'object') continue;
+            const record = bone as Record<string, unknown>;
+            const boneName = record['boneName'];
+            const acceptedHead = Array.isArray(record['head']) ? record['head'].map(Number) : [];
+            const acceptedTail = Array.isArray(record['tail']) ? record['tail'].map(Number) : [];
+            rnaArmatureBoneMutations.push({
+              order: rnaArmatureBoneMutations.length + 1,
+              boneOrder: boneIndex + 1,
+              executionMethod: 'blender_rna_edit_bone_create',
+              mcpTool: 'operatingline.blender.rig.armature.execute-next',
+              sourceOperationId: 'projection.semantic.armature.bones',
+              semanticAction: 'projection.semantic.armature.bones',
+              valueSource: 'accepted_action_argument',
+              actionArgument: 'bones',
+              mutationKind: 'edit_bone_create',
+              armatureId,
+              dataName,
+              boneName,
+              acceptedHead,
+              observedHead: acceptedHead.map(Math.fround),
+              acceptedTail,
+              observedTail: acceptedTail.map(Math.fround),
+              acceptedUseDeform: false,
+              observedUseDeform: false,
+              observedBone: true,
+              uiPath: ['Layout', objectName, 'Edit Mode', 'Bones', boneName],
+            });
+          }
+          for (const [boneIndex, bone] of bones.entries()) {
+            if (bone === null || typeof bone !== 'object') continue;
+            const record = bone as Record<string, unknown>;
+            const parentName = record['parentName'];
+            if (typeof parentName !== 'string') continue;
+            const boneName = record['boneName'];
+            rnaArmatureBoneMutations.push({
+              order: rnaArmatureBoneMutations.length + 1,
+              boneOrder: boneIndex + 1,
+              executionMethod: 'blender_rna_edit_bone_parent_bind',
+              mcpTool: 'operatingline.blender.rig.armature.execute-next',
+              sourceOperationId: 'projection.semantic.armature.bones',
+              semanticAction: 'projection.semantic.armature.bones',
+              valueSource: 'accepted_action_argument',
+              actionArgument: 'bones',
+              mutationKind: 'edit_bone_parent_bind',
+              armatureId,
+              dataName,
+              boneName,
+              acceptedParentName: parentName,
+              observedParentName: parentName,
+              observedBinding: true,
+              uiPath: ['Layout', objectName, 'Edit Mode', 'Bones', boneName, 'Parent', parentName],
+            });
+          }
+          for (const [boneIndex, bone] of bones.entries()) {
+            if (bone === null || typeof bone !== 'object') continue;
+            const boneName = (bone as Record<string, unknown>)['boneName'];
+            rnaArmatureBoneMutations.push({
+              order: rnaArmatureBoneMutations.length + 1,
+              boneOrder: boneIndex + 1,
+              executionMethod: 'blender_rna_pose_bone_rotation_mode_write',
+              mcpTool: 'operatingline.blender.rig.armature.execute-next',
+              sourceOperationId: 'projection.semantic.armature.bones',
+              semanticAction: 'projection.semantic.armature.bones',
+              valueSource: 'catalog_constant',
+              actionArgument: null,
+              mutationKind: 'pose_bone_rotation_mode_write',
+              armatureId,
+              boneName,
+              acceptedRotationMode: 'XYZ',
+              observedRotationMode: 'XYZ',
+              uiPath: ['Pose Mode', objectName, 'Bone', boneName, 'Rotation Mode'],
+            });
+          }
+        }
+        const rnaArmatureBindingMutations: Array<Record<string, unknown>> = [];
+        if (ordinal === 8 && Array.isArray(bindings)) {
+          for (const [bindingIndex, binding] of bindings.entries()) {
+            if (binding === null || typeof binding !== 'object') continue;
+            const record = binding as Record<string, unknown>;
+            const targetId = record['targetId'];
+            const boneName = record['boneName'];
+            rnaArmatureBindingMutations.push({
+              order: bindingIndex + 1,
+              bindingOrder: bindingIndex + 1,
+              executionMethod: 'blender_rna_object_bone_parent_write',
+              mcpTool: 'operatingline.blender.rig.armature.execute-next',
+              sourceOperationId: 'projection.semantic.armature.bindings',
+              semanticAction: 'projection.semantic.armature.bindings',
+              valueSource: 'accepted_action_argument',
+              actionArgument: 'bindings',
+              mutationKind: 'object_bone_parent_write',
+              targetId,
+              armatureId,
+              boneName,
+              acceptedParentType: 'BONE',
+              observedParentType: 'BONE',
+              acceptedParentBone: boneName,
+              observedParentBone: boneName,
+              observedParent: true,
+              observedWorldMatrixPreserved: true,
+              uiPath: ['Layout', targetId, 'Parent', armatureId, 'Bone', boneName],
+            });
+          }
+        }
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeArmature: ordinal === armatureLeafOperationIds.length,
+          stage: Math.min(ordinal, armatureLeafOperationIds.length - 1),
+          collectionId: actionArguments['collectionId'],
+          armatureId: ordinal >= 2 ? actionArguments['armatureId'] : null,
+          objectNameApplied: ordinal >= 3,
+          dataNameApplied: ordinal >= 4,
+          resolvedObjectName: ordinal >= 3 ? actionArguments['objectName'] : null,
+          resolvedDataName: ordinal >= 4 ? actionArguments['dataName'] : null,
+          boneCount: ordinal >= 6 && Array.isArray(bones) ? bones.length : 0,
+          bindingCount: ordinal >= 8 && Array.isArray(bindings) ? bindings.length : 0,
+          bonesApplied: ordinal >= 6,
+          bindingsApplied: ordinal >= 8,
+          rnaArmatureResourceMutations,
+          rnaArmatureBoneMutations,
+          rnaArmatureBindingMutations,
+        };
+      }
+      if (execution.actionName === skinWeightsLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[4],
+        );
+        const actionArguments = action.arguments;
+        const weights = actionArguments['weights'];
+        const targetId = actionArguments['targetId'];
+        const armatureId = actionArguments['armatureId'];
+        const modifierId = actionArguments['modifierId'];
+        const modifierName = actionArguments['modifierName'];
+        const boneNames = new Set<string>();
+        if (Array.isArray(weights)) {
+          for (const vertex of weights) {
+            if (
+              vertex === null ||
+              typeof vertex !== 'object' ||
+              !Array.isArray((vertex as Record<string, unknown>)['influences'])
+            ) {
+              continue;
+            }
+            for (const influence of (vertex as Record<string, unknown>)[
+              'influences'
+            ] as unknown[]) {
+              if (influence === null || typeof influence !== 'object') continue;
+              const boneName = (influence as Record<string, unknown>)['boneName'];
+              if (typeof boneName === 'string') boneNames.add(boneName);
+            }
+          }
+        }
+        const orderedBoneNames = [...boneNames];
+        const rnaSkinWeightMutations: Array<Record<string, unknown>> = [];
+        if (ordinal === 5) {
+          for (const [boneIndex, boneName] of orderedBoneNames.entries()) {
+            rnaSkinWeightMutations.push({
+              order: rnaSkinWeightMutations.length + 1,
+              boneOrder: boneIndex + 1,
+              executionMethod: 'blender_rna_armature_bone_deform_write',
+              mcpTool: 'operatingline.blender.rig.skin-weights.execute-next',
+              sourceOperationId: 'projection.semantic.skin_weights.weights',
+              semanticAction: 'projection.semantic.skin_weights.weights',
+              valueSource: 'accepted_action_argument',
+              actionArgument: 'weights',
+              mutationKind: 'armature_bone_deform_enable',
+              targetId,
+              armatureId,
+              boneName,
+              acceptedValue: true,
+              observedValue: true,
+              uiPath: ['Object Data Properties', armatureId, 'Bones', boneName, 'Deform'],
+            });
+          }
+          for (const [boneIndex, boneName] of orderedBoneNames.entries()) {
+            rnaSkinWeightMutations.push({
+              order: rnaSkinWeightMutations.length + 1,
+              groupOrder: boneIndex + 1,
+              executionMethod: 'blender_rna_vertex_group_create',
+              mcpTool: 'operatingline.blender.rig.skin-weights.execute-next',
+              sourceOperationId: 'projection.semantic.skin_weights.weights',
+              semanticAction: 'projection.semantic.skin_weights.weights',
+              valueSource: 'accepted_action_argument',
+              actionArgument: 'weights',
+              mutationKind: 'vertex_group_create',
+              targetId,
+              armatureId,
+              boneName,
+              groupName: boneName,
+              resourceType: 'VertexGroup',
+              observedResource: true,
+              uiPath: ['Object Data Properties', targetId, 'Vertex Groups', boneName],
+            });
+          }
+          if (Array.isArray(weights)) {
+            for (const [vertexIndex, vertex] of weights.entries()) {
+              if (vertex === null || typeof vertex !== 'object') continue;
+              const record = vertex as Record<string, unknown>;
+              const acceptedVertexIndex = record['vertexIndex'];
+              const influences = record['influences'];
+              if (typeof acceptedVertexIndex !== 'number' || !Array.isArray(influences)) continue;
+              for (const [influenceIndex, influence] of influences.entries()) {
+                if (influence === null || typeof influence !== 'object') continue;
+                const influenceRecord = influence as Record<string, unknown>;
+                const boneName = influenceRecord['boneName'];
+                const weight = influenceRecord['weight'];
+                if (typeof boneName !== 'string' || typeof weight !== 'number') continue;
+                rnaSkinWeightMutations.push({
+                  order: rnaSkinWeightMutations.length + 1,
+                  vertexOrder: vertexIndex + 1,
+                  influenceOrder: influenceIndex + 1,
+                  executionMethod: 'blender_rna_vertex_group_weight_replace',
+                  mcpTool: 'operatingline.blender.rig.skin-weights.execute-next',
+                  sourceOperationId: 'projection.semantic.skin_weights.weights',
+                  semanticAction: 'projection.semantic.skin_weights.weights',
+                  valueSource: 'accepted_action_argument',
+                  actionArgument: 'weights',
+                  mutationKind: 'vertex_group_weight_replace',
+                  targetId,
+                  armatureId,
+                  vertexIndex: acceptedVertexIndex,
+                  boneName,
+                  groupName: boneName,
+                  assignmentMode: 'REPLACE',
+                  acceptedWeight: weight,
+                  observedWeight: Math.fround(weight),
+                  observedMembership: true,
+                  uiPath: [
+                    'Weight Paint',
+                    targetId,
+                    'Vertex',
+                    String(acceptedVertexIndex),
+                    boneName,
+                    'Weight',
+                  ],
+                });
+              }
+            }
+          }
+        }
+        const pendingModifierName = `OperatingLine.PendingSkinModifier.${receiptId.slice(0, 8)}`;
+        const rnaSkinModifierMutations: Array<Record<string, unknown>> =
+          ordinal === 7
+            ? [
+                {
+                  order: 1,
+                  executionMethod: 'blender_rna_armature_modifier_create',
+                  mcpTool: 'operatingline.blender.rig.skin-weights.execute-next',
+                  sourceOperationId: 'projection.semantic.skin_weights.preserve_volume',
+                  semanticAction: 'projection.semantic.skin_weights.preserve_volume',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'armature_modifier_create',
+                  targetId,
+                  armatureId,
+                  modifierId,
+                  pendingModifierName,
+                  resourceType: 'ArmatureModifier',
+                  modifierType: 'ARMATURE',
+                  observedResource: true,
+                  uiPath: ['Properties', targetId, 'Modifiers', pendingModifierName],
+                },
+                {
+                  order: 2,
+                  executionMethod: 'blender_rna_armature_modifier_object_bind',
+                  mcpTool: 'operatingline.blender.rig.skin-weights.execute-next',
+                  sourceOperationId: 'projection.semantic.skin_weights.preserve_volume',
+                  semanticAction: 'projection.semantic.skin_weights.preserve_volume',
+                  valueSource: 'accepted_action_argument',
+                  actionArgument: 'armatureId',
+                  mutationKind: 'armature_modifier_object_bind',
+                  targetId,
+                  armatureId,
+                  modifierId,
+                  pendingModifierName,
+                  observedBinding: true,
+                  uiPath: [
+                    'Properties',
+                    targetId,
+                    'Modifiers',
+                    pendingModifierName,
+                    'Object',
+                    armatureId,
+                  ],
+                },
+                ...(
+                  [
+                    ['use_vertex_groups', true, 'catalog_constant', null, 'Vertex Groups'],
+                    ['use_bone_envelopes', false, 'catalog_constant', null, 'Bone Envelopes'],
+                    [
+                      'use_deform_preserve_volume',
+                      actionArguments['preserveVolume'],
+                      'accepted_action_argument',
+                      'preserveVolume',
+                      'Preserve Volume',
+                    ],
+                  ] as const
+                ).map(
+                  ([propertyName, acceptedValue, valueSource, actionArgument, uiLabel], index) => ({
+                    order: index + 3,
+                    executionMethod: 'blender_rna_armature_modifier_property_write',
+                    mcpTool: 'operatingline.blender.rig.skin-weights.execute-next',
+                    sourceOperationId: 'projection.semantic.skin_weights.preserve_volume',
+                    semanticAction: 'projection.semantic.skin_weights.preserve_volume',
+                    valueSource,
+                    actionArgument,
+                    mutationKind: 'armature_modifier_property_write',
+                    targetId,
+                    armatureId,
+                    modifierId,
+                    pendingModifierName,
+                    propertyName,
+                    acceptedValue,
+                    observedValue: acceptedValue,
+                    uiPath: ['Properties', targetId, 'Modifiers', pendingModifierName, uiLabel],
+                  }),
+                ),
+              ]
+            : ordinal === 8
+              ? [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_modifier_name_write',
+                    mcpTool: 'operatingline.blender.rig.skin-weights.execute-next',
+                    sourceOperationId: 'projection.semantic.skin_weights.modifier_name',
+                    semanticAction: 'projection.semantic.skin_weights.modifier_name',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'modifierName',
+                    mutationKind: 'armature_modifier_name_write',
+                    targetId,
+                    armatureId,
+                    modifierId,
+                    beforeName: pendingModifierName,
+                    acceptedName: modifierName,
+                    observedName: modifierName,
+                    uiPath: ['Properties', targetId, 'Modifiers', modifierName, 'Name'],
+                  },
+                ]
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeSkinWeights: ordinal === skinWeightsLeafOperationIds.length,
+          stage: Math.min(ordinal, skinWeightsLeafOperationIds.length - 1),
+          targetId: actionArguments['targetId'],
+          armatureId: actionArguments['armatureId'],
+          modifierId: actionArguments['modifierId'],
+          vertexCount: ordinal >= 5 && Array.isArray(weights) ? weights.length : 0,
+          boneCount: ordinal >= 5 ? boneNames.size : 0,
+          groupCount: ordinal >= 5 ? boneNames.size : 0,
+          weightsApplied: ordinal >= 5,
+          modifierCreated: ordinal >= 7,
+          preserveVolumeApplied: ordinal >= 7,
+          modifierNameApplied: ordinal >= 8,
+          resolvedModifierName: ordinal >= 8 ? actionArguments['modifierName'] : null,
+          rnaSkinWeightMutations,
+          rnaSkinModifierMutations,
+        };
+      }
+      if (execution.actionName === solidifyLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[5],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const modifierId = actionArguments['modifierId'];
+        const modifierName = actionArguments['modifierName'];
+        const pendingModifierName = `OperatingLine.PendingSolidifyModifier.${receiptId.slice(0, 8)}`;
+        const propertySpecs = [
+          ['solidify_mode', 'EXTRUDE', 'catalog_constant', null],
+          ['thickness', actionArguments['thickness'], 'accepted_action_argument', 'thickness'],
+          ['thickness_clamp', 0, 'catalog_constant', null],
+          ['use_thickness_angle_clamp', false, 'catalog_constant', null],
+          ['thickness_vertex_group', 0, 'catalog_constant', null],
+          ['offset', actionArguments['offset'], 'accepted_action_argument', 'offset'],
+          ['edge_crease_inner', 0, 'catalog_constant', null],
+          ['edge_crease_outer', 0, 'catalog_constant', null],
+          ['edge_crease_rim', 0, 'catalog_constant', null],
+          ['material_offset', 0, 'catalog_constant', null],
+          ['material_offset_rim', 0, 'catalog_constant', null],
+          ['vertex_group', '', 'catalog_constant', null],
+          ['shell_vertex_group', '', 'catalog_constant', null],
+          ['rim_vertex_group', '', 'catalog_constant', null],
+          ['use_even_offset', true, 'catalog_constant', null],
+          ['use_rim', true, 'catalog_constant', null],
+          ['use_rim_only', false, 'catalog_constant', null],
+          ['use_quality_normals', false, 'catalog_constant', null],
+          ['invert_vertex_group', false, 'catalog_constant', null],
+          ['use_flat_faces', false, 'catalog_constant', null],
+          ['use_flip_normals', false, 'catalog_constant', null],
+          ['nonmanifold_thickness_mode', 'CONSTRAINTS', 'catalog_constant', null],
+          ['nonmanifold_boundary_mode', 'NONE', 'catalog_constant', null],
+          ['nonmanifold_merge_threshold', 0.0001, 'catalog_constant', null],
+          ['bevel_convex', 0, 'catalog_constant', null],
+        ] as const;
+        const rnaSolidifyModifierMutations: Array<Record<string, unknown>> =
+          ordinal === 3
+            ? [
+                {
+                  order: 1,
+                  executionMethod: 'blender_rna_solidify_modifier_create',
+                  mcpTool: 'operatingline.blender.modifier.solidify.execute-next',
+                  sourceOperationId: 'control.add_modifier',
+                  semanticAction: 'control.add_modifier',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'solidify_modifier_create',
+                  targetId,
+                  modifierId,
+                  pendingModifierName,
+                  resourceType: 'SolidifyModifier',
+                  modifierType: 'SOLIDIFY',
+                  observedResource: true,
+                  uiPath: [
+                    'Properties',
+                    targetId,
+                    'Modifiers',
+                    'Add Modifier',
+                    'Generate',
+                    'Solidify',
+                    pendingModifierName,
+                  ],
+                },
+              ]
+            : ordinal === 4
+              ? [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_modifier_name_write',
+                    mcpTool: 'operatingline.blender.modifier.solidify.execute-next',
+                    sourceOperationId: 'semantic.solidify_parameters',
+                    semanticAction: 'semantic.solidify_parameters',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'modifierName',
+                    mutationKind: 'solidify_modifier_name_write',
+                    targetId,
+                    modifierId,
+                    beforeName: pendingModifierName,
+                    acceptedName: modifierName,
+                    observedName: modifierName,
+                    uiPath: ['Properties', targetId, 'Modifiers', modifierName, 'Name'],
+                  },
+                  ...propertySpecs.map(
+                    ([propertyName, acceptedValue, valueSource, actionArgument], index) => ({
+                      order: index + 2,
+                      executionMethod: 'blender_rna_solidify_modifier_property_write',
+                      mcpTool: 'operatingline.blender.modifier.solidify.execute-next',
+                      sourceOperationId: 'semantic.solidify_parameters',
+                      semanticAction: 'semantic.solidify_parameters',
+                      valueSource,
+                      actionArgument,
+                      mutationKind: 'solidify_modifier_property_write',
+                      targetId,
+                      modifierId,
+                      modifierName,
+                      propertyName,
+                      acceptedValue,
+                      observedValue:
+                        typeof acceptedValue === 'number'
+                          ? Math.fround(acceptedValue)
+                          : acceptedValue,
+                      uiPath: ['Properties', targetId, 'Modifiers', modifierName, propertyName],
+                    }),
+                  ),
+                ]
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeSolidify: ordinal === solidifyLeafOperationIds.length,
+          stage: Math.min(ordinal, solidifyLeafOperationIds.length),
+          targetId,
+          modifierId,
+          modifierCreated: ordinal >= 3,
+          settingsApplied: ordinal >= 4,
+          resolvedModifierName: ordinal >= 4 ? modifierName : null,
+          rnaSolidifyModifierMutations,
+        };
+      }
+      if (execution.actionName === bevelModifierLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[13],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const modifierId = actionArguments['modifierId'];
+        const modifierName = actionArguments['modifierName'];
+        const pendingModifierName = `OperatingLine.PendingBevelModifier.${receiptId.slice(0, 8)}`;
+        const propertySpecs = [
+          ['width', actionArguments['width'], 'accepted_action_argument', 'width'],
+          ['segments', actionArguments['segments'], 'accepted_action_argument', 'segments'],
+          ['limit_method', 'ANGLE', 'catalog_constant', null],
+          ['angle_limit', actionArguments['angleLimit'], 'accepted_action_argument', 'angleLimit'],
+        ] as const;
+        const rnaBevelModifierMutations: Array<Record<string, unknown>> =
+          ordinal === 3
+            ? [
+                {
+                  order: 1,
+                  executionMethod: 'blender_rna_bevel_modifier_create',
+                  mcpTool: 'operatingline.blender.modifier.bevel.execute-next',
+                  sourceOperationId: 'control.add_modifier',
+                  semanticAction: 'control.add_modifier',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'bevel_modifier_create',
+                  targetId,
+                  modifierId,
+                  pendingModifierName,
+                  resourceType: 'BevelModifier',
+                  modifierType: 'BEVEL',
+                  observedResource: true,
+                  uiPath: [
+                    'Properties',
+                    targetId,
+                    'Modifiers',
+                    'Add Modifier',
+                    'Generate',
+                    'Bevel',
+                    pendingModifierName,
+                  ],
+                },
+              ]
+            : ordinal === 4
+              ? [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_modifier_name_write',
+                    mcpTool: 'operatingline.blender.modifier.bevel.execute-next',
+                    sourceOperationId: 'semantic.bevel_parameters',
+                    semanticAction: 'semantic.bevel_parameters',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'modifierName',
+                    mutationKind: 'bevel_modifier_name_write',
+                    targetId,
+                    modifierId,
+                    beforeName: pendingModifierName,
+                    acceptedName: modifierName,
+                    observedName: modifierName,
+                    uiPath: ['Properties', targetId, 'Modifiers', modifierName, 'Name'],
+                  },
+                  ...propertySpecs.map(
+                    ([propertyName, acceptedValue, valueSource, actionArgument], index) => ({
+                      order: index + 2,
+                      executionMethod: 'blender_rna_bevel_modifier_property_write',
+                      mcpTool: 'operatingline.blender.modifier.bevel.execute-next',
+                      sourceOperationId: 'semantic.bevel_parameters',
+                      semanticAction: 'semantic.bevel_parameters',
+                      valueSource,
+                      actionArgument,
+                      mutationKind: 'bevel_modifier_property_write',
+                      targetId,
+                      modifierId,
+                      modifierName,
+                      propertyName,
+                      acceptedValue,
+                      observedValue:
+                        propertyName !== 'segments' && typeof acceptedValue === 'number'
+                          ? Math.fround(acceptedValue)
+                          : acceptedValue,
+                      uiPath: ['Properties', targetId, 'Modifiers', modifierName, propertyName],
+                    }),
+                  ),
+                ]
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeBevelModifier: ordinal === bevelModifierLeafOperationIds.length,
+          stage: Math.min(ordinal, bevelModifierLeafOperationIds.length),
+          targetId,
+          modifierId,
+          modifierCreated: ordinal >= 3,
+          settingsApplied: ordinal >= 4,
+          resolvedModifierName: ordinal >= 4 ? modifierName : null,
+          rnaBevelModifierMutations,
+        };
+      }
+      if (execution.actionName === singleMaterialLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[14],
+        );
+        const actionArguments = action.arguments;
+        const materialId = actionArguments['materialId'];
+        const materialName = actionArguments['materialName'];
+        const baseColor = actionArguments['baseColor'];
+        const roughness = actionArguments['roughness'];
+        const metallic = actionArguments['metallic'];
+        const targets = actionArguments['targets'];
+        if (
+          typeof materialId !== 'string' ||
+          typeof materialName !== 'string' ||
+          !Array.isArray(baseColor) ||
+          baseColor.length !== 4 ||
+          baseColor.some((value) => typeof value !== 'number') ||
+          typeof roughness !== 'number' ||
+          typeof metallic !== 'number' ||
+          !Array.isArray(targets) ||
+          targets.some((targetId) => typeof targetId !== 'string')
+        ) {
+          return leafOperationExecutionRejected(
+            'Single Material action arguments changed after proposal acceptance',
+            409,
+            'leaf_operation_single_material_arguments_invalid',
+          );
+        }
+        const parsedObservedMutations = companionLeafOperationMaterialRnaMutationsSchema.safeParse(
+          observedEvidence?.['rnaMaterialMutations'],
+        );
+        if (!parsedObservedMutations.success) {
+          return leafOperationExecutionRejected(
+            'Single Material result omitted its strict RNA mutation evidence',
+            409,
+            'leaf_operation_single_material_evidence_invalid',
+          );
+        }
+        const observedMutations = parsedObservedMutations.data;
+        const pendingMaterialName = `OperatingLine.PendingMaterial.${receiptId.slice(0, 8)}`;
+        let rnaMaterialMutations: Array<Record<string, unknown>> = [];
+        if (ordinal === 3) {
+          const observedUseNodes = observedMutations[1];
+          if (observedUseNodes?.mutationKind !== 'material_use_nodes_write') {
+            return leafOperationExecutionRejected(
+              'Single Material operation 03 omitted Use Nodes evidence',
+              409,
+              'leaf_operation_single_material_use_nodes_missing',
+            );
+          }
+          rnaMaterialMutations = [
+            {
+              order: 1,
+              executionMethod: 'blender_rna_material_create',
+              mcpTool: 'operatingline.blender.material.single.execute-next',
+              sourceOperationId: 'control.new_material',
+              semanticAction: 'control.new_material',
+              valueSource: 'managed_receipt_identity',
+              mutationKind: 'material_create',
+              materialId,
+              pendingMaterialName,
+              resourceType: 'Material',
+              observedResource: true,
+              uiPath: ['Shading', 'Material Properties', 'New', pendingMaterialName],
+            },
+            {
+              order: 2,
+              executionMethod: 'blender_rna_material_use_nodes_write',
+              mcpTool: 'operatingline.blender.material.single.execute-next',
+              sourceOperationId: 'control.new_material',
+              semanticAction: 'control.new_material',
+              valueSource: 'catalog_constant',
+              mutationKind: 'material_use_nodes_write',
+              materialId,
+              beforeValue: observedUseNodes.beforeValue,
+              acceptedValue: true,
+              observedValue: true,
+              uiPath: ['Shading', 'Material Properties', pendingMaterialName, 'Use Nodes'],
+            },
+          ];
+        } else if (ordinal === 4) {
+          if (observedMutations.length !== 13 + targets.length) {
+            return leafOperationExecutionRejected(
+              'Single Material operation 04 target evidence count changed',
+              409,
+              'leaf_operation_single_material_target_count_changed',
+            );
+          }
+          const numericControlSpecs = [
+            ...(['R', 'G', 'B', 'A'] as const).map((component, index) => ({
+              executionMethod: 'blender_rna_material_property_write',
+              mutationKind: 'material_property_write',
+              surface: 'Material',
+              propertyName: 'diffuse_color',
+              actionArgument: 'baseColor',
+              component,
+              acceptedValue: baseColor[index],
+            })),
+            {
+              executionMethod: 'blender_rna_material_property_write',
+              mutationKind: 'material_property_write',
+              surface: 'Material',
+              propertyName: 'roughness',
+              actionArgument: 'roughness',
+              component: undefined,
+              acceptedValue: roughness,
+            },
+            {
+              executionMethod: 'blender_rna_material_property_write',
+              mutationKind: 'material_property_write',
+              surface: 'Material',
+              propertyName: 'metallic',
+              actionArgument: 'metallic',
+              component: undefined,
+              acceptedValue: metallic,
+            },
+            ...(['R', 'G', 'B', 'A'] as const).map((component, index) => ({
+              executionMethod: 'blender_rna_principled_input_write',
+              mutationKind: 'principled_input_write',
+              surface: 'Principled BSDF',
+              propertyName: 'Base Color',
+              actionArgument: 'baseColor',
+              component,
+              acceptedValue: baseColor[index],
+            })),
+            {
+              executionMethod: 'blender_rna_principled_input_write',
+              mutationKind: 'principled_input_write',
+              surface: 'Principled BSDF',
+              propertyName: 'Roughness',
+              actionArgument: 'roughness',
+              component: undefined,
+              acceptedValue: roughness,
+            },
+            {
+              executionMethod: 'blender_rna_principled_input_write',
+              mutationKind: 'principled_input_write',
+              surface: 'Principled BSDF',
+              propertyName: 'Metallic',
+              actionArgument: 'metallic',
+              component: undefined,
+              acceptedValue: metallic,
+            },
+          ] as const;
+          const observedName = observedMutations[0];
+          if (observedName?.mutationKind !== 'material_name_write') {
+            return leafOperationExecutionRejected(
+              'Single Material operation 04 omitted its accepted name write',
+              409,
+              'leaf_operation_single_material_name_missing',
+            );
+          }
+          rnaMaterialMutations.push({
+            order: 1,
+            executionMethod: 'blender_rna_material_name_write',
+            mcpTool: 'operatingline.blender.material.single.execute-next',
+            sourceOperationId: 'semantic.principled_surface',
+            semanticAction: 'semantic.principled_surface',
+            valueSource: 'accepted_action_argument',
+            actionArgument: 'materialName',
+            mutationKind: 'material_name_write',
+            materialId,
+            materialName,
+            surface: 'Material',
+            propertyName: 'name',
+            beforeValue: pendingMaterialName,
+            acceptedValue: materialName,
+            observedValue: materialName,
+            uiPath: ['Shading', 'Material Properties', materialName, 'Material', 'name'],
+          });
+          for (const [index, spec] of numericControlSpecs.entries()) {
+            const observed = observedMutations[index + 1];
+            if (
+              observed === undefined ||
+              (observed.mutationKind !== 'material_property_write' &&
+                observed.mutationKind !== 'principled_input_write')
+            ) {
+              return leafOperationExecutionRejected(
+                'Single Material operation 04 omitted ordered surface control evidence',
+                409,
+                'leaf_operation_single_material_surface_evidence_missing',
+              );
+            }
+            rnaMaterialMutations.push({
+              order: index + 2,
+              executionMethod: spec.executionMethod,
+              mcpTool: 'operatingline.blender.material.single.execute-next',
+              sourceOperationId: 'semantic.principled_surface',
+              semanticAction: 'semantic.principled_surface',
+              valueSource: 'accepted_action_argument',
+              actionArgument: spec.actionArgument,
+              mutationKind: spec.mutationKind,
+              materialId,
+              materialName,
+              surface: spec.surface,
+              propertyName: spec.propertyName,
+              ...(spec.component === undefined ? {} : { component: spec.component }),
+              beforeValue: observed.beforeValue,
+              acceptedValue: spec.acceptedValue,
+              observedValue: observed.observedValue,
+              uiPath: [
+                'Shading',
+                'Material Properties',
+                materialName,
+                spec.surface,
+                spec.propertyName,
+                ...(spec.component === undefined ? [] : [spec.component]),
+              ],
+            });
+          }
+          for (const [index, targetId] of targets.entries()) {
+            const observed = observedMutations[index + 13];
+            if (observed?.mutationKind !== 'material_slot_replace') {
+              return leafOperationExecutionRejected(
+                'Single Material operation 04 omitted ordered slot-assignment evidence',
+                409,
+                'leaf_operation_single_material_assignment_evidence_missing',
+              );
+            }
+            rnaMaterialMutations.push({
+              order: index + 14,
+              executionMethod: 'blender_rna_material_slot_replace',
+              mcpTool: 'operatingline.blender.material.single.execute-next',
+              sourceOperationId: 'semantic.principled_surface',
+              semanticAction: 'semantic.principled_surface',
+              valueSource: 'accepted_action_argument',
+              actionArgument: 'targets',
+              mutationKind: 'material_slot_replace',
+              targetOrder: index + 1,
+              targetId,
+              materialId,
+              beforeSlotCount: observed.beforeSlotCount,
+              observedSlotCount: 1,
+              observedAssignment: true,
+              sourceMeshId: observed.sourceMeshId,
+              sourceContentIntact: true,
+              uiPath: ['Shading', 'Material Properties', targetId, 'Material Slots', materialName],
+            });
+          }
+        }
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeSingleMaterial: ordinal === singleMaterialLeafOperationIds.length,
+          stage: Math.min(ordinal, singleMaterialLeafOperationIds.length),
+          materialId,
+          targetIds: targets,
+          materialCreated: ordinal >= 3,
+          surfaceConfigured: ordinal >= 4,
+          assignmentsApplied: ordinal >= 4,
+          resolvedMaterialName: ordinal >= 4 ? materialName : null,
+          rnaMaterialMutations,
+        };
+      }
+      if (execution.actionName === materialPaletteLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[15],
+        );
+        const materials = action.arguments['materials'];
+        if (
+          !Array.isArray(materials) ||
+          materials.length < 1 ||
+          materials.length > 8 ||
+          materials.some((material) => {
+            if (material === null || typeof material !== 'object' || Array.isArray(material)) {
+              return true;
+            }
+            const value = material as Record<string, unknown>;
+            const baseColor = value['baseColor'];
+            const targets = value['targets'];
+            return (
+              typeof value['materialId'] !== 'string' ||
+              typeof value['materialName'] !== 'string' ||
+              !Array.isArray(baseColor) ||
+              baseColor.length !== 4 ||
+              baseColor.some((component) => typeof component !== 'number') ||
+              typeof value['roughness'] !== 'number' ||
+              typeof value['metallic'] !== 'number' ||
+              !Array.isArray(targets) ||
+              targets.length < 1 ||
+              targets.some((targetId) => typeof targetId !== 'string')
+            );
+          })
+        ) {
+          return leafOperationExecutionRejected(
+            'Material Palette action arguments changed after proposal acceptance',
+            409,
+            'leaf_operation_material_palette_arguments_invalid',
+          );
+        }
+        const definitions = materials as Array<{
+          materialId: string;
+          materialName: string;
+          baseColor: number[];
+          roughness: number;
+          metallic: number;
+          targets: string[];
+        }>;
+        const parsedObservedMutations =
+          companionLeafOperationMaterialPaletteRnaMutationsSchema.safeParse(
+            observedEvidence?.['rnaMaterialPaletteMutations'],
+          );
+        if (!parsedObservedMutations.success) {
+          return leafOperationExecutionRejected(
+            'Material Palette result omitted its strict RNA mutation evidence',
+            409,
+            'leaf_operation_material_palette_evidence_invalid',
+          );
+        }
+        const observedMutations = parsedObservedMutations.data;
+        const rnaMaterialPaletteMutations: Array<Record<string, unknown>> = [];
+        if (ordinal === 4) {
+          const expectedMutationCount = definitions.reduce(
+            (count, definition) => count + 14 + definition.targets.length,
+            0,
+          );
+          if (observedMutations.length !== expectedMutationCount) {
+            return leafOperationExecutionRejected(
+              'Material Palette operation 04 evidence count changed',
+              409,
+              'leaf_operation_material_palette_count_changed',
+            );
+          }
+          let cursor = 0;
+          for (const [materialIndex, definition] of definitions.entries()) {
+            const materialOrder = materialIndex + 1;
+            const create = observedMutations[cursor];
+            const useNodes = observedMutations[cursor + 1];
+            if (
+              create?.mutationKind !== 'palette_material_create' ||
+              useNodes?.mutationKind !== 'palette_material_use_nodes_write'
+            ) {
+              return leafOperationExecutionRejected(
+                'Material Palette omitted an ordered create/Use Nodes pair',
+                409,
+                'leaf_operation_material_palette_create_missing',
+              );
+            }
+            rnaMaterialPaletteMutations.push(
+              {
+                order: cursor + 1,
+                materialOrder,
+                materialMutationOrder: 1,
+                executionMethod: 'blender_rna_material_create',
+                mcpTool: 'operatingline.blender.material.palette.execute-next',
+                sourceOperationId: 'semantic.assign_targets',
+                semanticAction: 'semantic.assign_targets',
+                valueSource: 'accepted_action_argument',
+                actionArgument: 'materials[].materialName',
+                mutationKind: 'palette_material_create',
+                materialId: definition.materialId,
+                materialName: definition.materialName,
+                resourceType: 'Material',
+                observedResource: true,
+                uiPath: [
+                  'Shading',
+                  'Material Properties',
+                  'Palette',
+                  materialOrder,
+                  definition.materialName,
+                  'New',
+                ],
+              },
+              {
+                order: cursor + 2,
+                materialOrder,
+                materialMutationOrder: 2,
+                executionMethod: 'blender_rna_material_use_nodes_write',
+                mcpTool: 'operatingline.blender.material.palette.execute-next',
+                sourceOperationId: 'semantic.assign_targets',
+                semanticAction: 'semantic.assign_targets',
+                valueSource: 'catalog_constant',
+                mutationKind: 'palette_material_use_nodes_write',
+                materialId: definition.materialId,
+                materialName: definition.materialName,
+                beforeValue: useNodes.beforeValue,
+                acceptedValue: true,
+                observedValue: true,
+                uiPath: [
+                  'Shading',
+                  'Material Properties',
+                  'Palette',
+                  materialOrder,
+                  definition.materialName,
+                  'Use Nodes',
+                ],
+              },
+            );
+            const numericSpecs = [
+              ...(['R', 'G', 'B', 'A'] as const).map((component, index) => ({
+                executionMethod: 'blender_rna_material_property_write',
+                mutationKind: 'palette_material_property_write',
+                actionArgument: 'materials[].baseColor',
+                surface: 'Material',
+                propertyName: 'diffuse_color',
+                component,
+                acceptedValue: definition.baseColor[index],
+              })),
+              {
+                executionMethod: 'blender_rna_material_property_write',
+                mutationKind: 'palette_material_property_write',
+                actionArgument: 'materials[].roughness',
+                surface: 'Material',
+                propertyName: 'roughness',
+                component: undefined,
+                acceptedValue: definition.roughness,
+              },
+              {
+                executionMethod: 'blender_rna_material_property_write',
+                mutationKind: 'palette_material_property_write',
+                actionArgument: 'materials[].metallic',
+                surface: 'Material',
+                propertyName: 'metallic',
+                component: undefined,
+                acceptedValue: definition.metallic,
+              },
+              ...(['R', 'G', 'B', 'A'] as const).map((component, index) => ({
+                executionMethod: 'blender_rna_principled_input_write',
+                mutationKind: 'palette_principled_input_write',
+                actionArgument: 'materials[].baseColor',
+                surface: 'Principled BSDF',
+                propertyName: 'Base Color',
+                component,
+                acceptedValue: definition.baseColor[index],
+              })),
+              {
+                executionMethod: 'blender_rna_principled_input_write',
+                mutationKind: 'palette_principled_input_write',
+                actionArgument: 'materials[].roughness',
+                surface: 'Principled BSDF',
+                propertyName: 'Roughness',
+                component: undefined,
+                acceptedValue: definition.roughness,
+              },
+              {
+                executionMethod: 'blender_rna_principled_input_write',
+                mutationKind: 'palette_principled_input_write',
+                actionArgument: 'materials[].metallic',
+                surface: 'Principled BSDF',
+                propertyName: 'Metallic',
+                component: undefined,
+                acceptedValue: definition.metallic,
+              },
+            ] as const;
+            for (const [numericIndex, spec] of numericSpecs.entries()) {
+              const observed = observedMutations[cursor + numericIndex + 2];
+              if (
+                observed === undefined ||
+                (observed.mutationKind !== 'palette_material_property_write' &&
+                  observed.mutationKind !== 'palette_principled_input_write')
+              ) {
+                return leafOperationExecutionRejected(
+                  'Material Palette omitted an ordered surface write',
+                  409,
+                  'leaf_operation_material_palette_surface_missing',
+                );
+              }
+              rnaMaterialPaletteMutations.push({
+                order: cursor + numericIndex + 3,
+                materialOrder,
+                materialMutationOrder: numericIndex + 3,
+                executionMethod: spec.executionMethod,
+                mcpTool: 'operatingline.blender.material.palette.execute-next',
+                sourceOperationId: 'semantic.assign_targets',
+                semanticAction: 'semantic.assign_targets',
+                valueSource: 'accepted_action_argument',
+                actionArgument: spec.actionArgument,
+                mutationKind: spec.mutationKind,
+                materialId: definition.materialId,
+                materialName: definition.materialName,
+                surface: spec.surface,
+                propertyName: spec.propertyName,
+                ...(spec.component === undefined ? {} : { component: spec.component }),
+                beforeValue: observed.beforeValue,
+                acceptedValue: spec.acceptedValue,
+                observedValue: observed.observedValue,
+                uiPath: [
+                  'Shading',
+                  'Material Properties',
+                  'Palette',
+                  materialOrder,
+                  definition.materialName,
+                  spec.surface,
+                  spec.propertyName,
+                  ...(spec.component === undefined ? [] : [spec.component]),
+                ],
+              });
+            }
+            for (const [targetIndex, targetId] of definition.targets.entries()) {
+              const observed = observedMutations[cursor + 14 + targetIndex];
+              if (observed?.mutationKind !== 'palette_material_slot_replace') {
+                return leafOperationExecutionRejected(
+                  'Material Palette omitted an ordered target assignment',
+                  409,
+                  'leaf_operation_material_palette_assignment_missing',
+                );
+              }
+              rnaMaterialPaletteMutations.push({
+                order: cursor + 15 + targetIndex,
+                materialOrder,
+                materialMutationOrder: 15 + targetIndex,
+                executionMethod: 'blender_rna_material_slot_replace',
+                mcpTool: 'operatingline.blender.material.palette.execute-next',
+                sourceOperationId: 'semantic.assign_targets',
+                semanticAction: 'semantic.assign_targets',
+                valueSource: 'accepted_action_argument',
+                actionArgument: 'materials[].targets',
+                mutationKind: 'palette_material_slot_replace',
+                materialId: definition.materialId,
+                materialName: definition.materialName,
+                targetOrder: targetIndex + 1,
+                targetId,
+                beforeSlotCount: observed.beforeSlotCount,
+                observedSlotCount: 1,
+                observedAssignment: true,
+                sourceMeshId: observed.sourceMeshId,
+                sourceContentIntact: true,
+                uiPath: [
+                  'Shading',
+                  'Material Properties',
+                  'Palette',
+                  materialOrder,
+                  targetId,
+                  'Material Slots',
+                  definition.materialName,
+                ],
+              });
+            }
+            cursor += 14 + definition.targets.length;
+          }
+        }
+        const targetIds = definitions.flatMap((definition) => definition.targets);
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeMaterialPalette: ordinal === materialPaletteLeafOperationIds.length,
+          stage: Math.min(ordinal, materialPaletteLeafOperationIds.length),
+          materialIds: definitions.map((definition) => definition.materialId),
+          targetIds,
+          paletteEntryCount: definitions.length,
+          paletteValidated: ordinal >= 3,
+          materialsCreated: ordinal >= 4,
+          surfacesConfigured: ordinal >= 4,
+          assignmentsApplied: ordinal >= 4,
+          resolvedMaterialNames:
+            ordinal >= 4 ? definitions.map((definition) => definition.materialName) : [],
+          rnaMaterialPaletteMutations,
+        };
+      }
+      if (execution.actionName === subdivisionSurfaceLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[6],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const modifierId = actionArguments['modifierId'];
+        const modifierName = actionArguments['modifierName'];
+        const viewportLevel = actionArguments['viewportLevel'];
+        const pendingModifierName = `OperatingLine.PendingSubdivisionSurfaceModifier.${receiptId.slice(0, 8)}`;
+        const propertySpecs = [
+          ['subdivision_type', 'CATMULL_CLARK', 'catalog_constant', null],
+          ['levels', viewportLevel, 'accepted_action_argument', 'viewportLevel'],
+          ['render_levels', 2, 'catalog_constant', null],
+          ['quality', 3, 'catalog_constant', null],
+          ['show_only_control_edges', true, 'catalog_constant', null],
+          ['use_creases', true, 'catalog_constant', null],
+          ['use_limit_surface', true, 'catalog_constant', null],
+          ['boundary_smooth', 'ALL', 'catalog_constant', null],
+          ['uv_smooth', 'PRESERVE_BOUNDARIES', 'catalog_constant', null],
+          ['use_custom_normals', false, 'catalog_constant', null],
+          ['show_viewport', true, 'catalog_constant', null],
+          ['show_render', true, 'catalog_constant', null],
+          ['show_in_editmode', true, 'catalog_constant', null],
+          ['show_on_cage', false, 'catalog_constant', null],
+        ] as const;
+        const rnaSubdivisionSurfaceModifierMutations: Array<Record<string, unknown>> =
+          ordinal === 3
+            ? [
+                {
+                  order: 1,
+                  executionMethod: 'blender_rna_subdivision_surface_modifier_create',
+                  mcpTool: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+                  sourceOperationId: 'operator.subdivision_set',
+                  semanticAction: 'operator.subdivision_set',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'subdivision_surface_modifier_create',
+                  targetId,
+                  modifierId,
+                  pendingModifierName,
+                  resourceType: 'SubsurfModifier',
+                  modifierType: 'SUBSURF',
+                  observedResource: true,
+                  uiPath: ['Layout', targetId, 'Object', 'Subdivision Set', pendingModifierName],
+                },
+              ]
+            : ordinal === 4
+              ? [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_modifier_name_write',
+                    mcpTool: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+                    sourceOperationId: 'semantic.subdivision_surface_contract',
+                    semanticAction: 'semantic.subdivision_surface_contract',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'modifierName',
+                    mutationKind: 'subdivision_surface_modifier_name_write',
+                    targetId,
+                    modifierId,
+                    beforeName: pendingModifierName,
+                    acceptedName: modifierName,
+                    observedName: modifierName,
+                    uiPath: ['Properties', targetId, 'Modifiers', modifierName, 'Name'],
+                  },
+                  ...propertySpecs.map(
+                    ([propertyName, acceptedValue, valueSource, actionArgument], index) => ({
+                      order: index + 2,
+                      executionMethod: 'blender_rna_subdivision_surface_modifier_property_write',
+                      mcpTool: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+                      sourceOperationId: 'semantic.subdivision_surface_contract',
+                      semanticAction: 'semantic.subdivision_surface_contract',
+                      valueSource,
+                      actionArgument,
+                      mutationKind: 'subdivision_surface_modifier_property_write',
+                      targetId,
+                      modifierId,
+                      modifierName,
+                      propertyName,
+                      acceptedValue,
+                      observedValue: acceptedValue,
+                      uiPath: ['Properties', targetId, 'Modifiers', modifierName, propertyName],
+                    }),
+                  ),
+                ]
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeSubdivisionSurface: ordinal === subdivisionSurfaceLeafOperationIds.length,
+          stage: Math.min(ordinal, subdivisionSurfaceLeafOperationIds.length),
+          targetId,
+          modifierId,
+          modifierCreated: ordinal >= 3,
+          settingsApplied: ordinal >= 4,
+          resolvedModifierName: ordinal >= 4 ? modifierName : null,
+          rnaSubdivisionSurfaceModifierMutations,
+        };
+      }
+      if (execution.actionName === mirrorLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[7],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const modifierId = actionArguments['modifierId'];
+        const modifierName = actionArguments['modifierName'];
+        const axis = actionArguments['axis'];
+        const axisIndex = axis === 'X' ? 0 : axis === 'Y' ? 1 : axis === 'Z' ? 2 : -1;
+        const pendingModifierName = `OperatingLine.PendingMirrorModifier.${receiptId.slice(0, 8)}`;
+        const propertySpecs = [
+          ['use_axis', 0, null, 'accepted_action_argument', 'axis'],
+          ['use_axis', 1, null, 'accepted_action_argument', 'axis'],
+          ['use_axis', 2, null, 'accepted_action_argument', 'axis'],
+          ['use_bisect_axis', 0, false, 'catalog_constant', null],
+          ['use_bisect_axis', 1, false, 'catalog_constant', null],
+          ['use_bisect_axis', 2, false, 'catalog_constant', null],
+          ['use_bisect_flip_axis', 0, false, 'catalog_constant', null],
+          ['use_bisect_flip_axis', 1, false, 'catalog_constant', null],
+          ['use_bisect_flip_axis', 2, false, 'catalog_constant', null],
+          ['use_clip', null, false, 'catalog_constant', null],
+          ['use_mirror_merge', null, true, 'catalog_constant', null],
+          ['merge_threshold', null, 0.001, 'catalog_constant', null],
+          ['bisect_threshold', null, 0.001, 'catalog_constant', null],
+          ['mirror_object', null, null, 'catalog_constant', null],
+          ['use_mirror_vertex_groups', null, true, 'catalog_constant', null],
+          ['use_mirror_u', null, false, 'catalog_constant', null],
+          ['use_mirror_v', null, false, 'catalog_constant', null],
+          ['use_mirror_udim', null, false, 'catalog_constant', null],
+          ['offset_u', null, 0, 'catalog_constant', null],
+          ['offset_v', null, 0, 'catalog_constant', null],
+          ['mirror_offset_u', null, 0, 'catalog_constant', null],
+          ['mirror_offset_v', null, 0, 'catalog_constant', null],
+          ['show_viewport', null, true, 'catalog_constant', null],
+          ['show_render', null, true, 'catalog_constant', null],
+          ['show_in_editmode', null, true, 'catalog_constant', null],
+          ['show_on_cage', null, false, 'catalog_constant', null],
+          ['use_apply_on_spline', null, false, 'catalog_constant', null],
+        ] as const;
+        const rnaMirrorModifierMutations: Array<Record<string, unknown>> =
+          ordinal === 6
+            ? [
+                {
+                  order: 1,
+                  executionMethod: 'blender_rna_mirror_modifier_create',
+                  mcpTool: 'operatingline.blender.modifier.mirror.execute-next',
+                  sourceOperationId: 'modifier.mirror',
+                  semanticAction: 'modifier.mirror',
+                  valueSource: 'managed_receipt_identity',
+                  mutationKind: 'mirror_modifier_create',
+                  targetId,
+                  modifierId,
+                  pendingModifierName,
+                  resourceType: 'MirrorModifier',
+                  modifierType: 'MIRROR',
+                  observedResource: true,
+                  uiPath: [
+                    'Properties',
+                    targetId,
+                    'Modifiers',
+                    'Add Modifier',
+                    'Generate',
+                    'Mirror',
+                    pendingModifierName,
+                  ],
+                },
+              ]
+            : ordinal === 7
+              ? [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_modifier_name_write',
+                    mcpTool: 'operatingline.blender.modifier.mirror.execute-next',
+                    sourceOperationId: 'semantic.mirror_contract',
+                    semanticAction: 'semantic.mirror_contract',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'modifierName',
+                    mutationKind: 'mirror_modifier_name_write',
+                    targetId,
+                    modifierId,
+                    beforeName: pendingModifierName,
+                    acceptedName: modifierName,
+                    observedName: modifierName,
+                    uiPath: ['Properties', targetId, 'Modifiers', modifierName, 'Name'],
+                  },
+                  ...propertySpecs.map(
+                    (
+                      [propertyName, componentIndex, catalogValue, valueSource, actionArgument],
+                      index,
+                    ) => {
+                      const acceptedValue =
+                        valueSource === 'accepted_action_argument'
+                          ? componentIndex === axisIndex
+                          : catalogValue;
+                      const componentLabel =
+                        componentIndex === null ? null : (['X', 'Y', 'Z'] as const)[componentIndex];
+                      return {
+                        order: index + 2,
+                        executionMethod: 'blender_rna_mirror_modifier_property_write',
+                        mcpTool: 'operatingline.blender.modifier.mirror.execute-next',
+                        sourceOperationId: 'semantic.mirror_contract',
+                        semanticAction: 'semantic.mirror_contract',
+                        valueSource,
+                        actionArgument,
+                        mutationKind: 'mirror_modifier_property_write',
+                        targetId,
+                        modifierId,
+                        modifierName,
+                        propertyName,
+                        ...(componentIndex === null ? {} : { componentIndex, componentLabel }),
+                        acceptedValue,
+                        observedValue:
+                          typeof acceptedValue === 'number'
+                            ? Math.fround(acceptedValue)
+                            : acceptedValue,
+                        uiPath: [
+                          'Properties',
+                          targetId,
+                          'Modifiers',
+                          modifierName,
+                          propertyName,
+                          ...(componentLabel === null ? [] : [componentLabel]),
+                        ],
+                      };
+                    },
+                  ),
+                ]
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeMirror: ordinal === mirrorLeafOperationIds.length,
+          stage: Math.min(ordinal, mirrorLeafOperationIds.length),
+          targetId,
+          modifierId,
+          modifierCreated: ordinal >= 6,
+          settingsApplied: ordinal >= 7,
+          resolvedModifierName: ordinal >= 7 ? modifierName : null,
+          rnaMirrorModifierMutations,
+        };
+      }
+      if (execution.actionName === editBevelLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[8],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const resultMeshId = actionArguments['resultMeshId'];
+        const resultMeshName = actionArguments['resultMeshName'];
+        const width = actionArguments['width'];
+        const segments = actionArguments['segments'];
+        const profile = actionArguments['profile'];
+        const pendingResultMeshName = `OperatingLine.PendingEditBevelMesh.${receiptId.slice(0, 8)}`;
+        const parsedObservedOperations =
+          companionLeafOperationEditBevelMeshOperationsSchema.safeParse(
+            observedEvidence?.['editBevelMeshOperations'],
+          );
+        if (!parsedObservedOperations.success) {
+          return leafOperationExecutionRejected(
+            'Edit Bevel result omitted its strict mesh-operation evidence',
+            409,
+            'leaf_operation_edit_bevel_evidence_invalid',
+          );
+        }
+        const observedOperations = parsedObservedOperations.data;
+        const editBevelMeshOperations: Array<Record<string, unknown>> =
+          ordinal === 5
+            ? (() => {
+                const content = observedOperations[4];
+                if (content?.mutationKind !== 'edit_bevel_mesh_content_write') {
+                  return leafOperationExecutionRejected(
+                    'Edit Bevel operation 05 omitted its bounded topology evidence',
+                    409,
+                    'leaf_operation_edit_bevel_topology_missing',
+                  );
+                }
+                return [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_mesh_copy',
+                    mcpTool: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+                    sourceOperationId: 'operator.bevel_edges',
+                    semanticAction: 'operator.bevel_edges',
+                    valueSource: 'managed_receipt_identity',
+                    mutationKind: 'edit_bevel_mesh_create',
+                    targetId,
+                    resultMeshId,
+                    pendingResultMeshName,
+                    resourceType: 'Mesh',
+                    observedResource: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Edit Bevel Edges',
+                      'Result Mesh',
+                      pendingResultMeshName,
+                    ],
+                  },
+                  ...(
+                    [
+                      ['width', 'Width', width],
+                      ['segments', 'Segments', segments],
+                      ['profile', 'Profile Shape', profile],
+                    ] as const
+                  ).map(([parameterName, label, acceptedValue], index) => ({
+                    order: index + 2,
+                    executionMethod: 'blender_bmesh_bevel_argument_projection',
+                    mcpTool: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+                    sourceOperationId: 'operator.bevel_edges',
+                    semanticAction: 'operator.bevel_edges',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: parameterName,
+                    mutationKind: 'edit_bevel_parameter_projection',
+                    targetId,
+                    resultMeshId,
+                    parameterName,
+                    acceptedValue,
+                    projectedValue: acceptedValue,
+                    uiPath: ['Adjust Last Operation', label],
+                  })),
+                  {
+                    order: 5,
+                    executionMethod: 'blender_bmesh_ops_bevel',
+                    mcpTool: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+                    sourceOperationId: 'operator.bevel_edges',
+                    semanticAction: 'operator.bevel_edges',
+                    valueSource: 'accepted_action_and_catalog_constants',
+                    mutationKind: 'edit_bevel_mesh_content_write',
+                    targetId,
+                    resultMeshId,
+                    fixedParameters: {
+                      offsetType: 'OFFSET',
+                      affect: 'EDGES',
+                      clampOverlap: false,
+                      loopSlide: true,
+                      markSeam: false,
+                      markSharp: false,
+                      material: -1,
+                      hardenNormals: false,
+                      faceStrengthMode: 'NONE',
+                      miterOuter: 'SHARP',
+                      miterInner: 'SHARP',
+                      spread: 0.1,
+                      vmeshMethod: 'ADJ',
+                    },
+                    sourceTopology: [...content.sourceTopology],
+                    resultTopology: [...content.resultTopology],
+                    sourceContentPreserved: true,
+                    resultContentObserved: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Edit Bevel Edges',
+                      'Apply BMesh Bevel',
+                    ],
+                  },
+                ];
+              })()
+            : ordinal === 6
+              ? (() => {
+                  const link = observedOperations[1];
+                  if (link?.mutationKind !== 'edit_bevel_object_data_link_write') {
+                    return leafOperationExecutionRejected(
+                      'Edit Bevel operation 06 omitted its receipt-owned data-link evidence',
+                      409,
+                      'leaf_operation_edit_bevel_link_missing',
+                    );
+                  }
+                  return [
+                    {
+                      order: 1,
+                      executionMethod: 'blender_rna_mesh_name_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+                      sourceOperationId: 'semantic.managed_bevel_edges_contract',
+                      semanticAction: 'semantic.managed_bevel_edges_contract',
+                      valueSource: 'accepted_action_argument',
+                      actionArgument: 'resultMeshName',
+                      mutationKind: 'edit_bevel_mesh_name_write',
+                      targetId,
+                      resultMeshId,
+                      beforeName: pendingResultMeshName,
+                      acceptedName: resultMeshName,
+                      observedName: resultMeshName,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Edit Bevel Edges',
+                        'Result Mesh Name',
+                      ],
+                    },
+                    {
+                      order: 2,
+                      executionMethod: 'blender_rna_object_data_link_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+                      sourceOperationId: 'semantic.managed_bevel_edges_contract',
+                      semanticAction: 'semantic.managed_bevel_edges_contract',
+                      valueSource: 'managed_receipt_identity',
+                      mutationKind: 'edit_bevel_object_data_link_write',
+                      targetId,
+                      resultMeshId,
+                      sourceMeshLogicalId: link.sourceMeshLogicalId,
+                      resultMeshLogicalId: resultMeshId,
+                      observedLink: true,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Edit Bevel Edges',
+                        'Object Data Link',
+                      ],
+                    },
+                  ];
+                })()
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeEditBevelEdges: ordinal === editBevelLeafOperationIds.length,
+          stage: Math.min(ordinal, editBevelLeafOperationIds.length),
+          targetId,
+          resultMeshId,
+          resultMeshCreated: ordinal >= 5,
+          meshContentApplied: ordinal >= 5,
+          resultLinked: ordinal >= 6,
+          resolvedResultMeshName: ordinal >= 6 ? resultMeshName : null,
+          editBevelMeshOperations,
+        };
+      }
+      if (execution.actionName === editInsetLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[9],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const resultMeshId = actionArguments['resultMeshId'];
+        const resultMeshName = actionArguments['resultMeshName'];
+        const thickness = actionArguments['thickness'];
+        const depth = actionArguments['depth'];
+        const pendingResultMeshName = `OperatingLine.PendingEditInsetMesh.${receiptId.slice(0, 8)}`;
+        const parsedObservedOperations =
+          companionLeafOperationEditInsetMeshOperationsSchema.safeParse(
+            observedEvidence?.['editInsetMeshOperations'],
+          );
+        if (!parsedObservedOperations.success) {
+          return leafOperationExecutionRejected(
+            'Edit Inset result omitted its strict mesh-operation evidence',
+            409,
+            'leaf_operation_edit_inset_evidence_invalid',
+          );
+        }
+        const observedOperations = parsedObservedOperations.data;
+        const editInsetMeshOperations: Array<Record<string, unknown>> =
+          ordinal === 5
+            ? (() => {
+                const content = observedOperations[3];
+                if (content?.mutationKind !== 'edit_inset_mesh_content_write') {
+                  return leafOperationExecutionRejected(
+                    'Edit Inset operation 05 omitted its exact topology evidence',
+                    409,
+                    'leaf_operation_edit_inset_topology_missing',
+                  );
+                }
+                return [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_mesh_copy',
+                    mcpTool: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+                    sourceOperationId: 'operator.inset_faces',
+                    semanticAction: 'operator.inset_faces',
+                    valueSource: 'managed_receipt_identity',
+                    mutationKind: 'edit_inset_mesh_create',
+                    targetId,
+                    resultMeshId,
+                    pendingResultMeshName,
+                    resourceType: 'Mesh',
+                    observedResource: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Individual Inset Faces',
+                      'Result Mesh',
+                      pendingResultMeshName,
+                    ],
+                  },
+                  ...(
+                    [
+                      ['thickness', 'Thickness', thickness],
+                      ['depth', 'Depth', depth],
+                    ] as const
+                  ).map(([parameterName, label, acceptedValue], index) => ({
+                    order: index + 2,
+                    executionMethod: 'blender_bmesh_inset_individual_argument_projection',
+                    mcpTool: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+                    sourceOperationId: 'operator.inset_faces',
+                    semanticAction: 'operator.inset_faces',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: parameterName,
+                    mutationKind: 'edit_inset_parameter_projection',
+                    targetId,
+                    resultMeshId,
+                    parameterName,
+                    acceptedValue,
+                    projectedValue: acceptedValue,
+                    uiPath: ['Adjust Last Operation', label],
+                  })),
+                  {
+                    order: 4,
+                    executionMethod: 'blender_bmesh_ops_inset_individual',
+                    mcpTool: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+                    sourceOperationId: 'operator.inset_faces',
+                    semanticAction: 'operator.inset_faces',
+                    valueSource: 'accepted_action_and_catalog_constants',
+                    mutationKind: 'edit_inset_mesh_content_write',
+                    targetId,
+                    resultMeshId,
+                    fixedParameters: {
+                      useEvenOffset: true,
+                      useInterpolate: true,
+                      useRelativeOffset: false,
+                    },
+                    sourceTopology: [...content.sourceTopology],
+                    sourceLoopCount: content.sourceLoopCount,
+                    expectedTopology: [...content.expectedTopology],
+                    resultTopology: [...content.resultTopology],
+                    sourceContentPreserved: true,
+                    resultContentObserved: true,
+                    resultNondegenerate: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Individual Inset Faces',
+                      'Apply BMesh Individual Inset',
+                    ],
+                  },
+                ];
+              })()
+            : ordinal === 6
+              ? (() => {
+                  const link = observedOperations[1];
+                  if (link?.mutationKind !== 'edit_inset_object_data_link_write') {
+                    return leafOperationExecutionRejected(
+                      'Edit Inset operation 06 omitted its receipt-owned data-link evidence',
+                      409,
+                      'leaf_operation_edit_inset_link_missing',
+                    );
+                  }
+                  return [
+                    {
+                      order: 1,
+                      executionMethod: 'blender_rna_mesh_name_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+                      sourceOperationId: 'semantic.managed_inset_faces_contract',
+                      semanticAction: 'semantic.managed_inset_faces_contract',
+                      valueSource: 'accepted_action_argument',
+                      actionArgument: 'resultMeshName',
+                      mutationKind: 'edit_inset_mesh_name_write',
+                      targetId,
+                      resultMeshId,
+                      beforeName: pendingResultMeshName,
+                      acceptedName: resultMeshName,
+                      observedName: resultMeshName,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Individual Inset Faces',
+                        'Result Mesh Name',
+                      ],
+                    },
+                    {
+                      order: 2,
+                      executionMethod: 'blender_rna_object_data_link_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+                      sourceOperationId: 'semantic.managed_inset_faces_contract',
+                      semanticAction: 'semantic.managed_inset_faces_contract',
+                      valueSource: 'managed_receipt_identity',
+                      mutationKind: 'edit_inset_object_data_link_write',
+                      targetId,
+                      resultMeshId,
+                      sourceMeshLogicalId: link.sourceMeshLogicalId,
+                      resultMeshLogicalId: resultMeshId,
+                      observedLink: true,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Individual Inset Faces',
+                        'Object Data Link',
+                      ],
+                    },
+                  ];
+                })()
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeEditInsetFaces: ordinal === editInsetLeafOperationIds.length,
+          stage: Math.min(ordinal, editInsetLeafOperationIds.length),
+          targetId,
+          resultMeshId,
+          resultMeshCreated: ordinal >= 5,
+          meshContentApplied: ordinal >= 5,
+          resultLinked: ordinal >= 6,
+          resolvedResultMeshName: ordinal >= 6 ? resultMeshName : null,
+          editInsetMeshOperations,
+        };
+      }
+      if (execution.actionName === editTriangulateLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[10],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const resultMeshId = actionArguments['resultMeshId'];
+        const resultMeshName = actionArguments['resultMeshName'];
+        const pendingResultMeshName = `OperatingLine.PendingEditTriangulateMesh.${receiptId.slice(0, 8)}`;
+        const parsedObservedOperations =
+          companionLeafOperationEditTriangulateMeshOperationsSchema.safeParse(
+            observedEvidence?.['editTriangulateMeshOperations'],
+          );
+        if (!parsedObservedOperations.success) {
+          return leafOperationExecutionRejected(
+            'Edit Triangulate result omitted its strict mesh-operation evidence',
+            409,
+            'leaf_operation_edit_triangulate_evidence_invalid',
+          );
+        }
+        const observedOperations = parsedObservedOperations.data;
+        const editTriangulateMeshOperations: Array<Record<string, unknown>> =
+          ordinal === 5
+            ? (() => {
+                const content = observedOperations[1];
+                if (content?.mutationKind !== 'edit_triangulate_mesh_content_write') {
+                  return leafOperationExecutionRejected(
+                    'Edit Triangulate operation 05 omitted its exact topology evidence',
+                    409,
+                    'leaf_operation_edit_triangulate_topology_missing',
+                  );
+                }
+                return [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_mesh_copy',
+                    mcpTool: 'operatingline.blender.mesh.edit-triangulate.execute-next',
+                    sourceOperationId: 'operator.triangulate_faces',
+                    semanticAction: 'operator.triangulate_faces',
+                    valueSource: 'managed_receipt_identity',
+                    mutationKind: 'edit_triangulate_mesh_create',
+                    targetId,
+                    resultMeshId,
+                    pendingResultMeshName,
+                    resourceType: 'Mesh',
+                    observedResource: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Triangulate Faces',
+                      'Result Mesh',
+                      pendingResultMeshName,
+                    ],
+                  },
+                  {
+                    order: 2,
+                    executionMethod: 'blender_bmesh_ops_triangulate',
+                    mcpTool: 'operatingline.blender.mesh.edit-triangulate.execute-next',
+                    sourceOperationId: 'operator.triangulate_faces',
+                    semanticAction: 'operator.triangulate_faces',
+                    valueSource: 'managed_source_and_catalog_constants',
+                    mutationKind: 'edit_triangulate_mesh_content_write',
+                    targetId,
+                    resultMeshId,
+                    fixedParameters: {
+                      quadMethod: 'FIXED',
+                      ngonMethod: 'EAR_CLIP',
+                    },
+                    sourceTopology: [...content.sourceTopology],
+                    sourceLoopCount: content.sourceLoopCount,
+                    expectedTopology: [...content.expectedTopology],
+                    resultTopology: [...content.resultTopology],
+                    sourceContentPreserved: true,
+                    resultContentObserved: true,
+                    allTriangles: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Triangulate Faces',
+                      'Apply BMesh Triangulate Faces',
+                    ],
+                  },
+                ];
+              })()
+            : ordinal === 6
+              ? (() => {
+                  const link = observedOperations[1];
+                  if (link?.mutationKind !== 'edit_triangulate_object_data_link_write') {
+                    return leafOperationExecutionRejected(
+                      'Edit Triangulate operation 06 omitted its receipt-owned data-link evidence',
+                      409,
+                      'leaf_operation_edit_triangulate_link_missing',
+                    );
+                  }
+                  return [
+                    {
+                      order: 1,
+                      executionMethod: 'blender_rna_mesh_name_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-triangulate.execute-next',
+                      sourceOperationId: 'semantic.managed_triangulate_contract',
+                      semanticAction: 'semantic.managed_triangulate_contract',
+                      valueSource: 'accepted_action_argument',
+                      actionArgument: 'resultMeshName',
+                      mutationKind: 'edit_triangulate_mesh_name_write',
+                      targetId,
+                      resultMeshId,
+                      beforeName: pendingResultMeshName,
+                      acceptedName: resultMeshName,
+                      observedName: resultMeshName,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Triangulate Faces',
+                        'Result Mesh Name',
+                      ],
+                    },
+                    {
+                      order: 2,
+                      executionMethod: 'blender_rna_object_data_link_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-triangulate.execute-next',
+                      sourceOperationId: 'semantic.managed_triangulate_contract',
+                      semanticAction: 'semantic.managed_triangulate_contract',
+                      valueSource: 'managed_receipt_identity',
+                      mutationKind: 'edit_triangulate_object_data_link_write',
+                      targetId,
+                      resultMeshId,
+                      sourceMeshLogicalId: link.sourceMeshLogicalId,
+                      resultMeshLogicalId: resultMeshId,
+                      observedLink: true,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Triangulate Faces',
+                        'Object Data Link',
+                      ],
+                    },
+                  ];
+                })()
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeEditTriangulate: ordinal === editTriangulateLeafOperationIds.length,
+          stage: Math.min(ordinal, editTriangulateLeafOperationIds.length),
+          targetId,
+          resultMeshId,
+          resultMeshCreated: ordinal >= 5,
+          meshContentApplied: ordinal >= 5,
+          resultLinked: ordinal >= 6,
+          resolvedResultMeshName: ordinal >= 6 ? resultMeshName : null,
+          editTriangulateMeshOperations,
+        };
+      }
+      if (execution.actionName === editExtrudeRegionLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[12],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const resultMeshId = actionArguments['resultMeshId'];
+        const resultMeshName = actionArguments['resultMeshName'];
+        const polygonIndices = actionArguments['polygonIndices'];
+        const translation = actionArguments['translation'];
+        if (!Array.isArray(polygonIndices) || !Array.isArray(translation)) {
+          return leafOperationExecutionRejected(
+            'Extrude Region accepted action arguments are not canonical arrays',
+            409,
+            'leaf_operation_edit_extrude_region_arguments_invalid',
+          );
+        }
+        const pendingResultMeshName = `OperatingLine.PendingEditExtrudeRegionMesh.${receiptId.slice(0, 8)}`;
+        const parsedObservedOperations =
+          companionLeafOperationEditExtrudeRegionMeshOperationsSchema.safeParse(
+            observedEvidence?.['editExtrudeRegionMeshOperations'],
+          );
+        if (!parsedObservedOperations.success) {
+          return leafOperationExecutionRejected(
+            'Extrude Region result omitted its strict mesh-operation evidence',
+            409,
+            'leaf_operation_edit_extrude_region_evidence_invalid',
+          );
+        }
+        const observedOperations = parsedObservedOperations.data;
+        const editExtrudeRegionMeshOperations: Array<Record<string, unknown>> =
+          ordinal === 4
+            ? (() => {
+                const selection = observedOperations[0];
+                if (selection?.mutationKind !== 'edit_extrude_region_selection_projection') {
+                  return leafOperationExecutionRejected(
+                    'Extrude Region operation 04 omitted its exact face-region evidence',
+                    409,
+                    'leaf_operation_edit_extrude_region_selection_missing',
+                  );
+                }
+                return [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_bmesh_region_validation',
+                    mcpTool: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+                    sourceOperationId: 'semantic.select_face_region',
+                    semanticAction: 'semantic.select_face_region',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'polygonIndices',
+                    mutationKind: 'edit_extrude_region_selection_projection',
+                    targetId,
+                    resultMeshId,
+                    acceptedPolygonIndices: [...polygonIndices],
+                    observedPolygonIndices: [...polygonIndices],
+                    sourceTopology: [...selection.sourceTopology],
+                    selectedFaceCount: selection.selectedFaceCount,
+                    selectedEdgeCount: selection.selectedEdgeCount,
+                    selectedVertexCount: selection.selectedVertexCount,
+                    boundaryEdgeCount: selection.boundaryEdgeCount,
+                    selectionObserved: true,
+                    uiPath: ['OperatingLine', 'Guided Control', 'Extrude Region', 'Face Region'],
+                  },
+                ];
+              })()
+            : ordinal === 5
+              ? (() => {
+                  const translationProjection = observedOperations[1];
+                  const content = observedOperations[2];
+                  if (
+                    translationProjection?.mutationKind !==
+                      'edit_extrude_region_translation_projection' ||
+                    content?.mutationKind !== 'edit_extrude_region_mesh_content_write'
+                  ) {
+                    return leafOperationExecutionRejected(
+                      'Extrude Region operation 05 omitted translation or topology evidence',
+                      409,
+                      'leaf_operation_edit_extrude_region_topology_missing',
+                    );
+                  }
+                  return [
+                    {
+                      order: 1,
+                      executionMethod: 'blender_rna_mesh_copy',
+                      mcpTool: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+                      sourceOperationId: 'operator.extrude_region_move',
+                      semanticAction: 'operator.extrude_region_move',
+                      valueSource: 'managed_receipt_identity',
+                      mutationKind: 'edit_extrude_region_mesh_create',
+                      targetId,
+                      resultMeshId,
+                      pendingResultMeshName,
+                      resourceType: 'Mesh',
+                      observedResource: true,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Extrude Region',
+                        'Result Mesh',
+                        pendingResultMeshName,
+                      ],
+                    },
+                    {
+                      order: 2,
+                      executionMethod: 'blender_bmesh_ops_translate',
+                      mcpTool: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+                      sourceOperationId: 'operator.extrude_region_move',
+                      semanticAction: 'operator.extrude_region_move',
+                      valueSource: 'accepted_action_argument',
+                      actionArgument: 'translation',
+                      mutationKind: 'edit_extrude_region_translation_projection',
+                      targetId,
+                      resultMeshId,
+                      acceptedTranslation: [...translation],
+                      observedTranslation: [...translation],
+                      translationObserved: true,
+                      uiPath: ['OperatingLine', 'Guided Control', 'Extrude Region', 'Translation'],
+                    },
+                    {
+                      order: 3,
+                      executionMethod: 'blender_bmesh_ops_extrude_face_region',
+                      mcpTool: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+                      sourceOperationId: 'operator.extrude_region_move',
+                      semanticAction: 'operator.extrude_region_move',
+                      valueSource: 'managed_source_and_accepted_action_arguments',
+                      mutationKind: 'edit_extrude_region_mesh_content_write',
+                      targetId,
+                      resultMeshId,
+                      sourceTopology: [...content.sourceTopology],
+                      selectedFaceCount: content.selectedFaceCount,
+                      selectedEdgeCount: content.selectedEdgeCount,
+                      selectedVertexCount: content.selectedVertexCount,
+                      boundaryEdgeCount: content.boundaryEdgeCount,
+                      expectedTopology: [...content.expectedTopology],
+                      resultTopology: [...content.resultTopology],
+                      sourceContentPreserved: true,
+                      resultContentObserved: true,
+                      uiPath: [
+                        'OperatingLine',
+                        'Guided Control',
+                        'Extrude Region',
+                        'Apply BMesh Extrude Face Region',
+                      ],
+                    },
+                  ];
+                })()
+              : ordinal === 6
+                ? (() => {
+                    const link = observedOperations[1];
+                    if (link?.mutationKind !== 'edit_extrude_region_object_data_link_write') {
+                      return leafOperationExecutionRejected(
+                        'Extrude Region operation 06 omitted its receipt-owned data-link evidence',
+                        409,
+                        'leaf_operation_edit_extrude_region_link_missing',
+                      );
+                    }
+                    return [
+                      {
+                        order: 1,
+                        executionMethod: 'blender_rna_mesh_name_write',
+                        mcpTool: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+                        sourceOperationId: 'semantic.managed_extrude_region_contract',
+                        semanticAction: 'semantic.managed_extrude_region_contract',
+                        valueSource: 'accepted_action_argument',
+                        actionArgument: 'resultMeshName',
+                        mutationKind: 'edit_extrude_region_mesh_name_write',
+                        targetId,
+                        resultMeshId,
+                        beforeName: pendingResultMeshName,
+                        acceptedName: resultMeshName,
+                        observedName: resultMeshName,
+                        uiPath: [
+                          'OperatingLine',
+                          'Guided Control',
+                          'Extrude Region',
+                          'Result Mesh Name',
+                        ],
+                      },
+                      {
+                        order: 2,
+                        executionMethod: 'blender_rna_object_data_link_write',
+                        mcpTool: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+                        sourceOperationId: 'semantic.managed_extrude_region_contract',
+                        semanticAction: 'semantic.managed_extrude_region_contract',
+                        valueSource: 'managed_receipt_identity',
+                        mutationKind: 'edit_extrude_region_object_data_link_write',
+                        targetId,
+                        resultMeshId,
+                        sourceMeshLogicalId: link.sourceMeshLogicalId,
+                        resultMeshLogicalId: resultMeshId,
+                        observedLink: true,
+                        uiPath: [
+                          'OperatingLine',
+                          'Guided Control',
+                          'Extrude Region',
+                          'Object Data Link',
+                        ],
+                      },
+                    ];
+                  })()
+                : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeEditExtrudeRegion: ordinal === editExtrudeRegionLeafOperationIds.length,
+          stage: Math.min(ordinal, editExtrudeRegionLeafOperationIds.length),
+          targetId,
+          resultMeshId,
+          faceRegionValidated: ordinal >= 4,
+          resultMeshCreated: ordinal >= 5,
+          meshContentApplied: ordinal >= 5,
+          resultLinked: ordinal >= 6,
+          resolvedResultMeshName: ordinal >= 6 ? resultMeshName : null,
+          editExtrudeRegionMeshOperations,
+        };
+      }
+      if (execution.actionName === editPokeLeafOperationActionName) {
+        const ordinal = execution.operationOrdinal;
+        const { action } = requireManagedBlenderOperationMcpTrack(
+          loadProcedureLeafReplayEvidence(execution.replayId).binding,
+          blenderLeafOperationProfiles[11],
+        );
+        const actionArguments = action.arguments;
+        const targetId = actionArguments['targetId'];
+        const resultMeshId = actionArguments['resultMeshId'];
+        const resultMeshName = actionArguments['resultMeshName'];
+        const offset = actionArguments['offset'];
+        const pendingResultMeshName = `OperatingLine.PendingEditPokeMesh.${receiptId.slice(0, 8)}`;
+        const parsedObservedOperations =
+          companionLeafOperationEditPokeMeshOperationsSchema.safeParse(
+            observedEvidence?.['editPokeMeshOperations'],
+          );
+        if (!parsedObservedOperations.success) {
+          return leafOperationExecutionRejected(
+            'Edit Poke result omitted its strict mesh-operation evidence',
+            409,
+            'leaf_operation_edit_poke_evidence_invalid',
+          );
+        }
+        const observedOperations = parsedObservedOperations.data;
+        const editPokeMeshOperations: Array<Record<string, unknown>> =
+          ordinal === 5
+            ? (() => {
+                const content = observedOperations[2];
+                if (content?.mutationKind !== 'edit_poke_mesh_content_write') {
+                  return leafOperationExecutionRejected(
+                    'Edit Poke operation 05 omitted its exact topology evidence',
+                    409,
+                    'leaf_operation_edit_poke_topology_missing',
+                  );
+                }
+                return [
+                  {
+                    order: 1,
+                    executionMethod: 'blender_rna_mesh_copy',
+                    mcpTool: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+                    sourceOperationId: 'operator.poke_faces',
+                    semanticAction: 'operator.poke_faces',
+                    valueSource: 'managed_receipt_identity',
+                    mutationKind: 'edit_poke_mesh_create',
+                    targetId,
+                    resultMeshId,
+                    pendingResultMeshName,
+                    resourceType: 'Mesh',
+                    observedResource: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Poke Faces',
+                      'Result Mesh',
+                      pendingResultMeshName,
+                    ],
+                  },
+                  {
+                    order: 2,
+                    executionMethod: 'blender_bmesh_poke_argument_projection',
+                    mcpTool: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+                    sourceOperationId: 'operator.poke_faces',
+                    semanticAction: 'operator.poke_faces',
+                    valueSource: 'accepted_action_argument',
+                    actionArgument: 'offset',
+                    mutationKind: 'edit_poke_parameter_projection',
+                    targetId,
+                    resultMeshId,
+                    parameterName: 'offset',
+                    acceptedValue: offset,
+                    projectedValue: offset,
+                    uiPath: ['Adjust Last Operation', 'Offset'],
+                  },
+                  {
+                    order: 3,
+                    executionMethod: 'blender_bmesh_ops_poke',
+                    mcpTool: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+                    sourceOperationId: 'operator.poke_faces',
+                    semanticAction: 'operator.poke_faces',
+                    valueSource: 'accepted_action_and_catalog_constants',
+                    mutationKind: 'edit_poke_mesh_content_write',
+                    targetId,
+                    resultMeshId,
+                    fixedParameters: {
+                      centerMode: 'MEAN_WEIGHTED',
+                      useRelativeOffset: false,
+                    },
+                    sourceTopology: [...content.sourceTopology],
+                    sourceLoopCount: content.sourceLoopCount,
+                    expectedTopology: [...content.expectedTopology],
+                    resultTopology: [...content.resultTopology],
+                    sourceContentPreserved: true,
+                    resultContentObserved: true,
+                    allTriangles: true,
+                    resultNondegenerate: true,
+                    uiPath: [
+                      'OperatingLine',
+                      'Guided Control',
+                      'Poke Faces',
+                      'Apply BMesh Poke Faces',
+                    ],
+                  },
+                ];
+              })()
+            : ordinal === 6
+              ? (() => {
+                  const link = observedOperations[1];
+                  if (link?.mutationKind !== 'edit_poke_object_data_link_write') {
+                    return leafOperationExecutionRejected(
+                      'Edit Poke operation 06 omitted its receipt-owned data-link evidence',
+                      409,
+                      'leaf_operation_edit_poke_link_missing',
+                    );
+                  }
+                  return [
+                    {
+                      order: 1,
+                      executionMethod: 'blender_rna_mesh_name_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+                      sourceOperationId: 'semantic.managed_poke_faces_contract',
+                      semanticAction: 'semantic.managed_poke_faces_contract',
+                      valueSource: 'accepted_action_argument',
+                      actionArgument: 'resultMeshName',
+                      mutationKind: 'edit_poke_mesh_name_write',
+                      targetId,
+                      resultMeshId,
+                      beforeName: pendingResultMeshName,
+                      acceptedName: resultMeshName,
+                      observedName: resultMeshName,
+                      uiPath: ['OperatingLine', 'Guided Control', 'Poke Faces', 'Result Mesh Name'],
+                    },
+                    {
+                      order: 2,
+                      executionMethod: 'blender_rna_object_data_link_write',
+                      mcpTool: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+                      sourceOperationId: 'semantic.managed_poke_faces_contract',
+                      semanticAction: 'semantic.managed_poke_faces_contract',
+                      valueSource: 'managed_receipt_identity',
+                      mutationKind: 'edit_poke_object_data_link_write',
+                      targetId,
+                      resultMeshId,
+                      sourceMeshLogicalId: link.sourceMeshLogicalId,
+                      resultMeshLogicalId: resultMeshId,
+                      observedLink: true,
+                      uiPath: ['OperatingLine', 'Guided Control', 'Poke Faces', 'Object Data Link'],
+                    },
+                  ];
+                })()
+              : [];
+        return {
+          completedOperations: Array.from({ length: ordinal }, (_value, index) => index + 1),
+          preconditionsValidated: ordinal === 1,
+          completeEditPokeFaces: ordinal === editPokeLeafOperationIds.length,
+          stage: Math.min(ordinal, editPokeLeafOperationIds.length),
+          targetId,
+          resultMeshId,
+          resultMeshCreated: ordinal >= 5,
+          meshContentApplied: ordinal >= 5,
+          resultLinked: ordinal >= 6,
+          resolvedResultMeshName: ordinal >= 6 ? resultMeshName : null,
+          editPokeMeshOperations,
+        };
+      }
+      return leafOperationExecutionRejected(
+        'Leaf-operation evidence belongs to an unsupported guided profile',
+        422,
+        'leaf_operation_unsupported_action',
+      );
+    };
+
+    const validateBlenderLeafOperationExecutionResult = (
+      result: CompanionLeafOperationResult,
+      currentDocumentSession: ActiveCompanionDocumentSession,
+      execution: CompanionLeafOperationStatus,
+    ): void => {
+      const latestBeforeFinal = listKnownCompanionStates().find(
+        (candidate) =>
+          candidate.adapterId === result.target.adapterId &&
+          candidate.instanceId === result.target.instanceId,
+      );
+      if (result.status !== 'succeeded') {
+        if (
+          latestBeforeFinal?.reportId !== result.expectedState.reportId ||
+          latestBeforeFinal.sequence !== result.expectedState.sequence
+        ) {
+          return leafOperationExecutionRejected(
+            'A rejected or restored-failure operation must preserve its authorized Companion state',
+            409,
+            'leaf_operation_failure_state_changed',
+          );
+        }
+        return;
+      }
+      const progress = result.progress;
+      if (progress === null) {
+        return leafOperationExecutionRejected('Succeeded leaf operation has no progress evidence');
+      }
+      const previous = leafOperationExecutionCoordinator.successfulExecutionsForReplay(
+        result.replayId,
+      );
+      const priorProgress = previous.at(-1)?.result?.progress;
+      const resultProfile = blenderLeafOperationProfiles.find(
+        (profile) => profile.actionName === result.actionName,
+      );
+      const expectedMutating =
+        resultProfile?.mutatingOrdinals.includes(result.operationOrdinal as never) ?? false;
+      if (
+        previous.length !== result.operationOrdinal - 1 ||
+        (priorProgress === undefined
+          ? result.operationOrdinal !== 1
+          : priorProgress === null ||
+            progress.runId !== priorProgress.runId ||
+            progress.bindingSha256 !== priorProgress.bindingSha256 ||
+            progress.latestObservation.details.receiptId !==
+              priorProgress.latestObservation.details.receiptId ||
+            progress.latestObservation.details.beforeFingerprintSha256 !==
+              priorProgress.latestObservation.details.afterFingerprintSha256)
+      ) {
+        return leafOperationExecutionRejected(
+          'Leaf operation result does not continue the durable fingerprint prefix',
+          409,
+          'leaf_operation_progress_chain_invalid',
+        );
+      }
+      if (
+        progress.latestObservation.details.afterFingerprintSha256 === undefined ||
+        !sameProcedureLeafReplayValue(
+          progress.latestObservation.details.evidence,
+          expectedLeafOperationEvidence(
+            execution,
+            progress.latestObservation.details.receiptId,
+            progress.latestObservation.details.evidence,
+          ),
+        ) ||
+        (expectedMutating
+          ? progress.latestObservation.details.beforeFingerprintSha256 ===
+            progress.latestObservation.details.afterFingerprintSha256
+          : progress.latestObservation.details.beforeFingerprintSha256 !==
+            progress.latestObservation.details.afterFingerprintSha256)
+      ) {
+        return leafOperationExecutionRejected(
+          'Leaf operation result lacks its exact catalog-derived stage observation',
+          409,
+          'leaf_operation_observation_mismatch',
+        );
+      }
+      const dispatchedAt = execution.dispatchedAt;
+      if (dispatchedAt === undefined || Date.parse(result.occurredAt) < Date.parse(dispatchedAt)) {
+        return leafOperationExecutionRejected(
+          'Leaf operation evidence predates its immutable delivery',
+          409,
+          'leaf_operation_evidence_predates_dispatch',
+        );
+      }
+      if (result.operationOrdinal < result.operationIds.length) {
+        if (
+          progress.finalReport !== null ||
+          latestBeforeFinal?.reportId !== result.expectedState.reportId ||
+          latestBeforeFinal.sequence !== result.expectedState.sequence
+        ) {
+          return leafOperationExecutionRejected(
+            'Partial leaf progress must not publish or advance a Companion state report',
+            409,
+            'leaf_operation_partial_report_changed',
+          );
+        }
+        return;
+      }
+      if (progress.finalReport === null) {
+        return leafOperationExecutionRejected('Final leaf operation has no Companion report');
+      }
+      const reportPayload = database.getCompanionStateReport(progress.finalReport.reportId);
+      const parsedReport = companionStateReportSchema.safeParse(reportPayload);
+      if (!parsedReport.success) {
+        return leafOperationExecutionRejected(
+          'Final leaf operation references an unknown Companion report',
+          409,
+          'leaf_operation_report_missing',
+        );
+      }
+      const report = parsedReport.data;
+      const latest = listKnownCompanionStates().find(
+        (candidate) =>
+          candidate.adapterId === result.target.adapterId &&
+          candidate.instanceId === result.target.instanceId,
+      );
+      const reportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        report.reportId,
+      );
+      const reportReceiptHasCurrentDocumentAuthority = (() => {
+        if (reportReceipt?.sessionFingerprintSha256 === null || reportReceipt === null) {
+          return false;
+        }
+        try {
+          const receiptDocumentSession =
+            companionLeaseManager.authorizeDocumentSessionForReceiptFingerprint(
+              reportReceipt.sessionFingerprintSha256,
+              result.target.adapterId,
+              result.target.instanceId,
+            );
+          return (
+            leafOperationDocumentAuthorityFor(receiptDocumentSession) ===
+            leafOperationDocumentAuthorityFor(currentDocumentSession)
+          );
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) return false;
+          throw error;
+        }
+      })();
+      const authorizedStartPayload = database.getCompanionStateReport(
+        execution.expectedState.reportId,
+      );
+      const authorizedStart = companionStateReportSchema.safeParse(authorizedStartPayload);
+      const startCheckpoint = authorizedStart.success
+        ? authorizedStart.data.nativeUndoCheckpoint
+        : undefined;
+      let replayBinding: ProcedureLeafReplayBinding;
+      try {
+        ({ binding: replayBinding } = loadProcedureLeafReplayEvidence(execution.replayId));
+        validateStrongProcedureLeafReplayObservation(replayBinding, report);
+      } catch (error) {
+        if (!(error instanceof ProcedureLeafReplayError)) throw error;
+        return leafOperationExecutionRejected(
+          'Final leaf operation does not satisfy its strong action observation',
+          409,
+          'leaf_operation_final_observation_mismatch',
+        );
+      }
+      if (result.actionName === editBevelLeafOperationActionName) {
+        const bevelObservation = report.observations.find(
+          (observation) => observation.kind === 'mesh_edges_beveled',
+        );
+        const bevelOperation = previous.find((candidate) => candidate.operationOrdinal === 5);
+        const bevelEvidence =
+          bevelOperation?.result?.progress?.latestObservation.details.evidence[
+            'editBevelMeshOperations'
+          ];
+        const parsedBevelEvidence =
+          companionLeafOperationEditBevelMeshOperationsSchema.safeParse(bevelEvidence);
+        const contentWrite = parsedBevelEvidence.success
+          ? parsedBevelEvidence.data.find(
+              (operation) => operation.mutationKind === 'edit_bevel_mesh_content_write',
+            )
+          : undefined;
+        const details = bevelObservation?.details;
+        if (
+          contentWrite?.mutationKind !== 'edit_bevel_mesh_content_write' ||
+          details === undefined ||
+          !isDeepStrictEqual(contentWrite.sourceTopology, [
+            details.sourceVertexCount,
+            details.sourceEdgeCount,
+            details.sourceFaceCount,
+          ]) ||
+          !isDeepStrictEqual(contentWrite.resultTopology, [
+            details.vertexCount,
+            details.edgeCount,
+            details.faceCount,
+          ]) ||
+          details.sourceContentIntact !== true ||
+          details.topologyGrew !== true
+        ) {
+          return leafOperationExecutionRejected(
+            'Final Edit Bevel observation does not prove the exact operation-05 topology',
+            409,
+            'leaf_operation_edit_bevel_topology_mismatch',
+          );
+        }
+      }
+      if (result.actionName === editInsetLeafOperationActionName) {
+        const insetObservation = report.observations.find(
+          (observation) => observation.kind === 'mesh_faces_inset',
+        );
+        const insetOperation = previous.find((candidate) => candidate.operationOrdinal === 5);
+        const insetEvidence =
+          insetOperation?.result?.progress?.latestObservation.details.evidence[
+            'editInsetMeshOperations'
+          ];
+        const parsedInsetEvidence =
+          companionLeafOperationEditInsetMeshOperationsSchema.safeParse(insetEvidence);
+        const contentWrite = parsedInsetEvidence.success
+          ? parsedInsetEvidence.data.find(
+              (operation) => operation.mutationKind === 'edit_inset_mesh_content_write',
+            )
+          : undefined;
+        const details = insetObservation?.details;
+        if (
+          contentWrite?.mutationKind !== 'edit_inset_mesh_content_write' ||
+          details === undefined ||
+          !isDeepStrictEqual(contentWrite.sourceTopology, [
+            details.sourceVertexCount,
+            details.sourceEdgeCount,
+            details.sourceFaceCount,
+          ]) ||
+          contentWrite.sourceLoopCount !== details.sourceLoopCount ||
+          !isDeepStrictEqual(contentWrite.expectedTopology, [
+            details.expectedVertexCount,
+            details.expectedEdgeCount,
+            details.expectedFaceCount,
+          ]) ||
+          !isDeepStrictEqual(contentWrite.resultTopology, [
+            details.vertexCount,
+            details.edgeCount,
+            details.faceCount,
+          ]) ||
+          details.sourceContentIntact !== true ||
+          details.topologyMatches !== true ||
+          details.resultNondegenerate !== true
+        ) {
+          return leafOperationExecutionRejected(
+            'Final Edit Inset observation does not prove the exact operation-05 topology',
+            409,
+            'leaf_operation_edit_inset_topology_mismatch',
+          );
+        }
+      }
+      if (result.actionName === editTriangulateLeafOperationActionName) {
+        const triangulateObservation = report.observations.find(
+          (observation) => observation.kind === 'mesh_triangulated',
+        );
+        const triangulateOperation = previous.find((candidate) => candidate.operationOrdinal === 5);
+        const triangulateEvidence =
+          triangulateOperation?.result?.progress?.latestObservation.details.evidence[
+            'editTriangulateMeshOperations'
+          ];
+        const parsedTriangulateEvidence =
+          companionLeafOperationEditTriangulateMeshOperationsSchema.safeParse(triangulateEvidence);
+        const contentWrite = parsedTriangulateEvidence.success
+          ? parsedTriangulateEvidence.data.find(
+              (operation) => operation.mutationKind === 'edit_triangulate_mesh_content_write',
+            )
+          : undefined;
+        const details = triangulateObservation?.details;
+        if (
+          contentWrite?.mutationKind !== 'edit_triangulate_mesh_content_write' ||
+          details === undefined ||
+          !isDeepStrictEqual(contentWrite.sourceTopology, [
+            details.sourceVertexCount,
+            details.sourceEdgeCount,
+            details.sourceFaceCount,
+          ]) ||
+          contentWrite.sourceLoopCount !== details.sourceLoopCount ||
+          !isDeepStrictEqual(contentWrite.expectedTopology, [
+            details.expectedVertexCount,
+            details.expectedEdgeCount,
+            details.expectedFaceCount,
+          ]) ||
+          !isDeepStrictEqual(contentWrite.resultTopology, [
+            details.vertexCount,
+            details.edgeCount,
+            details.faceCount,
+          ]) ||
+          details.sourceContentIntact !== true ||
+          details.contentIntact !== true ||
+          details.topologyMatches !== true ||
+          details.allTriangles !== true
+        ) {
+          return leafOperationExecutionRejected(
+            'Final Edit Triangulate observation does not prove the exact operation-05 topology',
+            409,
+            'leaf_operation_edit_triangulate_topology_mismatch',
+          );
+        }
+      }
+      if (result.actionName === editExtrudeRegionLeafOperationActionName) {
+        const extrudeObservation = report.observations.find(
+          (observation) => observation.kind === 'mesh_region_extruded',
+        );
+        const selectionOperation = previous.find((candidate) => candidate.operationOrdinal === 4);
+        const extrusionOperation = previous.find((candidate) => candidate.operationOrdinal === 5);
+        const selectionEvidence =
+          selectionOperation?.result?.progress?.latestObservation.details.evidence[
+            'editExtrudeRegionMeshOperations'
+          ];
+        const extrusionEvidence =
+          extrusionOperation?.result?.progress?.latestObservation.details.evidence[
+            'editExtrudeRegionMeshOperations'
+          ];
+        const parsedSelectionEvidence =
+          companionLeafOperationEditExtrudeRegionMeshOperationsSchema.safeParse(selectionEvidence);
+        const parsedExtrusionEvidence =
+          companionLeafOperationEditExtrudeRegionMeshOperationsSchema.safeParse(extrusionEvidence);
+        const selectionProjection = parsedSelectionEvidence.success
+          ? parsedSelectionEvidence.data.find(
+              (operation) => operation.mutationKind === 'edit_extrude_region_selection_projection',
+            )
+          : undefined;
+        const contentWrite = parsedExtrusionEvidence.success
+          ? parsedExtrusionEvidence.data.find(
+              (operation) => operation.mutationKind === 'edit_extrude_region_mesh_content_write',
+            )
+          : undefined;
+        const details = extrudeObservation?.details;
+        if (
+          selectionProjection?.mutationKind !== 'edit_extrude_region_selection_projection' ||
+          contentWrite?.mutationKind !== 'edit_extrude_region_mesh_content_write' ||
+          details === undefined ||
+          !isDeepStrictEqual(contentWrite.sourceTopology, [
+            details.sourceVertexCount,
+            details.sourceEdgeCount,
+            details.sourceFaceCount,
+          ]) ||
+          selectionProjection.selectedFaceCount !== contentWrite.selectedFaceCount ||
+          selectionProjection.selectedEdgeCount !== contentWrite.selectedEdgeCount ||
+          selectionProjection.selectedVertexCount !== contentWrite.selectedVertexCount ||
+          selectionProjection.boundaryEdgeCount !== contentWrite.boundaryEdgeCount ||
+          contentWrite.selectedFaceCount !== details.selectedFaceCount ||
+          contentWrite.selectedEdgeCount !== details.selectedEdgeCount ||
+          contentWrite.selectedVertexCount !== details.selectedVertexCount ||
+          contentWrite.boundaryEdgeCount !== details.boundaryEdgeCount ||
+          !isDeepStrictEqual(contentWrite.expectedTopology, [
+            details.expectedVertexCount,
+            details.expectedEdgeCount,
+            details.expectedFaceCount,
+          ]) ||
+          !isDeepStrictEqual(contentWrite.resultTopology, [
+            details.vertexCount,
+            details.edgeCount,
+            details.faceCount,
+          ]) ||
+          details.sourceContentIntact !== true ||
+          details.contentIntact !== true ||
+          details.topologyMatches !== true ||
+          details.topologyGrew !== true
+        ) {
+          return leafOperationExecutionRejected(
+            'Final Extrude Region observation does not prove the exact operation-04/05 region topology',
+            409,
+            'leaf_operation_edit_extrude_region_topology_mismatch',
+          );
+        }
+      }
+      if (result.actionName === editPokeLeafOperationActionName) {
+        const pokeObservation = report.observations.find(
+          (observation) => observation.kind === 'mesh_faces_poked',
+        );
+        const pokeOperation = previous.find((candidate) => candidate.operationOrdinal === 5);
+        const pokeEvidence =
+          pokeOperation?.result?.progress?.latestObservation.details.evidence[
+            'editPokeMeshOperations'
+          ];
+        const parsedPokeEvidence =
+          companionLeafOperationEditPokeMeshOperationsSchema.safeParse(pokeEvidence);
+        const contentWrite = parsedPokeEvidence.success
+          ? parsedPokeEvidence.data.find(
+              (operation) => operation.mutationKind === 'edit_poke_mesh_content_write',
+            )
+          : undefined;
+        const details = pokeObservation?.details;
+        if (
+          contentWrite?.mutationKind !== 'edit_poke_mesh_content_write' ||
+          details === undefined ||
+          !isDeepStrictEqual(contentWrite.sourceTopology, [
+            details.sourceVertexCount,
+            details.sourceEdgeCount,
+            details.sourceFaceCount,
+          ]) ||
+          contentWrite.sourceLoopCount !== details.sourceLoopCount ||
+          !isDeepStrictEqual(contentWrite.expectedTopology, [
+            details.expectedVertexCount,
+            details.expectedEdgeCount,
+            details.expectedFaceCount,
+          ]) ||
+          !isDeepStrictEqual(contentWrite.resultTopology, [
+            details.vertexCount,
+            details.edgeCount,
+            details.faceCount,
+          ]) ||
+          details.sourceContentIntact !== true ||
+          details.topologyMatches !== true ||
+          details.allTriangles !== true ||
+          details.resultNondegenerate !== true
+        ) {
+          return leafOperationExecutionRejected(
+            'Final Edit Poke observation does not prove the exact operation-05 topology',
+            409,
+            'leaf_operation_edit_poke_topology_mismatch',
+          );
+        }
+      }
+      const checkpoint = report.nativeUndoCheckpoint;
+      const expectedCompletedStepIds = [
+        ...(authorizedStart.success ? authorizedStart.data.completedStepIds : []),
+        result.stepId,
+      ];
+      if (
+        latest?.reportId !== report.reportId ||
+        latest.sequence !== report.sequence ||
+        reportReceipt === null ||
+        reportReceipt.authentication !== 'negotiated_companion_lease' ||
+        reportReceipt.adapterId !== result.target.adapterId ||
+        reportReceipt.instanceId !== result.target.instanceId ||
+        !reportReceiptHasCurrentDocumentAuthority ||
+        progress.finalReport.reportId !== report.reportId ||
+        progress.finalReport.sequence !== report.sequence ||
+        report.sequence !== result.expectedState.sequence + 1 ||
+        report.plan?.id !== result.plan.id ||
+        report.plan.revision !== result.plan.revision ||
+        report.planContentSha256 !== result.planContentSha256 ||
+        report.executionId !== result.executionId ||
+        report.transition !== 'step_succeeded' ||
+        report.activeStepId !== result.stepId ||
+        report.stepId !== result.stepId ||
+        !isDeepStrictEqual(report.completedStepIds, expectedCompletedStepIds) ||
+        report.phase !==
+          (procedureLeafReplayExecutableSteps(replayBinding).every((candidate) =>
+            expectedCompletedStepIds.includes(candidate.id),
+          )
+            ? 'completed'
+            : 'running') ||
+        (report.observationGate !== undefined && report.observationGate !== null) ||
+        report.error !== null ||
+        startCheckpoint === undefined ||
+        checkpoint?.operation !== 'next' ||
+        !continuesAuthorizedLeafOperationCheckpoint(
+          startCheckpoint.checkpointId,
+          checkpoint.checkpointId,
+          checkpoint.previousCheckpointId,
+          checkpoint.journal.lineageCheckpointIds,
+          result.operationIds.length,
+        ) ||
+        Date.parse(checkpoint.committedAt) < Date.parse(dispatchedAt) ||
+        !isDeepStrictEqual(checkpoint.session.receiptStepIds, [
+          ...startCheckpoint.session.receiptStepIds,
+          result.stepId,
+        ]) ||
+        Date.parse(reportReceipt.receivedAt) <= Date.parse(dispatchedAt) ||
+        Date.parse(report.occurredAt) < Date.parse(dispatchedAt) ||
+        Date.parse(result.occurredAt) < Date.parse(report.occurredAt)
+      ) {
+        return leafOperationExecutionRejected(
+          'Final leaf operation lacks its exact report, Observation gate, or native Undo evidence',
+          409,
+          'leaf_operation_final_report_invalid',
+        );
+      }
+    };
+
+    const validateBlenderLeafOperationRecoveryAck = (
+      ack: CompanionLeafOperationRecoveryAck,
+      currentDocumentSession: ActiveCompanionDocumentSession,
+      execution: CompanionLeafOperationStatus,
+    ): void => {
+      const challenge = ack.challenge;
+      const durableStart = companionStateReportSchema.safeParse(
+        database.getCompanionStateReport(execution.expectedState.reportId),
+      );
+      const latest = listKnownCompanionStates().find(
+        (candidate) =>
+          candidate.adapterId === execution.target.adapterId &&
+          candidate.instanceId === execution.target.instanceId,
+      );
+      const startCheckpoint = durableStart.success
+        ? durableStart.data.nativeUndoCheckpoint
+        : undefined;
+      if (
+        execution.status !== 'recovery_required' ||
+        durableStart.success === false ||
+        startCheckpoint === undefined ||
+        challenge.authorityProof.reportId !== durableStart.data.reportId ||
+        challenge.authorityProof.sequence !== durableStart.data.sequence ||
+        challenge.authorityProof.authorizedStartCheckpointId !== startCheckpoint.checkpointId ||
+        !isDeepStrictEqual(
+          challenge.nativeUndoGuard,
+          execution.result?.recoveryReason?.nativeUndoGuard ?? null,
+        )
+      ) {
+        return leafOperationExecutionRejected(
+          'Leaf-operation recovery no longer matches its durable start state or recovery guard',
+          409,
+          'leaf_operation_recovery_authority_invalid',
+        );
+      }
+
+      if (ack.evidence.kind === 'document_incarnation_retired') {
+        let originalDocumentIdentity: {
+          readonly adapterId: string;
+          readonly instanceId: string;
+          readonly sessionId: string;
+          readonly documentIncarnationId: string;
+        };
+        try {
+          originalDocumentIdentity =
+            companionLeaseManager.lookupDocumentSessionIdentityForReceiptFingerprint(
+              challenge.originalSessionFingerprintSha256,
+              execution.target.adapterId,
+              execution.target.instanceId,
+            );
+        } catch (error) {
+          if (!(error instanceof CompanionLeaseError)) throw error;
+          return leafOperationExecutionRejected(
+            'Document retirement cannot prove the original delivered Companion session',
+            409,
+            'leaf_operation_recovery_retirement_session_invalid',
+          );
+        }
+        if (
+          originalDocumentIdentity.sessionId === currentDocumentSession.hello.sessionId ||
+          originalDocumentIdentity.documentIncarnationId !==
+            currentDocumentSession.hello.documentIncarnationId ||
+          originalDocumentIdentity.instanceId !== currentDocumentSession.hello.instanceId
+        ) {
+          return leafOperationExecutionRejected(
+            'Document retirement requires a replaced Companion process session for the same durable document incarnation',
+            409,
+            'leaf_operation_recovery_retirement_session_invalid',
+          );
+        }
+        return;
+      }
+
+      if (ack.evidence.kind === 'operation_applied') {
+        const terminalResult = ack.evidence.terminalResult;
+        validateBlenderLeafOperationExecutionResult(
+          terminalResult,
+          currentDocumentSession,
+          execution,
+        );
+        const progress = terminalResult.progress;
+        const checkpoint = ack.evidence.currentCheckpoint;
+        if (progress === null) {
+          return leafOperationExecutionRejected(
+            'Applied leaf-operation recovery omitted terminal progress',
+            409,
+            'leaf_operation_recovery_applied_progress_missing',
+          );
+        }
+        const finalReport = progress.finalReport;
+        if (finalReport === null) {
+          if (
+            latest === undefined ||
+            latest.reportId !== execution.expectedState.reportId ||
+            latest.sequence !== execution.expectedState.sequence ||
+            !sameProcedureLeafReplayValue(latest, durableStart.data) ||
+            checkpoint.reportId !== execution.expectedState.reportId ||
+            checkpoint.sequence !== execution.expectedState.sequence ||
+            checkpoint.operation !== 'leaf_operation' ||
+            checkpoint.previousCheckpointId === null ||
+            checkpoint.previousCheckpointId === checkpoint.checkpointId ||
+            (execution.operationOrdinal === 1 &&
+              checkpoint.previousCheckpointId !== startCheckpoint.checkpointId) ||
+            checkpoint.sceneFingerprintSha256 !==
+              progress.latestObservation.details.afterFingerprintSha256
+          ) {
+            return leafOperationExecutionRejected(
+              'Applied partial operation does not prove its exact current checkpoint and state',
+              409,
+              'leaf_operation_recovery_applied_checkpoint_invalid',
+            );
+          }
+          return;
+        }
+        const finalState = companionStateReportSchema.safeParse(
+          database.getCompanionStateReport(finalReport.reportId),
+        );
+        const finalCheckpoint = finalState.success
+          ? finalState.data.nativeUndoCheckpoint
+          : undefined;
+        if (
+          finalState.success === false ||
+          finalCheckpoint === undefined ||
+          latest === undefined ||
+          latest.reportId !== finalState.data.reportId ||
+          latest.sequence !== finalState.data.sequence ||
+          checkpoint.reportId !== finalState.data.reportId ||
+          checkpoint.sequence !== finalState.data.sequence ||
+          checkpoint.checkpointId !== finalCheckpoint.checkpointId ||
+          checkpoint.previousCheckpointId !== finalCheckpoint.previousCheckpointId ||
+          checkpoint.operation !== finalCheckpoint.operation ||
+          checkpoint.sceneFingerprintSha256 !==
+            progress.latestObservation.details.afterFingerprintSha256
+        ) {
+          return leafOperationExecutionRejected(
+            'Applied final operation does not prove its exact next report and native checkpoint',
+            409,
+            'leaf_operation_recovery_applied_final_invalid',
+          );
+        }
+        return;
+      }
+
+      if (
+        latest === undefined ||
+        latest.reportId !== execution.expectedState.reportId ||
+        latest.sequence !== execution.expectedState.sequence ||
+        !sameProcedureLeafReplayValue(latest, durableStart.data)
+      ) {
+        return leafOperationExecutionRejected(
+          'Leaf-operation recovery no longer matches its durable accepted prefix report',
+          409,
+          'leaf_operation_recovery_authority_invalid',
+        );
+      }
+
+      const checkpoint = ack.evidence.currentCheckpoint;
+      if (ack.evidence.kind === 'unresolved_current_state') {
+        if (
+          checkpoint !== null &&
+          (checkpoint.reportId !== execution.expectedState.reportId ||
+            checkpoint.sequence !== execution.expectedState.sequence)
+        ) {
+          return leafOperationExecutionRejected(
+            'Unresolved leaf-operation recovery reported a checkpoint outside its authorized state',
+            409,
+            'leaf_operation_recovery_checkpoint_invalid',
+          );
+        }
+        return;
+      }
+      if (checkpoint === null) {
+        return leafOperationExecutionRejected(
+          'Restored leaf-operation recovery omitted its current checkpoint proof',
+          409,
+          'leaf_operation_recovery_checkpoint_missing',
+        );
+      }
+
+      const prefixLength = challenge.acceptedPrefix.completedOperationIds.length;
+      if (prefixLength === 0) {
+        if (
+          checkpoint.checkpointId !== startCheckpoint.checkpointId ||
+          checkpoint.previousCheckpointId !== startCheckpoint.previousCheckpointId ||
+          checkpoint.operation !== startCheckpoint.operation ||
+          checkpoint.sceneFingerprintSha256 !== null
+        ) {
+          return leafOperationExecutionRejected(
+            'Empty-prefix recovery did not prove the exact authorized start checkpoint',
+            409,
+            'leaf_operation_recovery_start_checkpoint_mismatch',
+          );
+        }
+        return;
+      }
+
+      const successfulPrefix = leafOperationExecutionCoordinator.successfulExecutionsForReplay(
+        execution.replayId,
+      );
+      const latestSuccessful = successfulPrefix.at(-1);
+      const progress = latestSuccessful?.result?.progress;
+      if (
+        successfulPrefix.length !== prefixLength ||
+        latestSuccessful === undefined ||
+        latestSuccessful.operationOrdinal !== prefixLength ||
+        progress === undefined ||
+        progress === null ||
+        !isDeepStrictEqual(
+          progress.completedOperationIds,
+          challenge.acceptedPrefix.completedOperationIds,
+        ) ||
+        progress.runId !== challenge.acceptedPrefix.runId ||
+        progress.bindingSha256 !== challenge.acceptedPrefix.bindingSha256 ||
+        progress.latestObservation.details.receiptId !== challenge.acceptedPrefix.receiptId ||
+        progress.nextOrdinal !== challenge.acceptedPrefix.nextOrdinal ||
+        progress.latestObservation.details.afterFingerprintSha256 !==
+          challenge.acceptedPrefix.latestFingerprintSha256 ||
+        !sameProcedureLeafReplayValue(
+          progress.latestObservation.details.evidence,
+          expectedLeafOperationEvidence(
+            latestSuccessful,
+            progress.latestObservation.details.receiptId,
+            progress.latestObservation.details.evidence,
+          ),
+        ) ||
+        checkpoint.reportId !== execution.expectedState.reportId ||
+        checkpoint.sequence !== execution.expectedState.sequence ||
+        checkpoint.operation !== 'leaf_operation' ||
+        checkpoint.previousCheckpointId === null ||
+        checkpoint.previousCheckpointId === checkpoint.checkpointId ||
+        checkpoint.sceneFingerprintSha256 !== challenge.acceptedPrefix.latestFingerprintSha256 ||
+        (prefixLength === 1 && checkpoint.previousCheckpointId !== startCheckpoint.checkpointId)
+      ) {
+        return leafOperationExecutionRejected(
+          'Leaf-operation recovery did not prove its exact durable operation prefix and stage',
+          409,
+          'leaf_operation_recovery_prefix_invalid',
+        );
+      }
+    };
+
     const validateBlenderActionExecutionResult = (
       result: CompanionActionExecutionResult,
       sessionFingerprintSha256: string,
@@ -5470,7 +10812,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.execution-track.execute',
         {
           description:
-            'Queue the reviewed Blender execution-track capability path. The current Companion validates and attests the exact baseline, persists protocol outbox metadata in the Scene, then returns failed_no_mutation before any proof, target action, restoration, or managed commit because the native proof/restore driver is not yet connected.',
+            'Queue the reviewed Blender UV Sphere execution-track v2 path. The Companion binds the exact baseline, records seven event-simulated UI-control receipts across eight native mutation stages, restores the baseline with exact native Undo, proves a Redo barrier, waits for the server managed-start acknowledgement, then commits exactly one allowlisted managed action with a strong Observation, native checkpoint, and durable recovery evidence. This dedicated MCP path does not enable public Next or general Blender control execution.',
           inputSchema: companionExecutionTrackExecutionCreateRequestSchema,
           outputSchema: companionExecutionTrackExecutionStatusMcpSchema,
         },
@@ -5570,11 +10912,133 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
       );
 
+      for (const profile of blenderLeafOperationProfiles) {
+        server.registerTool(
+          profile.executeToolName,
+          {
+            description: `Queue exactly one next operation from the fixed ${profile.operationIds.length}-operation ${profile.title} leaf of an already accepted, started Procedure replay. The strict four-field request cannot submit nodes, sockets, RNA, Python, action arguments, or an ordinal. The server derives the next exact catalog operation and parameters from immutable replay authority plus authenticated prior progress; only operation ${profile.operationIds.length} may publish step_succeeded.`,
+            inputSchema: companionLeafOperationCreateRequestSchema,
+            outputSchema: companionLeafOperationStatusMcpSchema,
+          },
+          async (requestInput) => {
+            const parsedRequest = companionLeafOperationCreateRequestSchema.safeParse(requestInput);
+            if (!parsedRequest.success) {
+              return {
+                isError: true,
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                      error: 'invalid_leaf_operation_request',
+                      message: 'Leaf-operation request violates the strict public contract',
+                    }),
+                  },
+                ],
+              };
+            }
+            try {
+              const existing = leafOperationExecutionCoordinator.findForCreate(parsedRequest.data);
+              if (
+                existing !== null &&
+                (existing.actionName !== profile.actionName ||
+                  existing.recipeId !== profile.recipeId ||
+                  !isDeepStrictEqual(existing.operationIds, profile.operationIds))
+              ) {
+                return leafOperationExecutionRejected(
+                  `The requestId belongs to a different leaf-operation profile than ${profile.title}`,
+                  409,
+                  'leaf_operation_profile_mismatch',
+                );
+              }
+              const execution =
+                existing ??
+                (() => {
+                  const authorization = authorizeBlenderLeafOperationExecution(
+                    parsedRequest.data,
+                    profile,
+                  );
+                  return leafOperationExecutionCoordinator.queue(
+                    authorization.execution,
+                    authorization.sessionFingerprintSha256,
+                    authorization.documentAuthoritySha256,
+                  );
+                })();
+              return {
+                content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+                structuredContent: execution,
+              };
+            } catch (error) {
+              return {
+                isError: true,
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                      error:
+                        error instanceof BlenderLeafOperationExecutionError
+                          ? error.code
+                          : 'leaf_operation_execution_failed',
+                      message:
+                        error instanceof Error
+                          ? error.message
+                          : 'Leaf operation could not be safely authorized',
+                    }),
+                  },
+                ],
+              };
+            }
+          },
+        );
+
+        server.registerTool(
+          profile.statusToolName,
+          {
+            description: `Return the durable state of one ${profile.title} leaf-operation request. queued or dispatched is not success; recovery_required is never replayed automatically.`,
+            inputSchema: companionLeafOperationStatusRequestSchema,
+            outputSchema: companionLeafOperationStatusMcpSchema,
+          },
+          async (requestInput) => {
+            const parsedRequest = companionLeafOperationStatusRequestSchema.safeParse(requestInput);
+            const execution = parsedRequest.success
+              ? leafOperationExecutionCoordinator.get(parsedRequest.data.requestId)
+              : null;
+            if (
+              !parsedRequest.success ||
+              execution === null ||
+              execution.actionName !== profile.actionName ||
+              execution.recipeId !== profile.recipeId ||
+              !isDeepStrictEqual(execution.operationIds, profile.operationIds)
+            ) {
+              return {
+                isError: true,
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                      error: parsedRequest.success
+                        ? 'leaf_operation_not_found'
+                        : 'invalid_leaf_operation_status_request',
+                      message: parsedRequest.success
+                        ? `The ${profile.title} leaf-operation request was not found`
+                        : 'Leaf-operation status request violates the strict public contract',
+                    }),
+                  },
+                ],
+              };
+            }
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+              structuredContent: execution,
+            };
+          },
+        );
+      }
+
       server.registerTool(
         'operatingline.blender.action.execute',
         {
           description:
-            'Queue exactly one Catalog-authorized managed Blender action from an already human-accepted, started, untouched, instance-bound Procedure replay: one of seven mesh primitives; one of six replacement-mesh Edit actions (Subdivide, Triangulate, Extrude Region, Bevel Edges, Inset Faces, or Poke Faces); Mirror or Solidify; create an armature; bind explicit skin weights; or create pose keyframes. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all arguments from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or action arguments, and menu or shortcut tracks are not execution proof.',
+            'Queue exactly one Catalog-authorized managed Blender action from the current 9-action whole-leaf set of an already human-accepted, started, untouched, instance-bound Procedure replay: one of seven mesh primitives, the replacement-mesh Subdivide action, or create a no-bake, no-render light-trails lookdev scene. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all arguments from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or action arguments, and menu or shortcut tracks are not execution proof.',
           inputSchema: companionActionExecutionCreateRequestSchema,
           outputSchema: companionActionExecutionStatusSchema,
         },
@@ -5706,7 +11170,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.shortcut-proof.execute',
         {
           description:
-            'Queue one exact accepted factory-Cube native shortcut proof authorized by InteractionCatalog 1.44: either bounded Subdivision Surface adjustment or in-place Edit Mode Subdivide with accepted cuts and smoothness. Authority is derived only from the immutable native_shortcut_proof ProposalRecord, accepted in-host decision, active untouched next leaf, authenticated Companion receipt, and executor-discriminated proof track. It accepts no caller-supplied keys, coordinates, operators, Python, arbitrary actions, or parameters and creates no managed ActionReceipt or replacement mesh.',
+            'Queue one exact accepted factory-Cube native shortcut proof authorized by the exact versioned InteractionCatalog proof declaration: either bounded Subdivision Surface adjustment or in-place Edit Mode Subdivide with accepted cuts and smoothness. Authority is derived only from the immutable native_shortcut_proof ProposalRecord, accepted in-host decision, active untouched next leaf, authenticated Companion receipt, and executor-discriminated proof track. It accepts no caller-supplied keys, coordinates, operators, Python, arbitrary actions, or parameters and creates no managed ActionReceipt or replacement mesh.',
           inputSchema: companionShortcutProofCreateRequestSchema,
           outputSchema: companionShortcutProofStatusMcpSchema,
         },
@@ -6128,7 +11592,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           inputSchema: deferMcpInputValidation(
             procedureTutorialMediaAuthoringRunCreateRequestSchema,
           ),
-          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed =
@@ -6159,7 +11623,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           inputSchema: deferMcpInputValidation(
             procedureTutorialMediaAuthoringRunStatusRequestSchema,
           ),
-          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed =
@@ -6188,7 +11652,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Explicitly store or discard one awaiting media authoring result. Store requires the exact preparation, packet, candidate-tree, and materialized-tree hashes plus every confirmation; storage is atomic and never proposes or executes host work.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringReviewRequestSchema),
-          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialMediaAuthoringReviewRequestSchema.safeParse(requestInput);
@@ -6216,7 +11680,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Resume only an exact recovery-required deterministic materialization or storage stage. The media pipeline and Provider call are never replayed by this operation.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringResumeRequestSchema),
-          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialMediaAuthoringResumeRequestSchema.safeParse(requestInput);
@@ -6604,7 +12068,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Start one asynchronous, selection-bound authoring run from a previously recorded exact YouTube caption track. The authorization must echo the exact available Provider descriptor previously reviewed by the user; any live disclosure drift is rejected before evidence or side effects. The run may perform the authorized caption network/quota operation and one explicitly selected Provider call that can transmit normalized captions and incur cost. It validates and materializes the candidate, then pauses for review of the exact packet, candidate, and materialized-tree hashes. It does not create a Proposal or execute the host, and it stores no ProcedureTree before a separate exact review approval.',
           inputSchema: deferMcpInputValidation(procedureTutorialAuthoringRunCreateRequestSchema),
-          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialAuthoringRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialAuthoringRunCreateRequestSchema.safeParse(requestInput);
@@ -6632,7 +12096,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Read the exact asynchronous selected-caption authoring run. Awaiting-review returns the complete Provider generation and deterministic materialization preview; completion means an immutable catalog-grounded candidate ProcedureTree was stored, not that Blender executed or verified it.',
           inputSchema: deferMcpInputValidation(procedureTutorialAuthoringRunStatusRequestSchema),
-          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialAuthoringRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialAuthoringRunStatusRequestSchema.safeParse(requestInput);
@@ -6660,7 +12124,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Store or discard one awaiting selected-caption authoring result. Store requires the exact review id, packet hash, candidate-tree hash, materialized-tree hash, and all three explicit confirmations; accepted storage atomically binds the full provenance event to the immutable candidate tree. This never creates or accepts a Proposal and never executes Blender.',
           inputSchema: deferMcpInputValidation(procedureTutorialAuthoringReviewRequestSchema),
-          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialAuthoringRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialAuthoringReviewRequestSchema.safeParse(requestInput);
@@ -6688,7 +12152,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Resume only an exact recovery_required local materialization or atomic-storage stage. Caption download and Provider generation are never retried by this operation, preventing repeated quota use, billing, or a different selected track.',
           inputSchema: deferMcpInputValidation(procedureTutorialAuthoringResumeRequestSchema),
-          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialAuthoringRunStatusMcpSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialAuthoringResumeRequestSchema.safeParse(requestInput);
@@ -7170,7 +12634,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.replay.propose',
         {
           description:
-            'Revalidate and materialize one Catalog-authorized managed Blender leaf from the 18-action set: seven mesh primitives; six replacement-mesh Edit actions (Subdivide, Triangulate, Extrude Region, Bevel Edges, Inset Faces, and Poke Faces); Mirror and Solidify; create an armature; bind explicit skin weights; and create pose keyframes. Atomically store its immutable replay binding and create a human-reviewable, instance-bound GuideProposal. This does not accept, start, or execute the proposal; menu and shortcut tracks remain provenance candidates and are not execution proof.',
+            'Revalidate and materialize one Catalog-authorized managed Blender leaf from the 25-action set: seven mesh primitives; six replacement-mesh Edit actions (Subdivide, Triangulate, Extrude Region, Bevel Edges, Inset Faces, and Poke Faces); Mirror, Solidify, Bevel, and Subdivision Surface modifiers; one bounded Principled material creation/assignment and one ordered bounded Material Palette; Transform Geometry and no-bake Light Trails geometry; create an armature; bind explicit skin weights; create pose keyframes; and create a no-bake, no-render Light Trails lookdev scene. Atomically store its immutable replay binding and create a human-reviewable, instance-bound GuideProposal. This does not accept, start, or execute the proposal; menu and shortcut tracks remain provenance candidates and are not execution proof.',
           inputSchema: deferMcpInputValidation(procedureLeafReplayProposalRequestSchema),
           outputSchema: procedureLeafReplayProposalResultSchema,
         },
@@ -7218,7 +12682,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.shortcut-proof.propose',
         {
           description:
-            'Revalidate and materialize exactly one catalog-authorized factory-Cube leaf with an InteractionCatalog 1.44 executor-discriminated native shortcut proof track, create a pending human-reviewable instance-bound GuideProposal, and atomically store the full ProposalRecord. Supported profiles are bounded Subdivision Surface adjustment and in-place Edit Mode Subdivide; this does not accept, start, or execute the proposal and creates no managed ActionReceipt or replacement mesh.',
+            'Revalidate and materialize exactly one catalog-authorized factory-Cube leaf with the exact versioned InteractionCatalog executor-discriminated native shortcut proof track, create a pending human-reviewable instance-bound GuideProposal, and atomically store the full ProposalRecord. Supported profiles are bounded Subdivision Surface adjustment and in-place Edit Mode Subdivide; this does not accept, start, or execute the proposal and creates no managed ActionReceipt or replacement mesh.',
           inputSchema: procedureShortcutProofProposalRequestMcpSchema,
           outputSchema: procedureShortcutProofProposalResultMcpSchema,
         },
@@ -8723,6 +14187,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               sessionId: parsedRequest.data.sessionId,
               documentIncarnationId: parsedRequest.data.documentIncarnationId,
             }),
+          );
+          leafOperationExecutionCoordinator.reconcileDocumentAuthority(
+            'blender',
+            parsedRequest.data.instanceId,
+            leafOperationDocumentAuthoritySha256({
+              adapterId: 'blender',
+              instanceId: parsedRequest.data.instanceId,
+              documentIncarnationId: parsedRequest.data.documentIncarnationId,
+            }),
+            parsedRequest.data.sessionId,
           );
         }
         return established;
@@ -10404,7 +15878,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'execution_track_preflight_protocol_unsupported',
-            message: 'Execution-track preflight requires a current Guide 1.6 document session',
+            message: 'Execution-track preflight requires a current Guide document session',
           });
         }
         const existing = executionTrackPreflightCoordinator.findForCreate(parsedRequest.data);
@@ -10465,7 +15939,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'execution_track_preflight_protocol_unsupported',
-            message: 'Execution-track preflight status requires Guide 1.6',
+            message: 'Execution-track preflight status requires Guide 1.6+',
           });
         }
         requireCurrentExecutionTrackDocumentReceipt(
@@ -10509,7 +15983,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'execution_track_preflight_protocol_unsupported',
-            message: 'Execution-track preflight polling requires Guide 1.6',
+            message: 'Execution-track preflight polling requires Guide 1.6+',
           });
         }
         const target = {
@@ -10575,7 +16049,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
             return reply.code(409).send({
               error: 'execution_track_preflight_protocol_unsupported',
-              message: 'Execution-track preflight results require Guide 1.6',
+              message: 'Execution-track preflight results require Guide 1.6+',
             });
           }
           const completion = executionTrackPreflightCoordinator.complete(
@@ -10668,7 +16142,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
           return reply.code(409).send({
             error: 'execution_track_execution_protocol_unsupported',
-            message: 'Execution-track execution requires a current Guide 1.6 document session',
+            message: 'Execution-track execution requires a current Guide document session',
           });
         }
         const authority = executionTrackLiveAuthorityFor(session);
@@ -10717,7 +16191,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
             return reply.code(409).send({
               error: 'execution_track_execution_protocol_unsupported',
-              message: 'Execution-track progress requires Guide 1.6',
+              message: 'Execution-track progress requires Guide 1.6+',
             });
           }
           const result = executionTrackExecutionCoordinator.acceptProgress(
@@ -10763,7 +16237,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
             return reply.code(409).send({
               error: 'execution_track_execution_protocol_unsupported',
-              message: 'Managed execution start requires Guide 1.6',
+              message: 'Managed execution start requires Guide 1.6+',
             });
           }
           const result = executionTrackExecutionCoordinator.startManaged(
@@ -10808,7 +16282,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
             return reply.code(409).send({
               error: 'execution_track_execution_protocol_unsupported',
-              message: 'Execution-track results require Guide 1.6',
+              message: 'Execution-track results require Guide 1.6+',
             });
           }
           const liveAuthority = executionTrackLiveAuthorityFor(session);
@@ -10888,7 +16362,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
             return reply.code(409).send({
               error: 'execution_track_execution_protocol_unsupported',
-              message: 'Execution-track recovery requires Guide 1.6',
+              message: 'Execution-track recovery requires Guide 1.6+',
             });
           }
           const authority = executionTrackLiveAuthorityFor(session);
@@ -10940,7 +16414,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
             return reply.code(409).send({
               error: 'execution_track_execution_protocol_unsupported',
-              message: 'Execution-track recovery acknowledgement requires Guide 1.6',
+              message: 'Execution-track recovery acknowledgement requires Guide 1.6+',
             });
           }
           if (
@@ -11076,6 +16550,421 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         }
       },
     );
+    runtimeApp.get('/api/v1/companion/poke-compound', async (request, reply) => {
+      const parsedRequest = companionPokeCompoundPollRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_poke_compound_poll_request',
+          message: 'Companion Poke compound poll violates the strict proof transport contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Poke compound proof delivery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'poke_compound_protocol_unsupported',
+            message: 'Poke compound proof delivery requires the current Guide protocol',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const documentAuthoritySha256 = pokeCompoundDocumentAuthorityFor(session);
+        const injected = options.pokeCompoundProofTransport?.resolveRequest(session) ?? null;
+        if (injected !== null) {
+          if (
+            injected.replay.target.adapterId !== session.hello.adapterId ||
+            injected.replay.target.instanceId !== session.hello.instanceId
+          ) {
+            throw new BlenderPokeCompoundExecutionError(
+              'poke_compound_target_mismatch',
+              409,
+              'Configured Poke compound proof request targets another Companion session',
+            );
+          }
+          pokeCompoundExecutionCoordinator.queue(
+            injected,
+            sessionFingerprintSha256,
+            documentAuthoritySha256,
+          );
+        }
+        const delivery = pokeCompoundExecutionCoordinator.poll(
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+          sessionFingerprintSha256,
+          documentAuthoritySha256,
+        );
+        return companionPokeCompoundPollDeliverySchema.parse({ request: delivery });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderPokeCompoundExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/poke-compound-result', async (request, reply) => {
+      const parsedResult = companionPokeCompoundResultSchema.safeParse(request.body);
+      if (!parsedResult.success) {
+        return reply.code(400).send({
+          error: 'invalid_poke_compound_result',
+          message: 'Companion Poke compound result violates the strict proof transport contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Poke compound proof results require a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedResult.data.target.adapterId,
+          parsedResult.data.target.instanceId,
+        );
+        const result = pokeCompoundExecutionCoordinator.complete(
+          parsedResult.data,
+          createHash('sha256').update(leaseHeader).digest('hex'),
+          pokeCompoundDocumentAuthorityFor(session),
+        );
+        return companionPokeCompoundResultAckSchema.parse({ result });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderPokeCompoundExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.get('/api/v1/companion/poke-compound-recovery', async (request, reply) => {
+      const parsedRequest = companionPokeCompoundRecoveryPollRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_poke_compound_recovery_poll_request',
+          message: 'Companion Poke compound recovery poll violates the strict contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Poke compound recovery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        const challenge = pokeCompoundExecutionCoordinator.pollRecovery(
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+          createHash('sha256').update(leaseHeader).digest('hex'),
+          pokeCompoundDocumentAuthorityFor(session),
+        );
+        return companionPokeCompoundRecoveryPollDeliverySchema.parse({ request: challenge });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderPokeCompoundExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/poke-compound-recovery', async (request, reply) => {
+      const parsedAck = companionPokeCompoundRecoveryAckSchema.safeParse(request.body);
+      if (!parsedAck.success) {
+        return reply.code(400).send({
+          error: 'invalid_poke_compound_recovery_ack',
+          message: 'Companion Poke compound recovery acknowledgement violates the strict contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Poke compound recovery acknowledgement requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const target = parsedAck.data.challenge.originalDelivery.target;
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          target.adapterId,
+          target.instanceId,
+        );
+        const result = pokeCompoundExecutionCoordinator.acknowledgeRecovery(
+          parsedAck.data,
+          createHash('sha256').update(leaseHeader).digest('hex'),
+          pokeCompoundDocumentAuthorityFor(session),
+        );
+        return companionPokeCompoundRecoveryAckResponseSchema.parse({ result });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderPokeCompoundExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.get('/api/v1/companion/leaf-operation', async (request, reply) => {
+      const parsedRequest = companionLeafOperationPollRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_leaf_operation_poll_request',
+          message: 'Companion leaf-operation poll violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Leaf-operation delivery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'leaf_operation_protocol_unsupported',
+            message: 'Leaf-operation delivery requires the current Guide protocol',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const delivery = leafOperationExecutionCoordinator.poll(
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+          sessionFingerprintSha256,
+          leafOperationDocumentAuthorityFor(session),
+          session.hello.sessionId,
+        );
+        return companionLeafOperationPollDeliverySchema.parse({ request: delivery });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderLeafOperationExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/leaf-operation-result', async (request, reply) => {
+      const parsedResult = companionLeafOperationResultSchema.safeParse(request.body);
+      if (!parsedResult.success) {
+        return reply.code(400).send({
+          error: 'invalid_leaf_operation_result',
+          message: 'Companion leaf-operation result violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Leaf-operation results require a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedResult.data.target.adapterId,
+          parsedResult.data.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'leaf_operation_protocol_unsupported',
+            message: 'Leaf-operation results require the current Guide protocol',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const result = leafOperationExecutionCoordinator.complete(
+          parsedResult.data,
+          sessionFingerprintSha256,
+          leafOperationDocumentAuthorityFor(session),
+          (candidate, execution) =>
+            validateBlenderLeafOperationExecutionResult(candidate, session, execution),
+        );
+        return companionLeafOperationResultAckSchema.parse({ result });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderLeafOperationExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.get('/api/v1/companion/leaf-operation-recovery', async (request, reply) => {
+      const parsedRequest = companionLeafOperationRecoveryPollRequestSchema.safeParse(
+        request.query,
+      );
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_leaf_operation_recovery_poll_request',
+          message: 'Companion leaf-operation recovery poll violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Leaf-operation recovery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'leaf_operation_protocol_unsupported',
+            message: 'Leaf-operation recovery requires the current Guide protocol',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const owner = leafOperationExecutionCoordinator
+          .listTargetLockOwners()
+          .find(
+            (candidate) =>
+              candidate.adapterId === parsedRequest.data.adapterId &&
+              candidate.instanceId === parsedRequest.data.instanceId &&
+              candidate.status === 'recovery_required',
+          );
+        if (owner === undefined) {
+          return companionLeafOperationRecoveryPollDeliverySchema.parse({ request: null });
+        }
+        const execution = leafOperationExecutionCoordinator.get(owner.requestId);
+        const durableStart =
+          execution === null
+            ? { success: false as const }
+            : companionStateReportSchema.safeParse(
+                database.getCompanionStateReport(execution.expectedState.reportId),
+              );
+        const startCheckpoint = durableStart.success
+          ? durableStart.data.nativeUndoCheckpoint
+          : undefined;
+        if (
+          execution === null ||
+          durableStart.success === false ||
+          durableStart.data.reportId !== execution.expectedState.reportId ||
+          durableStart.data.sequence !== execution.expectedState.sequence ||
+          startCheckpoint === undefined
+        ) {
+          return leafOperationExecutionRejected(
+            'Leaf-operation recovery lacks its durable authorized start checkpoint',
+            409,
+            'leaf_operation_recovery_start_state_missing',
+          );
+        }
+        const documentAuthoritySha256 = leafOperationDocumentAuthorityFor(session);
+        leafOperationExecutionCoordinator.issueRecoveryChallenge(
+          execution.requestId,
+          sessionFingerprintSha256,
+          documentAuthoritySha256,
+          {
+            reportId: durableStart.data.reportId,
+            sequence: durableStart.data.sequence,
+            authorizedStartCheckpointId: startCheckpoint.checkpointId,
+          },
+        );
+        const challenge = leafOperationExecutionCoordinator.pollRecovery(
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+          sessionFingerprintSha256,
+          documentAuthoritySha256,
+        );
+        if (challenge === null) {
+          return leafOperationExecutionRejected(
+            'Leaf-operation recovery challenge was not retained for the replacement lease',
+            409,
+            'leaf_operation_recovery_challenge_unavailable',
+          );
+        }
+        return companionLeafOperationRecoveryPollDeliverySchema.parse({ request: challenge });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderLeafOperationExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/leaf-operation-recovery', async (request, reply) => {
+      const parsedAck = companionLeafOperationRecoveryAckSchema.safeParse(request.body);
+      if (!parsedAck.success) {
+        return reply.code(400).send({
+          error: 'invalid_leaf_operation_recovery_ack',
+          message:
+            'Companion leaf-operation recovery acknowledgement violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Leaf-operation recovery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const target = parsedAck.data.challenge.originalDelivery.target;
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          target.adapterId,
+          target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'leaf_operation_protocol_unsupported',
+            message: 'Leaf-operation recovery requires the current Guide protocol',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const result = leafOperationExecutionCoordinator.acknowledgeRecovery(
+          parsedAck.data,
+          sessionFingerprintSha256,
+          leafOperationDocumentAuthorityFor(session),
+          (ack, execution) => validateBlenderLeafOperationRecoveryAck(ack, session, execution),
+        );
+        return companionLeafOperationRecoveryAckResponseSchema.parse({ result });
+      } catch (error) {
+        if (
+          error instanceof CompanionLeaseError ||
+          error instanceof BlenderLeafOperationExecutionError
+        ) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
     runtimeApp.get('/api/v1/companion/action', async (request, reply) => {
       const parsedRequest = companionActionPollRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
@@ -11731,7 +17620,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             return reply.code(409).send({
               error: 'companion_session_identity_mismatch',
               message:
-                'Reviewed execution-track proposal decision requires its exact current Guide 1.6 target session',
+                'Reviewed execution-track proposal decision requires its exact current Guide target session',
             });
           }
           authenticatedSessionProvenance = {

@@ -10,6 +10,7 @@ const stableIdCollectionFields = new Set([
   'evidence',
   'nodes',
   'semanticOperations',
+  'menuCandidates',
   'menuTracks',
   'shortcutTracks',
   'mcpTracks',
@@ -28,6 +29,7 @@ export type ProcedureTreeEditorStableCollection =
   | 'evidence'
   | 'nodes'
   | 'semanticOperations'
+  | 'menuCandidates'
   | 'menuTracks'
   | 'shortcutTracks'
   | 'mcpTracks'

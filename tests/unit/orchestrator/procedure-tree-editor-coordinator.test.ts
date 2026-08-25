@@ -217,6 +217,50 @@ function configureProjectedEditorTree(tree: ProcedureTree): void {
   selected.semanticOperations[0]!.parameters['radius'] = selected.action!.arguments['radius'];
 }
 
+function configureReadonlyMenuCandidateTree(tree: ProcedureTree): void {
+  tree.formatVersion = '1.2.0';
+  for (const node of tree.nodes) {
+    if (node.kind !== 'leaf') continue;
+    node.shortcutTracks = node.shortcutTracks.map((track) =>
+      track.availability !== 'available'
+        ? track
+        : {
+            ...track,
+            operations: track.operations.map((operation) =>
+              'kind' in operation ? operation : { ...operation, kind: 'key_input' as const },
+            ),
+          },
+    );
+  }
+  const selected = leaf(tree);
+  selected.menuCandidates = [
+    {
+      id: 'menu.candidate.test',
+      modality: 'menu',
+      projection: 'candidate_only',
+      equivalence: 'not_equivalent_to_managed_action',
+      executionAuthority: 'none',
+      title: 'Candidate-only native menu path',
+      reason: 'The native in-place operation is not equivalent to the managed action.',
+      preconditions: [{ kind: 'mode', label: 'Mode', value: 'EDIT_MESH' }],
+      operations: [
+        {
+          id: 'candidate.configure',
+          order: 1,
+          semanticRefs: selected.semanticOperations.map((operation) => operation.id),
+          description: 'Show the concrete candidate-only value.',
+          evidenceRefs: [],
+          intent: 'configure',
+          target: { kind: 'control', hostId: 'mesh.test.value' },
+          path: ['Adjust Last Operation', 'Value'],
+          parameters: { value: 2 },
+        },
+      ],
+      omittedActionArguments: [],
+    },
+  ];
+}
+
 function setup(
   configureBase?: (tree: ProcedureTree) => void,
   resolveInteractionCatalog: (tree: ProcedureTree) => InteractionCatalog = interactionCatalog,
@@ -902,6 +946,62 @@ describe('ProcedureTree editor coordinator', () => {
         },
       }).fields,
     ).toEqual(expect.arrayContaining([expect.objectContaining({ editable: false })]));
+  });
+
+  it('exposes menu-candidate parameters and comments without allowing direct candidate edits', () => {
+    const setupResult = trackedSetup(configureReadonlyMenuCandidateTree);
+    const branch = createBranch(setupResult, 'Candidate-only menu review');
+    const selected = leaf(setupResult.base);
+    const candidate = selected.menuCandidates?.[0];
+    if (candidate === undefined) throw new Error('Expected menu candidate');
+    const operation = candidate.operations[0]!;
+
+    expect(
+      setupResult.coordinator.parameterForm({
+        formatVersion: '1.0.0',
+        branchId: branch.branchId,
+        revision: branch.head,
+        target: {
+          kind: 'menu_candidate',
+          nodeId: selected.id,
+          trackId: candidate.id,
+          operationId: operation.id,
+        },
+      }),
+    ).toMatchObject({
+      target: { kind: 'menu_candidate', trackId: candidate.id, operationId: operation.id },
+      fields: [{ name: 'value', value: 2, editable: false }],
+    });
+
+    expect(
+      setupResult.coordinator.createComment({
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        branchId: branch.branchId,
+        revision: branch.head,
+        anchor: {
+          kind: 'operation',
+          treeId: setupResult.base.id,
+          nodeId: selected.id,
+          modality: 'menu_candidate',
+          trackId: candidate.id,
+          operationId: operation.id,
+        },
+        body: 'Review this candidate-only Blender control value.',
+        occurredAt,
+      }),
+    ).toMatchObject({ result: 'accepted', comment: { anchor: { modality: 'menu_candidate' } } });
+
+    expect(() =>
+      editPreview(setupResult, branch.branchId, branch.head, 1, (tree) => {
+        leaf(tree).menuCandidates![0]!.operations[0]!.parameters['value'] = 3;
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<ProcedureTreeEditorError>>({
+        code: 'validation_failed',
+        statusCode: 422,
+      }),
+    );
   });
 
   it('projects catalog-authorized Action edits and recomputes the same commit preview', () => {

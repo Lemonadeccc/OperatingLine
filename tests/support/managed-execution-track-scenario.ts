@@ -10,6 +10,7 @@ import {
   computeCompanionExecutionTrackExecutionProofTerminalMarkerContentSha256,
   computeCompanionMenuControlProofOperationReceiptContentSha256,
   computeProtocolCanonicalJsonSha256,
+  guideProtocolVersion,
   type CompanionNativeUndoCheckpoint,
   type CompanionExecutionTrackExecutionDelivery,
   type CompanionExecutionTrackExecutionProgress,
@@ -43,7 +44,7 @@ export function managedExecutionTrackBinding() {
     },
   } as const;
   const startReport = companionStateReportSchema.parse({
-    protocolVersion: '1.6.0',
+    protocolVersion: guideProtocolVersion,
     reportId: request.expectedState.reportId,
     sequence: request.expectedState.sequence,
     adapterId: request.target.adapterId,
@@ -490,7 +491,7 @@ export function managedExecutionTrackStartReport(
 ) {
   if (baseline.phase !== 'baseline_attested') throw new Error('expected baseline progress');
   return companionStateReportSchema.parse({
-    protocolVersion: '1.6.0',
+    protocolVersion: guideProtocolVersion,
     reportId: delivery.binding.expectedState.reportId,
     sequence: delivery.binding.expectedState.sequence,
     adapterId: delivery.binding.target.adapterId,
@@ -536,7 +537,7 @@ export function managedExecutionTrackSuccessReport(
     delivery.binding.leafId,
   ];
   return companionStateReportSchema.parse({
-    protocolVersion: '1.6.0',
+    protocolVersion: guideProtocolVersion,
     reportId: options.reportId ?? '90000000-0000-4000-8000-000000000010',
     sequence: options.sequence ?? delivery.binding.expectedState.sequence + 1,
     adapterId: delivery.binding.target.adapterId,
@@ -658,7 +659,7 @@ export function managedExecutionTrackFailureReport(
     delivery.binding.leafId,
   ];
   return companionStateReportSchema.parse({
-    protocolVersion: '1.6.0',
+    protocolVersion: guideProtocolVersion,
     reportId: options.reportId ?? '90000000-0000-4000-8000-000000000050',
     sequence: options.sequence ?? delivery.binding.expectedState.sequence + 1,
     adapterId: delivery.binding.target.adapterId,
@@ -832,7 +833,7 @@ export function managedExecutionTrackRecoveredReport(
     observedAt: options.observationAt ?? '2026-08-22T10:05:01Z',
   });
   return companionStateReportSchema.parse({
-    protocolVersion: '1.6.0',
+    protocolVersion: guideProtocolVersion,
     reportId,
     sequence,
     adapterId: delivery.binding.target.adapterId,

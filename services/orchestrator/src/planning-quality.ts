@@ -118,9 +118,21 @@ export function evaluatePlanningQuality(
     readonly managedActionReplayAuthority?: {
       readonly replayId: string;
       readonly leafId: string;
-      readonly actionName: 'blender.modifier.add_mirror' | 'blender.modifier.add_solidify';
-      readonly targetId: string;
-    };
+    } & (
+      | {
+          readonly actionName:
+            | 'blender.modifier.add_bevel'
+            | 'blender.modifier.add_mirror'
+            | 'blender.modifier.add_solidify'
+            | 'blender.modifier.add_subdivision_surface';
+          readonly targetId: string;
+        }
+      | {
+          readonly actionName:
+            'blender.material.create_and_assign' | 'blender.material.create_palette_and_assign';
+          readonly targetIds: readonly string[];
+        }
+    );
   } = {},
 ): PlanningQualityReport {
   const request = planningQualityEvaluationRequestSchema.parse(input);
@@ -183,6 +195,10 @@ export function evaluatePlanningQuality(
     const axis = action?.arguments['axis'];
     const expectedObservation = replayStep?.expectedObservations[0];
     const observationParameters = expectedObservation?.parameters;
+    const authorityTargetId =
+      'targetId' in managedActionReplayAuthority
+        ? managedActionReplayAuthority.targetId
+        : undefined;
     const exactMirrorBoundary =
       managedActionReplayAuthority.actionName === 'blender.modifier.add_mirror' &&
       action?.name === 'blender.modifier.add_mirror' &&
@@ -215,15 +231,67 @@ export function evaluatePlanningQuality(
       observationParameters['useEvenOffset'] === true &&
       observationParameters['useRim'] === true &&
       observationParameters['useRimOnly'] === false;
+    const width = action?.arguments['width'];
+    const segments = action?.arguments['segments'];
+    const angleLimit = action?.arguments['angleLimit'];
+    const exactBevelBoundary =
+      managedActionReplayAuthority.actionName === 'blender.modifier.add_bevel' &&
+      action?.name === 'blender.modifier.add_bevel' &&
+      typeof width === 'number' &&
+      Number.isFinite(width) &&
+      width >= 0.0001 &&
+      width <= 100 &&
+      Number.isSafeInteger(segments) &&
+      (segments as number) >= 1 &&
+      (segments as number) <= 16 &&
+      typeof angleLimit === 'number' &&
+      Number.isFinite(angleLimit) &&
+      angleLimit >= 0 &&
+      angleLimit <= Math.PI &&
+      Object.keys(action.arguments).length === 6 &&
+      observationParameters !== undefined &&
+      Object.keys(observationParameters).length === 6 &&
+      observationParameters['modifierType'] === 'BEVEL' &&
+      observationParameters['width'] === width &&
+      observationParameters['segments'] === segments &&
+      observationParameters['angleLimit'] === angleLimit;
+    const viewportLevel = action?.arguments['viewportLevel'];
+    const exactSubdivisionSurfaceBoundary =
+      managedActionReplayAuthority.actionName === 'blender.modifier.add_subdivision_surface' &&
+      action?.name === 'blender.modifier.add_subdivision_surface' &&
+      Number.isSafeInteger(viewportLevel) &&
+      (viewportLevel as number) >= 1 &&
+      (viewportLevel as number) <= 3 &&
+      Object.keys(action.arguments).length === 4 &&
+      observationParameters !== undefined &&
+      Object.keys(observationParameters).length === 17 &&
+      observationParameters['modifierType'] === 'SUBSURF' &&
+      observationParameters['levels'] === viewportLevel &&
+      observationParameters['renderLevels'] === 2 &&
+      observationParameters['subdivisionType'] === 'CATMULL_CLARK' &&
+      observationParameters['quality'] === 3 &&
+      observationParameters['showOnlyControlEdges'] === true &&
+      observationParameters['useCreases'] === true &&
+      observationParameters['useLimitSurface'] === true &&
+      observationParameters['boundarySmooth'] === 'ALL' &&
+      observationParameters['uvSmooth'] === 'PRESERVE_BOUNDARIES' &&
+      observationParameters['useCustomNormals'] === false &&
+      observationParameters['showViewport'] === true &&
+      observationParameters['showRender'] === true &&
+      observationParameters['showInEditMode'] === true &&
+      observationParameters['showOnCage'] === false;
     const exactManagedActionBoundary =
       request.targetAdapterId === 'blender' &&
       action?.adapterId === 'blender' &&
       action.name === managedActionReplayAuthority.actionName &&
-      targetId === managedActionReplayAuthority.targetId &&
+      targetId === authorityTargetId &&
       typeof modifierId === 'string' &&
       modifierId.length > 0 &&
       typeof action.arguments['modifierName'] === 'string' &&
-      (exactMirrorBoundary || exactSolidifyBoundary) &&
+      (exactBevelBoundary ||
+        exactMirrorBoundary ||
+        exactSolidifyBoundary ||
+        exactSubdivisionSurfaceBoundary) &&
       replayStep?.anchors.filter((anchor) => anchor.kind === 'object').length === 1 &&
       replayStep.anchors.filter((anchor) => anchor.kind === 'owned_control').length === 1 &&
       replayStep.anchors.some(
@@ -236,6 +304,156 @@ export function evaluatePlanningQuality(
       expectedObservation?.kind === 'modifier_ready' &&
       observationParameters?.['targetId'] === targetId &&
       observationParameters['modifierId'] === modifierId;
+    const materialTargets = action?.arguments['targets'];
+    const materialBaseColor = action?.arguments['baseColor'];
+    const exactSingleMaterialBoundary =
+      managedActionReplayAuthority.actionName === 'blender.material.create_and_assign' &&
+      request.targetAdapterId === 'blender' &&
+      action?.adapterId === 'blender' &&
+      action.name === 'blender.material.create_and_assign' &&
+      Object.keys(action.arguments).length === 6 &&
+      typeof action.arguments['materialId'] === 'string' &&
+      /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(action.arguments['materialId']) &&
+      typeof action.arguments['materialName'] === 'string' &&
+      action.arguments['materialName'].startsWith('OperatingLine.') &&
+      Array.isArray(materialTargets) &&
+      materialTargets.length >= 1 &&
+      materialTargets.length <= 64 &&
+      materialTargets.every(
+        (candidate) =>
+          typeof candidate === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(candidate),
+      ) &&
+      new Set(materialTargets).size === materialTargets.length &&
+      JSON.stringify(materialTargets) === JSON.stringify(managedActionReplayAuthority.targetIds) &&
+      Array.isArray(materialBaseColor) &&
+      materialBaseColor.length === 4 &&
+      materialBaseColor.every(
+        (component) =>
+          typeof component === 'number' &&
+          Number.isFinite(component) &&
+          component >= 0 &&
+          component <= 1,
+      ) &&
+      typeof action.arguments['roughness'] === 'number' &&
+      Number.isFinite(action.arguments['roughness']) &&
+      action.arguments['roughness'] >= 0 &&
+      action.arguments['roughness'] <= 1 &&
+      typeof action.arguments['metallic'] === 'number' &&
+      Number.isFinite(action.arguments['metallic']) &&
+      action.arguments['metallic'] >= 0 &&
+      action.arguments['metallic'] <= 1 &&
+      replayStep?.expectedObservations.length === 1 &&
+      expectedObservation?.kind === 'material_assigned' &&
+      observationParameters !== undefined &&
+      Object.keys(observationParameters).length === 2 &&
+      observationParameters['materialId'] === action.arguments['materialId'] &&
+      JSON.stringify(observationParameters['targets']) === JSON.stringify(materialTargets);
+    const paletteMaterials = action?.arguments['materials'];
+    const paletteDefinitions = Array.isArray(paletteMaterials)
+      ? paletteMaterials.filter(
+          (material): material is Record<string, unknown> =>
+            material !== null && typeof material === 'object' && !Array.isArray(material),
+        )
+      : [];
+    const paletteTargetIds = paletteDefinitions.flatMap((material) =>
+      Array.isArray(material['targets']) ? material['targets'] : [],
+    );
+    const paletteMaterialIds = paletteDefinitions.map((material) => material['materialId']);
+    const paletteMaterialNames = paletteDefinitions.map((material) => material['materialName']);
+    const exactPaletteBoundary =
+      managedActionReplayAuthority.actionName === 'blender.material.create_palette_and_assign' &&
+      request.targetAdapterId === 'blender' &&
+      action?.adapterId === 'blender' &&
+      action.name === 'blender.material.create_palette_and_assign' &&
+      Object.keys(action.arguments).length === 1 &&
+      Array.isArray(paletteMaterials) &&
+      paletteMaterials.length >= 1 &&
+      paletteMaterials.length <= 8 &&
+      paletteDefinitions.length === paletteMaterials.length &&
+      paletteDefinitions.every((material) => {
+        const targets = material['targets'];
+        const baseColor = material['baseColor'];
+        return (
+          Object.keys(material).length === 6 &&
+          typeof material['materialId'] === 'string' &&
+          /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(material['materialId']) &&
+          typeof material['materialName'] === 'string' &&
+          material['materialName'].startsWith('OperatingLine.') &&
+          Array.isArray(targets) &&
+          targets.length >= 1 &&
+          targets.length <= 64 &&
+          targets.every(
+            (targetId) =>
+              typeof targetId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(targetId),
+          ) &&
+          new Set(targets).size === targets.length &&
+          Array.isArray(baseColor) &&
+          baseColor.length === 4 &&
+          baseColor.every(
+            (component) =>
+              typeof component === 'number' &&
+              Number.isFinite(component) &&
+              component >= 0 &&
+              component <= 1,
+          ) &&
+          typeof material['roughness'] === 'number' &&
+          Number.isFinite(material['roughness']) &&
+          material['roughness'] >= 0 &&
+          material['roughness'] <= 1 &&
+          typeof material['metallic'] === 'number' &&
+          Number.isFinite(material['metallic']) &&
+          material['metallic'] >= 0 &&
+          material['metallic'] <= 1
+        );
+      }) &&
+      new Set(paletteMaterialIds).size === paletteMaterialIds.length &&
+      new Set(paletteMaterialNames).size === paletteMaterialNames.length &&
+      new Set(paletteTargetIds).size === paletteTargetIds.length &&
+      JSON.stringify(paletteTargetIds) === JSON.stringify(managedActionReplayAuthority.targetIds) &&
+      replayStep?.expectedObservations.length === paletteDefinitions.length &&
+      replayStep.expectedObservations.every((observation, index) => {
+        const definition = paletteDefinitions[index];
+        const targets = definition?.['targets'];
+        const observationTargets = observation.parameters['targets'];
+        if (
+          definition === undefined ||
+          observation.kind !== 'material_assigned' ||
+          Object.keys(observation.parameters).length !== 2 ||
+          observation.parameters['materialId'] !== definition['materialId'] ||
+          !Array.isArray(targets) ||
+          !Array.isArray(observationTargets) ||
+          observationTargets.length < 1
+        ) {
+          return false;
+        }
+        let cursor = 0;
+        return observationTargets.every((targetId) => {
+          const next = targets.indexOf(targetId, cursor);
+          if (next < 0) return false;
+          cursor = next + 1;
+          return true;
+        });
+      });
+    const exactMaterialBoundary = exactSingleMaterialBoundary || exactPaletteBoundary;
+    if (exactMaterialBoundary) {
+      const exactConsumerKeys = new Set(
+        verifiedExternalResourceConsumers.map(
+          (consumer) =>
+            `${consumer.consumerStepId}\u0000${consumer.resourceType}\u0000${consumer.resourceId}`,
+        ),
+      );
+      const expectedConsumerKeys = new Set(
+        managedActionReplayAuthority.targetIds.map(
+          (resourceId) => `${managedActionReplayAuthority.leafId}\u0000OBJECT[]\u0000${resourceId}`,
+        ),
+      );
+      if (
+        exactConsumerKeys.size === expectedConsumerKeys.size &&
+        [...expectedConsumerKeys].every((key) => exactConsumerKeys.has(key))
+      ) {
+        for (const key of expectedConsumerKeys) verifiedExternalResourceConsumerKeys.add(key);
+      }
+    }
     const exactTuple =
       verifiedExternalResourceConsumers.length === 1
         ? verifiedExternalResourceConsumers[0]
@@ -243,7 +461,7 @@ export function evaluatePlanningQuality(
     if (
       exactManagedActionBoundary &&
       exactTuple?.consumerStepId === managedActionReplayAuthority.leafId &&
-      exactTuple.resourceId === managedActionReplayAuthority.targetId &&
+      exactTuple.resourceId === authorityTargetId &&
       exactTuple.resourceType === 'OBJECT'
     ) {
       verifiedExternalResourceConsumerKeys.add(

@@ -150,6 +150,7 @@ function harness(
     timeoutMs?: number;
     existingEvents?: readonly StoredExecutionEvent[];
     invocationManager?: ReturnType<typeof createPlannerProviderInvocationManager>;
+    packet?: ReplanningPromptPacket;
   } = {},
 ) {
   const events: ExecutionEventInput[] = [];
@@ -165,7 +166,7 @@ function harness(
       if (revisionRequestId !== request.requestId) {
         throw new Error('Unknown revision request');
       }
-      return packetFor(request);
+      return options.packet ?? packetFor(request);
     },
     evaluateDraft: (packet, draft) =>
       evaluatePlanningQuality(
@@ -250,6 +251,70 @@ describe('planner replan generation coordinator', () => {
         packetFormatVersion: '1.0.0',
       }).success,
     ).toBe(false);
+    await coordinator.close();
+  });
+
+  it('marks an exact projected branch merge ready by evaluating its merge context', async () => {
+    const commonAncestorPlan = structuredClone(basePlan);
+    commonAncestorPlan.revision -= 2;
+    const sourcePlan = structuredClone(basePlan);
+    sourcePlan.revision -= 1;
+    const sourceHead = sourcePlan.steps.find((step) => step.id === 'snowman.model.head');
+    if (sourceHead === undefined) throw new Error('Snowman fixture is missing its head step');
+    sourceHead.title = 'Create the source branch head';
+    const expectedMergedPlan = structuredClone(sourcePlan);
+    expectedMergedPlan.revision = basePlan.revision + 1;
+    const requestId = randomUUID();
+    const sourceThreadId = randomUUID();
+    const sourceRequestId = randomUUID();
+    const revision = guideRevisionRequestSchema.parse({
+      protocolVersion: '1.4.0',
+      requestId,
+      adapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      instanceId: randomUUID(),
+      basePlan,
+      references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+      message: 'Merge the source branch into this branch.',
+      revisionThread: { threadId: randomUUID(), turn: 2, parentRequestId: randomUUID() },
+      revisionOperation: { kind: 'merge', sourceThreadId, sourceRequestId },
+      occurredAt: '2026-08-05T00:00:00.000Z',
+    });
+    const packet = buildReplanningPromptPacket({
+      revisionRequest: revision,
+      targetRevision: expectedMergedPlan.revision,
+      catalog: blenderActionCatalog,
+      companionState: null,
+      scope: createLocalReplanScope(revision),
+      merge: {
+        sourceThreadId,
+        sourceRequestId,
+        commonAncestorRequestId: randomUUID(),
+        commonAncestorPlan,
+        sourcePlan,
+        expectedMergedPlan,
+      },
+    });
+    const provider = providerWithReplan(({ packet: providerPacket }) => ({
+      requestId: providerPacket.context.revisionRequest.requestId,
+      catalogVersion: providerPacket.context.catalog.catalogVersion,
+      planning: {
+        goal: providerPacket.context.revisionRequest.message,
+        requiredPhaseIds,
+        capabilityCoverage,
+      },
+      plan: structuredClone(providerPacket.context.merge!.expectedMergedPlan),
+    }));
+    const { coordinator } = harness(provider, revision, { packet });
+
+    const result = await coordinator.generate(generationRequest(revision));
+
+    expect(result).toMatchObject({
+      status: 'ready',
+      locality: { valid: true },
+      planDiff: { targetPlan: { revision: expectedMergedPlan.revision } },
+    });
+    expect(result.draft.plan).toEqual(packet.context.merge?.expectedMergedPlan);
     await coordinator.close();
   });
 

@@ -104,6 +104,13 @@ describe('planning prompt packet', () => {
   });
 
   it('publishes strict prompt and proposal schemas', () => {
+    const packet = buildPlanningPromptPacket(context());
+    const responseSchemaJson = JSON.stringify(packet.responseContract.schema);
+    expect(responseSchemaJson).not.toContain('candidateMenuProjection');
+    expect(responseSchemaJson).not.toContain('bounded_blender_ui_probe');
+    expect(packet.renderedPrompt).not.toContain('candidateMenuProjection');
+    expect(packet.renderedPrompt).not.toContain('bounded_blender_ui_probe');
+
     const benchmark = JSON.parse(
       readFileSync(resolve('protocol/fixtures/v1/planning/robot-preview.benchmark.json'), 'utf8'),
     ) as {
@@ -118,6 +125,13 @@ describe('planning prompt packet', () => {
       plan: benchmark.referencePlan,
     };
     expect(planningProposalDraftSchema.parse(draft)).toEqual(draft);
+    const draftWithCandidateMenuProjection = structuredClone(draft) as {
+      plan: { steps: Array<Record<string, unknown>> };
+    };
+    draftWithCandidateMenuProjection.plan.steps[0]!.candidateMenuProjection = {};
+    expect(planningProposalDraftSchema.safeParse(draftWithCandidateMenuProjection).success).toBe(
+      false,
+    );
     expect(planningProposalDraftSchema.safeParse({ ...draft, commentary: 'extra' }).success).toBe(
       false,
     );

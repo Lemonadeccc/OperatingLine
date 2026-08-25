@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { blenderActionCatalog, blenderActionCatalogs } from '@operatingline/blender-action-catalog';
 import {
   guideRevisionRequestSchema,
+  guidePlanSchema,
   plannerReplanDraftSchema,
   plannerReplanGenerateRequestSchema,
   replanningPromptPacketSchema,
@@ -19,18 +20,72 @@ const basePlan = JSON.parse(
   readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as GuidePlan;
 
-function revisionRequest() {
+function planWithCandidateMenuProjection(revision = basePlan.revision): GuidePlan {
+  return guidePlanSchema.parse({
+    ...basePlan,
+    protocolVersion: '1.7.0',
+    revision,
+    steps: basePlan.steps.map((step) =>
+      step.id !== 'snowman.model.head'
+        ? step
+        : {
+            ...step,
+            candidateMenuProjection: {
+              projection: 'candidate_only',
+              interactionCatalogVersion: '1.44.0',
+              id: 'snowman.model.head.edit_subdivide_candidate',
+              modality: 'menu',
+              equivalence: 'not_equivalent_to_managed_action',
+              executionAuthority: 'none',
+              title: 'Edit Subdivide candidate',
+              reason: 'Preserve a bounded native-menu candidate for host-side evaluation.',
+              preconditions: [{ kind: 'mode', label: 'Mode', value: 'Edit Mode' }],
+              operations: [
+                {
+                  id: 'snowman.model.head.edit_subdivide_candidate.open',
+                  order: 1,
+                  semanticRefs: ['snowman.model.head'],
+                  description: 'Open Edit > Subdivide.',
+                  evidenceRefs: [],
+                  intent: 'navigate',
+                  target: { kind: 'menu_item', hostId: 'mesh.subdivide' },
+                  path: ['Edit', 'Subdivide'],
+                  parameters: {},
+                },
+              ],
+              omittedActionArguments: [],
+              nativeEvidence: {
+                kind: 'bounded_blender_ui_probe',
+                executorId: 'blender-native-probe',
+                hostVersions: ['4.3.0'],
+                managedActionExecuted: false,
+                managedReceiptCreated: false,
+                managedReplacementMeshCreated: false,
+                nativeMutationKind: 'mesh_subdivide',
+                operationIds: ['snowman.model.head.edit_subdivide_candidate.open'],
+                nativeUndoCheckpointRequired: true,
+                nativeUndoDepth: 1,
+                nativeRedoDepth: 1,
+              },
+            },
+          },
+    ),
+  });
+}
+
+function revisionRequest(plan: GuidePlan = basePlan) {
   const requestId = randomUUID();
   return guideRevisionRequestSchema.parse({
-    protocolVersion: '1.1.0',
+    protocolVersion: plan.protocolVersion === '1.7.0' ? '1.7.0' : '1.1.0',
     requestId,
     adapterId: 'blender',
     catalogVersion: blenderActionCatalog.catalogVersion,
     instanceId: randomUUID(),
-    basePlan,
+    basePlan: plan,
     references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
     message: 'Make the referenced head larger without changing the rest of the snowman.',
     revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
+    ...(plan.protocolVersion === '1.7.0' ? { revisionOperation: { kind: 'revise' } } : {}),
     occurredAt: '2026-08-05T00:00:00.000Z',
   });
 }
@@ -104,6 +159,87 @@ describe('typed replanning prompt packet', () => {
     ).toBe(false);
   });
 
+  it('keeps host-owned menu candidates outside the Provider replan boundary', () => {
+    const candidatePlan = planWithCandidateMenuProjection();
+    const request = revisionRequest(candidatePlan);
+    const packet = buildReplanningPromptPacket({
+      revisionRequest: request,
+      targetRevision: candidatePlan.revision + 1,
+      catalog: blenderActionCatalog,
+      companionState: null,
+      scope: createLocalReplanScope(request),
+    });
+
+    expect(candidatePlan.steps.find((step) => step.id === 'snowman.model.head')).toMatchObject({
+      candidateMenuProjection: {
+        nativeEvidence: { kind: 'bounded_blender_ui_probe' },
+      },
+    });
+    expect(JSON.stringify(packet.context)).not.toContain('candidateMenuProjection');
+    expect(JSON.stringify(packet.context)).not.toContain('bounded_blender_ui_probe');
+    expect(packet.renderedPrompt).not.toContain('candidateMenuProjection');
+    expect(packet.renderedPrompt).not.toContain('bounded_blender_ui_probe');
+    expect(JSON.stringify(packet.responseContract.schema)).not.toContain('candidateMenuProjection');
+    expect(JSON.stringify(packet.responseContract.schema)).not.toContain(
+      'bounded_blender_ui_probe',
+    );
+
+    const providerDraft = {
+      requestId: request.requestId,
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      planning: { goal: request.message, requiredPhaseIds: ['geometry'] },
+      plan: candidatePlan,
+    };
+    expect(plannerReplanDraftSchema.safeParse(providerDraft).success).toBe(false);
+    const projectedPlan = packet.context.revisionRequest.basePlan;
+    expect(
+      plannerReplanDraftSchema.safeParse({ ...providerDraft, plan: projectedPlan }).success,
+    ).toBe(true);
+  });
+
+  it('projects host-owned menu candidates out of every merge Plan', () => {
+    const commonAncestorPlan = planWithCandidateMenuProjection(basePlan.revision - 2);
+    const sourcePlan = planWithCandidateMenuProjection(basePlan.revision - 1);
+    const targetPlan = planWithCandidateMenuProjection();
+    const expectedMergedPlan = planWithCandidateMenuProjection(basePlan.revision + 1);
+    const requestId = randomUUID();
+    const sourceThreadId = randomUUID();
+    const sourceRequestId = randomUUID();
+    const request = guideRevisionRequestSchema.parse({
+      protocolVersion: '1.7.0',
+      requestId,
+      adapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      instanceId: randomUUID(),
+      basePlan: targetPlan,
+      references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+      message: 'Merge the source branch.',
+      revisionThread: { threadId: randomUUID(), turn: 2, parentRequestId: randomUUID() },
+      revisionOperation: { kind: 'merge', sourceThreadId, sourceRequestId },
+      occurredAt: '2026-08-05T00:00:00.000Z',
+    });
+    const packet = buildReplanningPromptPacket({
+      revisionRequest: request,
+      targetRevision: expectedMergedPlan.revision,
+      catalog: blenderActionCatalog,
+      companionState: null,
+      scope: createLocalReplanScope(request),
+      merge: {
+        sourceThreadId,
+        sourceRequestId,
+        commonAncestorRequestId: randomUUID(),
+        commonAncestorPlan,
+        sourcePlan,
+        expectedMergedPlan,
+      },
+    });
+
+    expect(JSON.stringify(packet.context)).not.toContain('candidateMenuProjection');
+    expect(JSON.stringify(packet.context)).not.toContain('bounded_blender_ui_probe');
+    expect(packet.renderedPrompt).not.toContain('candidateMenuProjection');
+    expect(packet.renderedPrompt).not.toContain('bounded_blender_ui_probe');
+  });
+
   it('preserves the historical 1.0 replan packet contract without capabilities', () => {
     const request = revisionRequest();
     const historicalCatalog = blenderActionCatalogs.find(
@@ -139,5 +275,18 @@ describe('typed replanning prompt packet', () => {
       };
       expect(schema.additionalProperties, filename).toBe(false);
     }
+
+    const draftSchema = JSON.parse(
+      readFileSync(resolve('protocol/schemas/v1/planner-replan-draft.schema.json'), 'utf8'),
+    ) as {
+      properties?: {
+        plan?: {
+          allOf?: unknown[];
+          properties?: { steps?: { items?: { allOf?: unknown[] } } };
+        };
+      };
+    };
+    expect(draftSchema.properties?.plan?.allOf).toHaveLength(3);
+    expect(draftSchema.properties?.plan?.properties?.steps?.items?.allOf).toHaveLength(3);
   });
 });

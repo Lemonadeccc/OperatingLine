@@ -73,11 +73,21 @@ function owningScopeRoot(
 }
 
 function meaningfulLeafProjection(leaf: ProcedureLeafNode): object {
-  const { validation, menuTracks, shortcutTracks, mcpTracks, ...meaningful } = leaf;
+  const {
+    validation,
+    menuCandidates,
+    menuTracks,
+    shortcutTracks,
+    mcpTracks,
+    parameterProjection,
+    ...meaningful
+  } = leaf;
   void validation;
+  void menuCandidates;
   void menuTracks;
   void shortcutTracks;
   void mcpTracks;
+  void parameterProjection;
   return meaningful;
 }
 
@@ -118,8 +128,11 @@ function unavailableMcpTracks(
 }
 
 function sanitizeChangedLeaf(leaf: ProcedureLeafNode): ProcedureLeafNode {
+  const { menuCandidates, parameterProjection, ...semanticLeaf } = leaf;
+  void menuCandidates;
+  void parameterProjection;
   return {
-    ...leaf,
+    ...semanticLeaf,
     menuTracks: unavailableMenuTracks(leaf.menuTracks),
     shortcutTracks: unavailableShortcutTracks(leaf.shortcutTracks),
     mcpTracks: unavailableMcpTracks(leaf.mcpTracks),

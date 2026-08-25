@@ -10,8 +10,10 @@ import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/p
 import {
   canonicalizeProtocolJsonValue,
   companionActionExecutionStatusSchema,
+  guidePlanSchema,
   guideRevisionRequestSchema,
   plannerReplanGenerationResultSchema,
+  projectGuidePlanForProvider,
   type GuidePlan,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
@@ -306,6 +308,228 @@ function request(
   evidence: CanonicalProcedureExecutionFailureEvidence,
 ): ProcedureExecutionFailureReplanRequest {
   return { requestId: evidence.execution.requestId };
+}
+
+function planWithCandidateMenuProjection(stepId: string): GuidePlan {
+  return guidePlanSchema.parse({
+    ...fixturePlan,
+    protocolVersion: '1.7.0',
+    steps: fixturePlan.steps.map((step) =>
+      step.id !== stepId
+        ? step
+        : {
+            ...step,
+            candidateMenuProjection: {
+              projection: 'candidate_only',
+              interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+              id: `${stepId}.edit_subdivide_candidate`,
+              modality: 'menu',
+              equivalence: 'not_equivalent_to_managed_action',
+              executionAuthority: 'none',
+              title: 'Edit Subdivide candidate',
+              reason: 'Keep a bounded host-owned native-menu candidate.',
+              preconditions: [{ kind: 'mode', label: 'Mode', value: 'Edit Mode' }],
+              operations: [
+                {
+                  id: `${stepId}.edit_subdivide_candidate.open`,
+                  order: 1,
+                  semanticRefs: [stepId],
+                  description: 'Open Edit > Subdivide.',
+                  evidenceRefs: [],
+                  intent: 'navigate',
+                  target: { kind: 'menu_item', hostId: 'mesh.subdivide' },
+                  path: ['Edit', 'Subdivide'],
+                  parameters: {},
+                },
+              ],
+              omittedActionArguments: [],
+            },
+          },
+    ),
+  });
+}
+
+function evidenceForPlan(plan: GuidePlan): CanonicalProcedureExecutionFailureEvidence {
+  const evidence = canonicalEvidence();
+  const planIdentity = { id: plan.id, revision: plan.revision };
+  const planContentSha256 = contentHash(plan);
+  const actionResult = {
+    ...evidence.actionResult,
+    plan: planIdentity,
+    planContentSha256,
+  };
+  return {
+    ...evidence,
+    execution: {
+      ...evidence.execution,
+      plan: planIdentity,
+      planContentSha256,
+      result: actionResult,
+    },
+    delivery: { ...evidence.delivery, plan: planIdentity, planContentSha256 },
+    actionResult,
+  };
+}
+
+function semanticCandidateFor(
+  evidence: CanonicalProcedureExecutionFailureEvidence,
+  basePlan: GuidePlan,
+  modifiedStepId: string,
+) {
+  const revisionRequestId = randomUUID();
+  const revisionRequest = guideRevisionRequestSchema.parse({
+    protocolVersion: basePlan.protocolVersion,
+    requestId: revisionRequestId,
+    adapterId: 'blender',
+    catalogVersion: blenderActionCatalog.catalogVersion,
+    instanceId: evidence.execution.target.instanceId,
+    basePlan,
+    references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+    message: 'Repair only the failed head step.',
+    revisionThread: { threadId: revisionRequestId, turn: 1, parentRequestId: null },
+    revisionOperation: { kind: 'revise' },
+    occurredAt: '2026-08-21T10:00:01.050Z',
+  });
+  const candidatePlan = structuredClone(projectGuidePlanForProvider(basePlan));
+  candidatePlan.revision += 1;
+  candidatePlan.steps.find((step) => step.id === modifiedStepId)!.title += ' repaired';
+  const planning = {
+    goal: revisionRequest.message,
+    requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+    capabilityCoverage: {
+      policyVersion: 'catalog_capability_coverage_v1' as const,
+      requirements: [
+        {
+          requirementId: 'repair-head',
+          statement: 'Repair only the failed head step.',
+          coverage: [
+            {
+              capabilityId: 'geometry.primitive_assembly',
+              stepIds: ['snowman.model.head'],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const providerRevisionRequest = guideRevisionRequestSchema.parse({
+    ...revisionRequest,
+    basePlan: projectGuidePlanForProvider(basePlan),
+  });
+  const scopeEvaluation = evaluateLocalReplanScope(providerRevisionRequest, candidatePlan);
+  const planningQuality = evaluatePlanningQuality(
+    {
+      targetAdapterId: revisionRequest.adapterId,
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      ...planning,
+      plan: candidatePlan,
+    },
+    blenderActionCatalog,
+    {
+      allowedCoverageStepIds: localReplanCoverageStepIds(providerRevisionRequest, candidatePlan),
+    },
+  );
+  const generationRequestId = randomUUID();
+  const generationResult = plannerReplanGenerationResultSchema.parse({
+    formatVersion: '1.0.0',
+    generationId: randomUUID(),
+    requestId: generationRequestId,
+    revisionRequestId,
+    targetAdapterId: revisionRequest.adapterId,
+    targetInstanceId: revisionRequest.instanceId,
+    provider: { id: 'failure-replan-planner', version: '1.0.0' },
+    packetFormatVersion: '1.1.0',
+    status: 'ready',
+    draft: {
+      requestId: revisionRequestId,
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      planning,
+      plan: candidatePlan,
+    },
+    planDiff: scopeEvaluation.planDiff,
+    planningQuality,
+    locality: scopeEvaluation.locality,
+    proposalCreated: false,
+    generatedAt: '2026-08-21T10:00:01.200Z',
+    durationMs: 100,
+  });
+  const policyResolution = trustedResolution(evidence, {
+    repairableArguments: [],
+    parameterRepairCandidates: [],
+    strategy: null,
+  });
+  const exactFailureEnvelopeSha256 = failureEnvelopeSha256(evidence);
+  const failureBinding = {
+    failureEnvelopeSha256: exactFailureEnvelopeSha256,
+    failedStepId: evidence.execution.step.id,
+    allowedScopeRootIds: [evidence.execution.step.id],
+    deterministicExhaustionSha256: contentHash({
+      failureEnvelopeSha256: exactFailureEnvelopeSha256,
+      failedStepId: evidence.execution.step.id,
+      policySha256: contentHash({
+        repairableArguments: policyResolution.repairableArguments,
+        parameterRepairCandidates: policyResolution.parameterRepairCandidates,
+        strategy: policyResolution.strategy,
+      }),
+      parameterCandidate: null,
+      strategyCandidate: null,
+    }),
+  };
+  const generationResultSha256 = contentHash(generationResult);
+  const credentialId = randomUUID();
+  const confidenceEvaluation = {
+    ...failureBinding,
+    generationRequestId,
+    revisionRequestId,
+    generationResultSha256,
+    candidatePlanContentSha256: contentHash(candidatePlan),
+    confidence: 0.8,
+    evaluatedAt: '2026-08-21T10:00:01.300Z',
+  };
+  const semanticCandidate = {
+    revisionRequest,
+    candidatePlan,
+    generationResult,
+    observationObligations: [{ kind: 'uv_sphere_ready', parameters: {} }],
+    generationEvidence: {
+      ...failureBinding,
+      generationRequestId,
+      generationResultSha256,
+      generatedAt: generationResult.generatedAt,
+    },
+    authorizationConsumption: {
+      ...failureBinding,
+      event: {
+        formatVersion: '1.0.0' as const,
+        eventId: randomUUID(),
+        sequence: 1,
+        kind: 'provider_authorization_consumed' as const,
+        credentialId,
+        singleUseKeySha256: contentHash('single-use'),
+        operationId: generationRequestId,
+        bindingSha256: contentHash({ generationRequestId, ...failureBinding }),
+        consumedAt: '2026-08-21T10:00:01.100Z',
+      },
+    },
+    completedGeneration: {
+      ...failureBinding,
+      event: {
+        formatVersion: '1.0.0' as const,
+        eventId: randomUUID(),
+        sequence: 2,
+        kind: 'provider_call_completed' as const,
+        credentialId,
+        operationId: generationRequestId,
+        durableReceiptSha256: generationResultSha256,
+        completedAt: '2026-08-21T10:00:01.250Z',
+      },
+    },
+    confidenceEvaluation: {
+      ...confidenceEvaluation,
+      receiptSha256: contentHash(confidenceEvaluation),
+    },
+  };
+  return { candidatePlan, policyResolution, semanticCandidate };
 }
 
 describe('procedure execution failure replan', () => {
@@ -897,6 +1121,146 @@ describe('procedure execution failure replan', () => {
             semanticCandidate: missingAnchorCandidate,
           }),
         ),
+      }).derive(request(evidence)),
+    ).toEqual({
+      kind: 'no_repair_available',
+      reason: 'deterministic_options_exhausted',
+    });
+  });
+
+  it('restores an unchanged out-of-scope host candidate after raw Provider evidence validation', () => {
+    const basePlan = planWithCandidateMenuProjection('snowman.model.body_lower');
+    const evidence = evidenceForPlan(basePlan);
+    const fixture = semanticCandidateFor(evidence, basePlan, 'snowman.model.head');
+    const canonicalPlan = structuredClone(fixture.candidatePlan) as GuidePlan;
+    canonicalPlan.steps.find(
+      (step) => step.id === 'snowman.model.body_lower',
+    )!.candidateMenuProjection = structuredClone(
+      basePlan.steps.find((step) => step.id === 'snowman.model.body_lower')!
+        .candidateMenuProjection,
+    );
+
+    const outcome = createProcedureExecutionFailureReplanCoordinator({
+      database: createEventDatabase(),
+      trustedResolver: trustedResolver({
+        ...fixture.policyResolution,
+        semanticCandidate: fixture.semanticCandidate,
+      }),
+    }).derive(request(evidence));
+
+    expect(outcome).toMatchObject({
+      kind: 'semantic_replan_proposed',
+      proposal: {
+        diff: {
+          candidatePlanContentSha256: contentHash(canonicalPlan),
+          localScopeStepIds: ['snowman.model.head'],
+        },
+      },
+    });
+    expect(contentHash(canonicalPlan)).not.toBe(contentHash(fixture.candidatePlan));
+    expect(fixture.semanticCandidate.confidenceEvaluation.candidatePlanContentSha256).toBe(
+      contentHash(fixture.candidatePlan),
+    );
+  });
+
+  it('does not restore a stale host candidate when the Provider modifies its owning step', () => {
+    const basePlan = planWithCandidateMenuProjection('snowman.model.head');
+    const evidence = evidenceForPlan(basePlan);
+    const fixture = semanticCandidateFor(evidence, basePlan, 'snowman.model.head');
+
+    const outcome = createProcedureExecutionFailureReplanCoordinator({
+      database: createEventDatabase(),
+      trustedResolver: trustedResolver({
+        ...fixture.policyResolution,
+        semanticCandidate: fixture.semanticCandidate,
+      }),
+    }).derive(request(evidence));
+
+    expect(outcome).toMatchObject({
+      kind: 'semantic_replan_proposed',
+      proposal: {
+        diff: { candidatePlanContentSha256: contentHash(fixture.candidatePlan) },
+      },
+    });
+  });
+
+  it('rejects a raw semantic candidate that injects host-owned menu guidance', () => {
+    const basePlan = planWithCandidateMenuProjection('snowman.model.body_lower');
+    const evidence = evidenceForPlan(basePlan);
+    const fixture = semanticCandidateFor(evidence, basePlan, 'snowman.model.head');
+    const injectedPlan = structuredClone(fixture.candidatePlan) as GuidePlan;
+    injectedPlan.steps.find(
+      (step) => step.id === 'snowman.model.body_lower',
+    )!.candidateMenuProjection = structuredClone(
+      basePlan.steps.find((step) => step.id === 'snowman.model.body_lower')!
+        .candidateMenuProjection,
+    );
+    const confidenceContent = {
+      ...fixture.semanticCandidate.confidenceEvaluation,
+      candidatePlanContentSha256: contentHash(injectedPlan),
+    };
+    const injectedCandidate = {
+      ...fixture.semanticCandidate,
+      candidatePlan: injectedPlan,
+      confidenceEvaluation: {
+        ...confidenceContent,
+        receiptSha256: contentHash({
+          failureEnvelopeSha256: confidenceContent.failureEnvelopeSha256,
+          failedStepId: confidenceContent.failedStepId,
+          allowedScopeRootIds: confidenceContent.allowedScopeRootIds,
+          deterministicExhaustionSha256: confidenceContent.deterministicExhaustionSha256,
+          generationRequestId: confidenceContent.generationRequestId,
+          revisionRequestId: confidenceContent.revisionRequestId,
+          generationResultSha256: confidenceContent.generationResultSha256,
+          candidatePlanContentSha256: confidenceContent.candidatePlanContentSha256,
+          confidence: confidenceContent.confidence,
+          evaluatedAt: confidenceContent.evaluatedAt,
+        }),
+      },
+    };
+
+    expect(
+      createProcedureExecutionFailureReplanCoordinator({
+        database: createEventDatabase(),
+        trustedResolver: trustedResolver({
+          ...fixture.policyResolution,
+          semanticCandidate: injectedCandidate,
+        }),
+      }).derive(request(evidence)),
+    ).toEqual({
+      kind: 'no_repair_available',
+      reason: 'deterministic_options_exhausted',
+    });
+  });
+
+  it('fails closed for merge candidates without trusted full merge context', () => {
+    const basePlan = planWithCandidateMenuProjection('snowman.model.body_lower');
+    const evidence = evidenceForPlan(basePlan);
+    const fixture = semanticCandidateFor(evidence, basePlan, 'snowman.model.head');
+    const mergeCandidate = {
+      ...fixture.semanticCandidate,
+      revisionRequest: {
+        ...fixture.semanticCandidate.revisionRequest,
+        revisionThread: {
+          threadId: randomUUID(),
+          turn: 2,
+          parentRequestId: randomUUID(),
+        },
+        revisionOperation: {
+          kind: 'merge' as const,
+          sourceThreadId: randomUUID(),
+          sourceRequestId: randomUUID(),
+        },
+      },
+    };
+
+    expect(
+      createProcedureExecutionFailureReplanCoordinator({
+        database: createEventDatabase(),
+        trustedResolver: trustedResolver({
+          ...fixture.policyResolution,
+          semanticCandidate: mergeCandidate,
+        }),
       }).derive(request(evidence)),
     ).toEqual({
       kind: 'no_repair_available',

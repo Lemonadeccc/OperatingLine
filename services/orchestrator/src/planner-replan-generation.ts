@@ -259,7 +259,11 @@ export function createPlannerReplanGenerationCoordinator(
       });
       const draft = parseProviderOutput(rawOutput);
       validateDraftIdentity(packet, draft);
-      const scopeEvaluation = evaluateLocalReplanScope(immutableRequest, draft.plan);
+      const scopeEvaluation = evaluateLocalReplanScope(
+        immutableRequest,
+        draft.plan,
+        packet.context.merge ?? null,
+      );
       let planningQuality: PlanningQualityReport;
       try {
         planningQuality = options.evaluateDraft(packet, draft);

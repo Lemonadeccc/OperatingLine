@@ -1,6 +1,7 @@
 import {
   plannerDialoguePromptFormatVersion,
   plannerDialoguePromptPacketSchema,
+  projectReplanningPromptContextForProvider,
   semanticReplanConfidenceThreshold,
   type PlannerDialogueHistoryMessage,
   type PlannerDialoguePromptPacket,
@@ -24,6 +25,7 @@ export interface SemanticDialoguePromptInput {
 export function buildSemanticDialoguePromptPacket(
   input: SemanticDialoguePromptInput,
 ): PlannerDialoguePromptPacket {
+  const replanning = projectReplanningPromptContextForProvider(input.replanning);
   const renderedPrompt = [
     'Respond to one OperatingLine host dialogue turn and decide whether it is a clear semantic replanning request.',
     `The automatic replanning confidence threshold is ${semanticReplanConfidenceThreshold}.`,
@@ -32,9 +34,9 @@ export function buildSemanticDialoguePromptPacket(
     'BEGIN_UNTRUSTED_DIALOGUE_CONTEXT_JSON',
     JSON.stringify(
       {
-        replanning: input.replanning,
+        replanning,
         history: input.history,
-        latestUserMessage: input.replanning.revisionRequest.message,
+        latestUserMessage: replanning.revisionRequest.message,
       },
       null,
       2,
@@ -46,7 +48,7 @@ export function buildSemanticDialoguePromptPacket(
     formatVersion: plannerDialoguePromptFormatVersion,
     operation: 'semantic_replan_dialogue',
     context: {
-      replanning: input.replanning,
+      replanning,
       history: input.history,
     },
     workflow: {
