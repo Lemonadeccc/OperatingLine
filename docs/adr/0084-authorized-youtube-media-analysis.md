@@ -7,7 +7,7 @@
 
 现有 YouTube 链路只通过官方 Data API 获取已明确选择的授权字幕轨。它不下载视频媒体，也没有音频抽取、
 ASR、证据帧、画面文字或快捷键候选识别。媒体处理属于长耗时、本地文件密集型副作用，不能塞进同步字幕
-import、256 KiB authoring packet 或 SQLite JSON 事件。现有 OAuth edit permission 也不是视频下载许可。
+import、当前 512 KiB authoring packet 或 SQLite JSON 事件。现有 OAuth edit permission 也不是视频下载许可。
 
 YouTube 平台政策与内容权利是两个独立边界。即使调用方拥有内容权利，也不能把第三方下载器默认开放为任意
 公开视频抓取能力。媒体下载必须有单独、可审计的权利声明，以及 YouTube 对该下载行为的书面批准记录。

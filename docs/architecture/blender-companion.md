@@ -34,8 +34,9 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.42.0` 与 ActionCatalog `1.22.0` 一一绑定 27 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0` 至已冻结的 `1.41.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+`1.69.0` 与 ActionCatalog `1.27.0` 一一绑定 29 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0` 至已冻结的 `1.68.0` 保持精确回放。ActionCatalog `1.27.0` 冻结 `1.26.0`，并把 Skin Weights
+实际创建的 Armature Modifier 从 `mutate` 资源效果修正为 `create`。UV Sphere 保留目录绑定的七步 menu 与六步
 candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
 保留四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
 与 `objectName`；其九步 candidate shortcut 依次执行 `Shift+A → Mesh → Ico Sphere`、`F9`、
@@ -89,25 +90,55 @@ lease/旧 challenge 均失效。driver 在每个 timer turn 重验 authority，d
 复制 `.blend` 或新 OS 进程不会继承旧 target。Edit Mode Bevel 保留 managed replacement Mesh `semantic_path`，并增加 candidate-only
 十步 shortcut：`TAB → 2 → A → Ctrl+B → F9 → Width → Segments → Profile → ENTER → TAB`。
 `Ctrl+B` 固定完整来源 operator 默认值并以内嵌 `ENTER` 确认；三个 F9 控件按序绑定 accepted
-`width`、`segments`、`profile`。`targetId`、`resultMeshId`、`resultMeshName` 显式省略；menu/MCP
-unavailable。原生 operator 就地修改当前 Mesh，不创建 managed replacement identity。
+`width`、`segments`、`profile`。`targetId`、`resultMeshId`、`resultMeshName` 显式省略；menu unavailable，
+candidate shortcut 不携带 MCP 执行权。原生 operator 就地修改当前 Mesh，不创建 managed replacement identity；
+managed MCP 由独立 `1.62.0` operation rail 提供。
 Individual Inset Faces 也保留 managed replacement Mesh `semantic_path`，并增加 candidate-only
 十步 shortcut：`TAB → 3 → A → I → F9 → Thickness → Depth → Individual true → ENTER → TAB`。
 `I` 步骤固定完整来源 operator 默认值并以内嵌 `ENTER` 确认；F9 控件按序绑定
 accepted `thickness`、`depth` 和 literal `use_individual=true`。`targetId`、`resultMeshId`、
-`resultMeshName` 显式省略，menu/MCP unavailable。原生 operator 就地修改当前 Mesh，
-不创建 managed replacement identity。
+`resultMeshName` 显式省略，menu unavailable，candidate shortcut 不携带 MCP 执行权。原生 operator 就地修改
+当前 Mesh，不创建 managed replacement identity；managed MCP 由 `1.63.0` 引入并由当前 `1.69.0`
+operation rail 继续提供。
 Poke Faces 同样保留 managed replacement Mesh `semantic_path`，并增加 candidate-only 九步
 shortcut：`TAB → 3 → A → F3(query="poke faces") → ENTER → F9 → Offset → ENTER → TAB`。
 搜索执行步骤固定 UI 默认 `offset=0`、`use_relative_offset=false` 与
 `center_mode=MEDIAN_WEIGHTED`，F9 控件再把 accepted `offset` 写入 `mesh.poke.offset`。
-`targetId`、`resultMeshId`、`resultMeshName` 显式省略，menu/MCP unavailable；现代默认 keymap 没有
+`targetId`、`resultMeshId`、`resultMeshName` 显式省略，menu unavailable，candidate shortcut 不携带
+managed MCP 执行权；现代默认 keymap 没有
 Poke Faces 直达键，legacy `Alt+P` 不进入默认轨迹。原生 operator 就地修改当前 Mesh，不创建 managed
-replacement identity。
+replacement identity；managed MCP 由独立 `1.64.0` operation rail 提供。
+Triangulate Faces 保留 managed replacement Mesh `semantic_path`；Face 菜单的原生 in-place operator
+不能表达 replacement identity、receipt、Observation 或补偿边界。InteractionCatalog `1.65.0` 将其
+managed MCP 升级为固定六步 operation rail，05 使用固定 `FIXED`/`EAR_CLIP` BMesh 方法，06 发布
+accepted name 与 Object data link。
+Extrude Region 也保留 managed replacement Mesh `semantic_path`；InteractionCatalog `1.66.0` 将其
+managed MCP 升级为固定六步 operation rail。04 消费并验证 accepted `polygonIndices`，05 创建 pending
+Mesh、执行 BMesh region extrusion 并消费 accepted local-space `translation`，06 发布 accepted name 与
+Object data link；menu/shortcut 仍不声明原生 UI 等价。
 Solidify Modifier 保留 `Layout → Modifiers → Add Modifier → Solidify Settings` 四步 `semantic_path`；
 原生 UI 无法表达受管 identity/name、精确参数、固定 RNA、源内容/evaluated topology 门、Observation 与补偿
 回退，因此 menu/shortcut unavailable。InteractionCatalog `1.42.0` 只为已接受 replay 的 next step 声明
-`operatingline.blender.action.execute`，历史 `1.41.0` 不继承该权限。
+`operatingline.blender.action.execute`，历史 `1.41.0` 不继承该权限。`1.59.0` 冻结 `1.58.0`，将这条
+历史 whole-action 权限升级为固定四步 `operatingline.blender.modifier.solidify.execute-next/status`；03 创建
+receipt-derived pending Modifier，04 写入 accepted name 与完整固定属性集，冻结目录仍保留原权限。
+Bevel Modifier 保留 `Layout → Modifiers → Add Modifier → Bevel Settings` 四步 `semantic_path`；menu/shortcut
+无法表达受管 identity/name、accepted width/segments/angle limit、固定 `limit_method=ANGLE`、源内容门、
+Observation 与补偿回退，因此 unavailable。InteractionCatalog `1.67.0` 冻结 `1.66.0`，首次为当前 recipe
+增加固定四步 `operatingline.blender.modifier.bevel.execute-next/status`；03 创建 receipt-derived pending
+Modifier，04 依次写入 accepted name、width、segments、固定 limit method 与 accepted angle limit。冻结
+`1.66.0` 不具有这项 MCP 权限。
+Single Material 保留 `Shading → Material Properties → New → Surface` 四步 `semantic_path`；menu/shortcut
+无法表达受管 Material identity/name、accepted surface、ordered multi-target slot assignment、源内容门、
+Observation 与补偿回退，因此 unavailable。InteractionCatalog `1.68.0` 冻结 `1.67.0`，首次为当前 recipe
+增加固定四步 `operatingline.blender.material.single.execute-next/status`；03 创建 receipt-derived pending
+Material 并启用 Use Nodes，04 依次写入 accepted name、Material/Principled surface 与 ordered targets。
+冻结 `1.67.0` 不具有这项 MCP 权限。
+Material Palette 保留 `Shading → Material Properties → Palette Entries → Assign Targets` 四步
+`semantic_path`；03 展示完整有序 `materials` 数组，04 才原子创建、配置并分配整套 palette。menu/shortcut
+无法表达跨材质唯一 identity/name、嵌套参数顺序、全局唯一 targets、多 Observation 与整叶回退，因此
+unavailable。InteractionCatalog `1.69.0` 冻结 `1.68.0`，首次增加固定四步
+`operatingline.blender.material.palette.execute-next/status`；冻结 `1.68.0` 不继承该权限。
 InteractionCatalog `1.43.0` 进一步为六个 replacement-mesh Edit、创建 Armature、显式蒙皮权重和姿势关键帧开放
 同一受管 executor。新 replay Observation 绑定完整 accepted action 参数、唯一 receipt、受管 ownership/content
 摘要和操作专属 invariant；稀疏 pose keyframe 按实际声明的 bone/channel 验证，不再使用 frames×bones×channels
@@ -115,12 +146,135 @@ InteractionCatalog `1.43.0` 进一步为六个 replacement-mesh Edit、创建 Ar
 菜单和默认快捷键事实按目标 Blender tag 的 `space_view3d.py`、`blender_default.py`、operator/RNA 与双版本运行时
 探针核对；项目不内置整套 Blender 源码。见
 [ADR 0106](../adr/0106-expanded-edit-rig-action-level-mcp.md)。
+当前目录在上述历史 whole-action 能力之上，把 Transform Geometry、Light Trails、Pose Animation、Armature、
+Skin Weights、Solidify、Bevel Modifier、Single Material、Material Palette、Subdivision Surface、Mirror、Edit Bevel、Edit Inset、Edit Triangulate、Extrude Region 和 Edit Poke
+分别固定为 11、54、12、9、9、4、4、4、4、4、7、6、6、6、6、6 项 operation-level MCP。十六条轨迹都由 immutable accepted replay
+派生 ordinal 和参数，
+并使用连续 fingerprint、operation receipt、强 Observation 与原生 Undo lineage；Pose 只有 04/05/07/09/11
+改变 RNA，Armature 只有 02/03/04/06/08 改变对象、data、bones 或 bindings，其余步骤保持为可见上下文或验证，
+不冒充原生控件点击。Transform 的 05–07 进一步把三个 vector 拆成 `X→Y→Z` 的真实 RNA component write，
+把具体值、socket/property、MCP 和 UI 语义路径写入严格 Observation 数组；该数组仍不是鼠标点击证据。
+当前 whole-action MCP 保持 9 项，Procedure replay 的完整 allowlist 为 25 个 action。
+Light Trails 的十二项参数 operation 同样产生十五条有序 RNA 写入：09/10/31 各绑定两个精确目标，记录受限
+投影、before/accepted/projected/float32 observed、node/socket/component、MCP 与 UI path；Guided Control 与
+native targeting 共用目标表，Runtime 从 replay 对完整数组执行 canonical equality。
+九个节点创建 operation 还产生三十九条 `rnaInitializationWrites`，覆盖稳定的 node enum/property、socket
+scalar 和 vector component 初始化；Guided Control 将其显示为 `INITIAL RNA` 子序列，Runtime 从 replay 与
+recipe 常量重建。Resample Curve mode 的 4.5/5.1 表面差异保留在版本适配器和最终图验证中，不冒充统一 RNA
+目标。
+十九项连接 operation 各产生一条 `rnaLinkCreations`，保存 Blender 返回 `NodeLink` 的精确 from/to node type、
+socket identifier、方向、MCP 和 UI path；Runtime 从固定 recipe 派生 35–53 的唯一目标。该记录证明 RNA 数据
+模型连接，不证明鼠标拖线。
+二十项节点 operation 还产生二十二条 `rnaStructureCreations`；普通节点为单条 node creation，Group Input/Output
+为严格的 interface-socket-before-node 两条序列。Runtime 从 recipe 重建节点 name/type 与接口方向/type，Guided
+Control 显示对应 `STRUCTURE/INTERFACE/NODE RNA`。
+operation 02 另产生三条 `rnaResourceMutations`，固定为 Node Group create、NODES Modifier create 与
+Modifier/Node Group bind；执行器回读实际资源/type/identity，Runtime 从 accepted replay 独立派生完整数组，
+Guided Control 显示 `02.01 → 02.02 → 02.03 RESOURCE RNA`。
+Pose Animation operation 07 另产生有序 `rnaKeyframeInsertions`，把每次真实 `PoseBone.keyframe_insert` 的
+frame/pose/channel、bone、data path 与 component FCurve 回读绑定；Runtime 从 accepted replay 重建完整数组，
+Guided Control 显示 `KEYFRAME RNA` 子序列。operation 09/11 再产生 `rnaAnimationPropertyWrites`，分别逐点保存
+interpolation、逐曲线保存 extrapolation 的 before/accepted/observed 值；Runtime 复用同一 accepted 曲线顺序，
+Guided Control 显示 `ANIMATION RNA` 子序列。operation 04/05 另产生 `rnaActionResourceMutations`，把由 durable
+receipt ID 确定的 pending Action create、Armature bind 与 accepted name write 绑定到同一 resource identity；
+Guided Control 显示 `ACTION RESOURCE RNA`。
+`Armature` 的 operation 02/03/04、06、08 分别产生 `rnaArmatureResourceMutations`、
+`rnaArmatureBoneMutations` 与 `rnaArmatureBindingMutations`；Runtime 从 durable receipt ID 和 accepted replay
+重建 pending identity、骨骼顺序/参数/父子关系与刚性 binding，Guided Control 显示对应 RNA 子序列。
+`Skin Weights` 的 operation 05 产生按 deform/group/vertex/influence 排序的 `rnaSkinWeightMutations`，operation
+07/08 产生 Modifier create/bind/property/name 的 `rnaSkinModifierMutations`；Runtime 从同一 receipt/replay
+重建完整数组，Guided Control 显示 `SKIN WEIGHT/MODIFIER RNA`。
+`Solidify` 的 operation 03 产生一条 Modifier create mutation，operation 04 产生一条 accepted name write 与
+25 条固定 property write；严格 `rnaSolidifyModifierMutations` 保存 receipt-derived identity、before/accepted/
+observed 值、MCP 和 UI 语义路径。Runtime 从同一 receipt/replay 独立重建，Guided Control 显示
+`SOLIDIFY RESOURCE/PROPERTY RNA`。相关决策见
+[ADR 0108](../adr/0108-transform-geometry-operation-level-mcp.md)、
+[ADR 0111](../adr/0111-light-trails-operation-level-mcp.md)、
+[ADR 0112](../adr/0112-pose-animation-operation-level-mcp.md) 与
+[ADR 0113](../adr/0113-armature-operation-level-mcp.md)、
+[ADR 0114](../adr/0114-skin-weights-operation-level-mcp.md) 与
+[ADR 0116](../adr/0116-transform-geometry-rna-component-write-evidence.md)、
+[ADR 0117](../adr/0117-light-trails-rna-control-write-evidence.md) 与
+[ADR 0118](../adr/0118-light-trails-node-initialization-rna-evidence.md)、
+[ADR 0119](../adr/0119-light-trails-rna-link-creation-evidence.md) 与
+[ADR 0120](../adr/0120-light-trails-rna-structure-creation-evidence.md)、
+[ADR 0121](../adr/0121-light-trails-rna-resource-mutation-evidence.md) 与
+[ADR 0122](../adr/0122-pose-animation-rna-keyframe-insertion-evidence.md)、
+[ADR 0123](../adr/0123-pose-animation-rna-property-write-evidence.md) 与
+[ADR 0124](../adr/0124-pose-animation-action-resource-evidence.md)、
+[ADR 0125](../adr/0125-armature-rna-mutation-evidence.md) 与
+[ADR 0126](../adr/0126-skin-weights-rna-mutation-evidence.md)，以及
+[ADR 0127](../adr/0127-solidify-operation-level-mcp-and-rna-evidence.md)。
+`Mirror` 的 operation 06 产生一条 Modifier create mutation，operation 07 产生一条 accepted name write、
+三个轴分量 write 与 24 条固定 property write；严格 `rnaMirrorModifierMutations` 保存 receipt-derived identity、
+before/accepted/observed 值、MCP 和 UI 语义路径。协议强制恰好一个本地轴启用；Runtime 从同一 receipt/replay
+独立重建，Guided Control 显示 `MIRROR RESOURCE/PROPERTY RNA`。见
+[ADR 0128](../adr/0128-mirror-operation-level-mcp-and-rna-evidence.md)。
+Subdivision Surface 的 operation 03 产生一条 pending `SUBSURF` Modifier create mutation，operation 04
+产生 accepted name write 与 14 条固定 property write；严格
+`rnaSubdivisionSurfaceModifierMutations` 保存 receipt-derived identity、accepted/observed level、目录常量、
+MCP 和 UI 语义路径。Runtime 从同一 receipt/replay 独立重建，Guided Control 显示
+`SUBDIVISION SURFACE RESOURCE/PROPERTY RNA`。原生四步 shortcut proof 继续是 candidate-only，不创建
+managed receipt。见
+[ADR 0129](../adr/0129-subdivision-surface-operation-level-mcp-and-rna-evidence.md)。
+Edit Bevel 的 operation 05 产生五条严格 `editBevelMeshOperations`：pending Mesh create、三项 accepted
+参数投影与固定 BMesh content write；operation 06 产生 accepted Mesh name write 和 Object data-link write。
+Runtime 独立重建确定性字段，把 schema 验证后的源/结果 topology 与最终强 `mesh_edges_beveled` Observation
+交叉核对；Guided Control 显示 `EDIT BEVEL MESH/CONTRACT RNA`。03/04 只保留 Edit Mode 与 Edge 菜单
+教学上下文，不声称原生 UI event；十步 shortcut proof 继续 candidate-only。见
+[ADR 0130](../adr/0130-edit-bevel-operation-level-mcp-and-bmesh-evidence.md)。
+Edit Inset 的 operation 05 产生四条严格 `editInsetMeshOperations`：pending Mesh create、两项 accepted
+参数投影与固定 BMesh individual-inset content write；operation 06 产生 accepted Mesh name write 和 Object
+data-link write。Runtime 独立重建确定性字段，核对源 loop 数、严格 `[V+L, E+2L, F+L]` topology、
+finite/nondegenerate 结果与最终强 `mesh_faces_inset` Observation；Guided Control 显示
+`EDIT INSET MESH/CONTRACT RNA`。03/04 只保留 Edit Mode 与 Face 菜单教学上下文，不声称原生 UI event；
+十步 shortcut proof 继续 candidate-only。见
+[ADR 0131](../adr/0131-edit-inset-operation-level-mcp-and-bmesh-evidence.md)。
+Edit Poke 的 operation 05 产生三条严格 `editPokeMeshOperations`：pending Mesh create、accepted offset
+投影与固定 `bmesh.ops.poke` content write；operation 06 产生 accepted Mesh name write 和 Object data-link
+write。Runtime 独立重建确定性字段，核对源 loop 数、严格 `[V+F, E+L, L]` topology、triangle-only 与
+finite/nondegenerate 结果及最终强 `mesh_faces_poked` Observation；Guided Control 显示
+`EDIT POKE MESH/CONTRACT RNA`。03/04 只保留 Edit Mode 与 Face 菜单教学上下文，不声称原生 UI event；
+九步 shortcut proof 继续 candidate-only。见
+[ADR 0132](../adr/0132-edit-poke-operation-level-mcp-and-bmesh-evidence.md)。
+Edit Triangulate 的 operation 05 产生两条严格 `editTriangulateMeshOperations`：pending Mesh create 与
+固定 `FIXED`/`EAR_CLIP` BMesh content write；operation 06 产生 accepted Mesh name write 和 Object
+data-link write。Runtime 核对源 loop 数、严格 `[V, E+L-3F, L-2F]` topology、源/结果内容与
+triangle-only 结果，并将动态收据与最终强 `mesh_triangulated` Observation 交叉验证；Guided Control
+显示 `EDIT TRIANGULATE MESH/CONTRACT RNA`。03/04 只保留 Edit Mode 与 Face 菜单教学上下文，不声称
+原生 UI event。见 [ADR 0133](../adr/0133-edit-triangulate-operation-level-mcp-and-bmesh-evidence.md)。
+Extrude Region 的 operation 04 产生一条严格 selection projection，保存 accepted/observed polygon
+indices 与 face/edge/vertex/boundary-edge 计数；operation 05 产生 pending Mesh create、accepted
+translation projection 和 BMesh content write；operation 06 产生 accepted Mesh name write 和 Object
+data-link write。Runtime 证明严格
+`[V+selectedVertexCount, E+selectedEdgeCount+boundaryEdgeCount, F+boundaryEdgeCount]` topology，并将
+operation 04/05 动态收据与最终强 `mesh_region_extruded` Observation 交叉验证；Guided Control 显示
+`EXTRUDE REGION MESH/CONTRACT RNA`。03/04 不声称原生 UI event。见
+[ADR 0134](../adr/0134-edit-extrude-region-operation-level-mcp-and-bmesh-evidence.md)。
+Bevel Modifier 的 operation 03 产生一条严格 `rnaBevelModifierMutations` create 记录；operation 04 产生
+accepted name、width、segments、固定 `limit_method=ANGLE` 与 accepted angle limit 的五条 ordered write。
+Runtime 从 accepted replay 重建 identity、值来源、顺序和常量，并将收据与最终强 `modifier_ready`、源 Mesh
+内容保护及有界 evaluated topology 交叉核对；Guided Control 显示对应 `BEVEL RESOURCE/PROPERTY RNA`。
+见 [ADR 0135](../adr/0135-bevel-modifier-operation-level-mcp-and-rna-evidence.md)。
+Single Material 的 operation 03 产生严格 `rnaMaterialMutations` Material create 与 Use Nodes write；
+operation 04 产生 accepted name、Material diffuse color/roughness/metallic、Principled Base Color/Roughness/
+Metallic 与每个 ordered target slot replacement 的 `13 + targetCount` 条记录。Runtime 从 accepted replay
+重建 identity、值和目标顺序，并将收据与最终强 `material_assigned`、唯一 Principled/Material Output、
+assignment、ownership、receipt 和源 Mesh 内容证明交叉核对；Guided Control 显示对应 Material/Surface/
+Assignment RNA。见 [ADR 0136](../adr/0136-single-material-operation-level-mcp-and-rna-evidence.md)。
+Material Palette 的 operation 03 只携带并显示 accepted `materials` 数组；operation 04 以一个原子事务生成
+每个材质的 create/use-nodes、Material/Principled surface 与 ordered target slot replacement。严格
+`rnaMaterialPaletteMutations` 同时保存连续全局 order 和每个材质内部 `materialMutationOrder`，每组为
+`14 + targetCount` 条；Runtime 从 replay 独立重建 identity、嵌套值和目标顺序，并逐项核对有序的多个
+`material_assigned` 成功门。Guided Control 将完整数组展开成 `04.01→04.NN MATERIAL PALETTE RNA`，而不
+宣称逐控件点击。见 [ADR 0137](../adr/0137-material-palette-operation-level-mcp-and-rna-evidence.md)。
 Mirror Modifier 保留七步 `semantic_path`：`Layout → Owned Mesh → Modifiers → Add Modifier → Generate →
 Mirror → Managed Mirror Contract`。其中 Add Modifier、Generate 和 Mirror 分别记录真实 Host 标识
 `OBJECT_MT_modifier_add`、`OBJECT_MT_modifier_add_generate` 与 `object.modifier_add(type=MIRROR)`。
 Properties Modifier context 的 `Shift+A` 只是一条打开 Add Modifier 的上下文别名，不能携带 IDs、
-受管名称、完整固定 RNA、安全门、Observation 或回退；menu/shortcut materialization unavailable，MCP 仅由
-`1.40.0+` 的 accepted-replay managed executor 提供。
+受管名称、完整固定 RNA、安全门、Observation 或回退；menu/shortcut materialization unavailable。
+`1.40.0` 的历史 accepted-replay MCP 使用 whole-action executor；`1.60.0` 将它升级为上述七步
+operation-level executor，当前 `1.69.0` 保留该 rail，冻结目录不继承新权限。
 Icosphere、Cube、Plane、Torus、Cone 和 Cylinder 都省略内部
 `resourceId`；Torus、Cone、Cylinder shortcut unavailable。只有目录逐 action 明确声明的 MCP track 可用，
 其余 action 继续 fail closed 为 unavailable。
@@ -137,11 +291,17 @@ level 1/2/3，得到 `26/48/24`、`98/192/96`、`386/768/384` vertices/edges/pol
 receipt、Observation 与补偿事务。Edit Mode Bevel 的十步轨迹在两个版本均验证 `width=0.2`、
 `segments=3`、`profile=0.6`，得到 96 vertices、192 edges、98 polygons，且源 Mesh pointer/datablock
 数量不变；harness 只证明已经发送 popup 关闭事件。该原生 in-place mutation 不等价于 managed
-copy/tag/swap、receipt、Observation、补偿或原生 Undo transaction。Individual Inset Faces 的十步轨迹在两个版本均验证
+copy/tag/swap、receipt、Observation、补偿或原生 Undo transaction。`1.62.0` 引入的独立 managed rail
+在两版 Blender 中另验证六次 delivery/result、相同 `8/12/6 → 96/192/98` topology、源内容保留、
+伪造证据拒绝、强 Observation 与完整 checkpoint lineage，但不把候选快捷键提升为等价执行。
+Individual Inset Faces 的十步轨迹在两个版本均验证
 `thickness=0.2`、`depth=0.1`、`use_individual=true`，得到 32 vertices、60 edges、30 polygons、
 全部 quad、6/30 结果面选择和 ±1.1 坐标边界，且源 Mesh pointer/datablock 数量不变。
 Harness 同样只证明已发送 popup 关闭事件；该原生 in-place mutation 不等价于 managed
-copy/tag/swap、receipt、Observation、补偿或原生 Undo transaction。Poke Faces 的九步轨迹在两个版本
+copy/tag/swap、receipt、Observation、补偿或原生 Undo transaction。`1.63.0` 引入的独立 managed rail
+在两版 Blender 中另验证六次 delivery/result、严格 `8/12/6 → 32/60/30` loop-derived topology、
+finite/nondegenerate 结果、源内容保留、伪造证据拒绝、强 Observation 与完整 checkpoint lineage，但不把
+候选快捷键提升为等价执行。Poke Faces 的九步轨迹在两个版本
 均验证 `offset=0.2`，Cube 从 8/12/6 变为 14/36/24，24 个结果面全部为 selected triangle，坐标边界为
 ±1.2，且源 Mesh pointer/datablock 数量不变。UI RNA 的 `MEDIAN_WEIGHTED` 与 managed BMesh 路径的
 `MEAN_WEIGHTED` 是不同接口的字面量；该 UI in-place mutation 同样不等价于 managed transaction。
@@ -245,12 +405,18 @@ lease 的 SHA-256 fingerprint，不把 lease 写进事件。
 现有 Proposal UI 独立预览并 Accept/Reject；审查本身不会安装 Plan、调用 Provider、排队 action 或触发
 Companion timer 执行。discard 不创建 revision 或 Proposal。Guide `1.6.0` 可把 proof-backed 策略切换物化为
 严格、仅哈希引用的 `executionTrackOverride`；通用创建/发布路径不能引入它，Proposal accept 前会重验当前
-基线 Plan 和 durable review 到不可变 replay proof 的完整链。当前逐控件 executor 尚不存在，所以 Blender 在 history、
-session 与 action 副作用前锁住 Next，action-level MCP 也拒绝该叶节点；旧 1.5 候选仍只可 discard。语义候选
-在没有签名 Provider authority 时也不能接受。候选过期只禁止 accept，当前证据仍有效时仍可 discard；Plan、
+基线 Plan 和 durable review 到不可变 replay proof 的完整链。公开 Next 仍在 history、session 与 action 副作用前
+锁住 overridden leaf，通用 action-level MCP 也拒绝该叶节点。专用
+`operatingline.blender.execution-track.execute` 已连接一个有界 UV Sphere v2 executor：七个前台事件模拟的
+菜单/控件收据覆盖八个 native mutation stage；随后以八次精确 native Undo 恢复 baseline，建立 Redo barrier，
+等待服务端 managed-start ACK，再只提交一次 allowlisted managed action。成功必须同时具备强 Observation、原生
+checkpoint、managed receipt 与 durable terminal/recovery evidence；崩溃恢复不会自动重放 mutation。该路径不是
+其他菜单、快捷键或叶节点的通用逐控件 executor。旧 1.5 候选仍只可 discard。语义候选在没有签名 Provider
+authority 时也不能接受。候选过期只禁止 accept，当前证据仍有效时仍可 discard；Plan、
 目录、rollback 证据或目标 lease 漂移则 fail closed。见
 [ADR 0103](../adr/0103-human-reviewed-execution-failure-replan.md) 与
-[ADR 0104](../adr/0104-reviewed-execution-track-override.md)。
+[ADR 0104](../adr/0104-reviewed-execution-track-override.md) 与
+[ADR 0115](../adr/0115-uv-sphere-execution-track-v2.md)。
 见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与

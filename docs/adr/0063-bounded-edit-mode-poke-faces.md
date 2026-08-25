@@ -151,11 +151,39 @@ intent/receipt、checkpoint 与全部 host-only 字段。`history_conflict`/`his
 fresh exact Object baseline Observation 驱动的 `abandon_baseline`。双版本 harness 也真实执行一次 Object-mode Undo，
 确认它只产生 quarantined negative evidence 而不产生 compound proof，并用 Redo 恢复测试现场。
 
+### 2026-08-24 真实进程丢失与 `.blend` 重载
+
+同一总入口现增加三阶段双版本测试。第一阶段把一个 `recovery_required`、含未完成叶 intent 的完整 sealed lock 写入
+Scene，保存 `.blend` 后以 `os._exit(23)` 异常退出；第二阶段由新的 Blender 进程加载同一文件，以真实的新 PID、
+session UID 和 runtime pointer 重算 host evidence，必须分类为 `history_lost`，写回
+`historyLock=quarantined`、`historyContinuity=lost_permanently`，且只保留 `abandon_baseline`；第三阶段再由第三个
+Blender 进程重载已隔离文件，验证 protocol current-state integrity、永久 loss 和 marker 均仍存在，并拒绝直接记录
+下一叶 intent。Node runner 还证明三个进程 identity 两两不同、document fingerprint 恒定；Blender 4.5.3 LTS 与
+5.1.1 均通过。异常退出后的动作永不自动重放，`.blend` file-load 也不会从保存的快照恢复 native history。
+
 这仍只是 Wave 1B 隔离 proof，不修改 ActionCatalog/InteractionCatalog alias 或 extension mirror，也不把 Poke
-接入 production action/shortcut coordinator。当前 runner 没有真实杀死/重启 Blender 子进程、执行 `.blend` file-load
-或断开再连接 transport；它只对这些边界使用持久 marker 的 process/session/document/lock/head mismatch 做分类验证。
-因此 Wave 1B 完整 crash/file-load/disconnect acceptance 仍未完成，Poke 继续 `unavailable`，直到补齐这些真实宿主
-边界且 Wave 2 发布新的 catalog revision/composition；现有 candidate shortcut 不继承本证明的执行权限。
+接入 production action/shortcut coordinator。Poke 继续 `unavailable`，直到 Wave 2 发布新的 catalog
+revision/composition；现有 candidate shortcut 不继承本证明的执行权限。
+
+### 2026-08-24 真实 Companion/Orchestrator delivery、ACK 与重连
+
+新增的 proof-only compound transport 不把三叶压成三个可独立重放的网络动作。Orchestrator 只投递一个完整、内容
+哈希绑定的 compound envelope；Blender 内部仍要求三组 intent-before / receipt-after 和 middle-only native-history
+proof。Coordinator 把 queued、dispatched、recovery-required、replacement-lease challenge、completed 或 quarantined
+全部写入追加式 event ledger，并与现有全局 native-history lock reader 共用同一 target exclusion。Runtime 在已投递但
+未确认的状态重启时只进入 `recovery_required`；普通 poll 不会再次返回原始 delivery。
+
+`pnpm test:blender:poke-compound-transport-recovery` 在 Blender 4.5.3 LTS 与 5.1.1 中启动真实 Companion HTTP
+线程和真实 Orchestrator。测试把严格 terminal result 先持久化到 Scene outbox，随后在 result POST 到达 Runtime
+之前主动断开连接并重启 Runtime。新的 Companion session 保留同一 document incarnation，取得 replacement-lease
+recovery challenge，只提交原 outbox 中的完整 terminal result；Runtime 接受后才清除 Scene outbox。两版都证明
+普通 delivery 只有一次、普通 result 从未提交、recovery ACK 只有一次，而且协议固定
+`automaticReplay=false`。另有 coordinator 负例覆盖篡改 leaf receipt、delivery identity、lease/document authority、
+chronology，以及新进程 `history_lost` 的永久 quarantine。
+
+该 transport E2E 使用经过同一 protocol validator 的确定性 terminal fixture，验证的是断线/持久 outbox/重启/
+ACK 原子边界；真实 Poke 几何、逐叶 marker 和 Undo/Redo 仍由前述双版本 foreground proof 独立验证。两类证据共同
+关闭 Wave 1B 的 transport acceptance，但不构成已发布的 production composition，也不授权当前 candidate shortcut。
 
 ## 未选择方案
 

@@ -26,7 +26,7 @@ ProcedureTree 已能保存 `tutorial_video` 来源和 `video_segment` 证据，P
 - transcript 的 `origin` 固定为 `user_supplied`，可带 locale；
 - 最多 2,000 个分段，每段包含 `startMs`、`endMs`、原文和 `0..1` 置信度；分段必须按时间排序、互不
   重叠、具有正区间且不超过视频时长；
-- 整个自包含 packet 继续受 256 KiB canonical 大小上限约束。
+- 当前自包含 packet 受 512 KiB canonical 大小上限约束；历史声明 256 KiB 的 packet 继续按自身上限验证。
 
 Runtime 按 tree ID/revision 生成稳定的教程 source ID 和顺序 evidence ID，把每段规范化为不可变
 `video_segment`。候选响应 Schema 固定视频来源和全部分段证据，并要求每个 semantic operation 至少引用

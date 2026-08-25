@@ -28,8 +28,9 @@ Packet 包含可无损还原且精确绑定的两份目录、按 tree ID/revisio
 候选响应 JSON Schema 和确定性工作流规则；不再把这些字段复制进第二份 rendered prompt。响应契约固定
 tree ID、revision、adapter、目录版本、宿主范围及 goal source/evidence；每个生成 leaf 必须为
 `candidate`，`validatedHostVersions` 必须为空，菜单、快捷键和 MCP 轨迹必须全部为 `unavailable`。
-Packet content 使用 `operatingline-json-value-v1` canonicalization 和 SHA-256 封装，并对整个 packet 设置
-256 KiB canonical 大小上限，超过时 fail closed。
+Packet content 使用 `operatingline-json-value-v1` canonicalization 和 SHA-256 封装。当前目录扩展后的
+packet 使用 512 KiB canonical 大小上限；历史 packet 可继续声明 256 KiB，并始终按其自身声明的较小
+上限验证。两种值之外的预算均被 Schema 拒绝，超过声明值时 fail closed。
 
 当前 MCP 客户端的宿主模型消费 packet。它可以先用 `operatingline.procedure.search` 的精确结构 selector
 查找带来源的 grounding 候选，但本阶段只生成层级、语义 operation 和 Action 参数；目录配方或检索结果

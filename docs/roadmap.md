@@ -382,7 +382,8 @@
         当前只生成层级、语义 operation 和 Action 参数，菜单、快捷键与 MCP 轨迹强制 unavailable；目录和
         精确检索结果仅作为后续 grounding 候选。候选与原 packet 通过服务端 authoring validate 核对 canonical
         SHA-256、已安装目录、固定 identity/provenance 和 candidate-only 契约，再走既有 compile；packet 去掉
-        重复 rendered prompt，并有 256 KiB canonical 上限。该流程不调用模型、不自动保存、创建 Proposal 或
+        重复 rendered prompt；当前 packet 有 512 KiB canonical 上限，历史 256 KiB packet 仍按自身预算
+        fail closed。该流程不调用模型、不自动保存、创建 Proposal 或
         执行宿主，也不声称已经实现语义 RAG。见
         [ADR 0045](adr/0045-provider-neutral-procedure-authoring.md)。
   - [x] 显式 Procedure Provider coordinator：MCP/HTTP 先公开支持 authoring 的已配置 Provider 与传输/凭据
@@ -550,8 +551,10 @@
           `8/12/6 → 16/24/12`，以及源 Mesh pointer/datablock 数量不变。该上下文别名无法携带 IDs、
           受管名称、安全门、Observation 或回退合同，故 menu/shortcut/MCP 仍全部 unavailable，不生成
           candidate operation 数组。见 [ADR 0064](adr/0064-bounded-mirror-modifier.md)。
-    - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
-          shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
+    - [x] 下一确定性交互覆盖切片：InteractionCatalog `1.50.0` 为 Edit Mode Subdivide 增加十一项
+          non-executable menu candidate，并在 Blender 4.5.3/5.1.1 中以收据绑定目标、真实 Select/Edge menu、
+          F9 参数矩阵和四次 Undo/Redo 验证完整有界过程。候选仍为 `executionAuthority: none`；04–07 是
+          exact-native 菜单标记，其余操作保持 reference-only，不把整条过程证据误写成逐控件定位证明。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
     - [x] 首个受管 Action 结果证明：`procedure.replay.propose` 对单一 UV Sphere leaf 重新验证/物化，
@@ -665,16 +668,288 @@ Cuts → Smoothness → ENTER → TAB` 前台事件执行。协议、Coordinator
           四次 Undo baseline 和四次 Redo final，同时固定排除 managed action、ActionReceipt 与 replacement Mesh。
           Blender 4.5.3/5.1.1 的三组参数矩阵通过；projection 仍为 candidate-only，不冒充受管 copy/swap action。
           见 [ADR 0107](adr/0107-native-edit-subdivide-shortcut-proof.md)。
-    - [ ] Poke Faces 隔离三叶 compound proof：Blender 4.5.3/5.1.1 前台已严格通过 Forward
+    - [x] Edit Mode Subdivide 十一步 menu candidate 的有界 UI 证据：InteractionCatalog `1.50.0` 在冻结
+          `1.49.0` 后加入 Layout、收据绑定目标、Mode、Select/All、Edge/Subdivide、F9 参数与返回 Object Mode
+          的有序候选。Blender 4.5.3/5.1.1 各以 `cuts/smooth = 1/0、2/0.5、8/1` 通过真实菜单、参数输入、
+          四次 Undo/Redo 和对象/Mesh identity 检查；候选阶段不新增 managed receipt 或 replacement Mesh。
+          该证据不提升执行权限：04–07 才是 exact-native 菜单标记，其余 operation 继续 reference-only，整条
+          projection 仍为 candidate-only 且不等价于 managed copy/swap action。
+    - [x] Poke Faces 隔离三叶 compound proof：Blender 4.5.3/5.1.1 前台已严格通过 Forward
           `Enter Edit→Poke→Exit Edit`、Back/Redo 各一次原生 history operation、逐叶 intent/receipt、
           middle-leaf-only checkpoint/history、完整 current-state integrity、每叶 crash/reconnect 分类、持久 lock、
           `unlock_final`/`abandon_baseline` 与负例门；Node/TypeScript 再用现有 compound protocol validator 验证
-          terminal evidence，并真实覆盖 Object-mode Undo 的 quarantine negative。尚未真实覆盖 Blender 子进程
-          crash/restart、`.blend` file-load 与 transport disconnect/reconnect；这些目前只做 marker mismatch 分类，
-          所以完整 Wave 1B gate 未关闭。未发布或修改任何 catalog，production Poke 继续 unavailable，等待上述
-          host 边界与 Wave 2 catalog publication/composition。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
-    - [ ] 真实逐控件 menu/shortcut executor，以及十八种已开放 managed action 之外的复合、Edit、Modifier、
-          Geometry Nodes、骨骼和动画叶节点覆盖。
+          terminal evidence，并真实覆盖 Object-mode Undo 的 quarantine negative。新增双版本三进程测试：保存
+          `recovery_required` lock 后异常退出，新 Blender 进程加载同一 `.blend` 必须持久写入
+          `history_lost/lost_permanently`，第三个进程再加载仍拒绝自动续跑。真实 Companion/Orchestrator 双版本
+          transport E2E 另以 Scene terminal outbox 覆盖 delivery 后、result commit 前断线，Runtime 重启后只向
+          replacement lease 发 recovery challenge，接受原终态后才 ACK/清 outbox，且普通 delivery/result 不重放。
+          transport fixture 与真实几何/历史 proof 分层验证；未发布或修改任何 catalog，production Poke 继续
+          unavailable，等待 Wave 2 catalog publication/composition。
+          见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
+    - [x] Light Trails 具名节点轨迹：InteractionCatalog `1.51.0` 冻结 `1.50.0`，把 no-bake 叶子展开为
+          23 个图级步骤，其中 20 个节点用精确 `OperatingLine.*` 名称定位；12 个 accepted 参数按消费顺序
+          插入对应节点之后，Blender 叶子 rail 共 35 项。真实 Blender 4.5.3/5.1.1 验证创建、保存、重开、
+          强 Observation、rollback 与零 bake；节点只声明 receipt-bound `CONTAINER CAPABLE`，逐 socket
+          menu/shortcut 继续 unavailable。
+    - [x] 混合 Euler/Quaternion pose 与完整参数轨迹：ActionCatalog `1.25.0` 冻结 `1.24.0`，每个 pose
+          精确选择 XYZ Euler 或 WXYZ 单位四元数，并禁止同一 bone 跨帧切换 channel；插值/外推成为显式参数。
+          InteractionCatalog `1.52.0` 冻结 `1.51.0`，以 `json_identity` 把完整 keyframes 数组放回其确切操作，
+          连同 Action Name、Interpolation、Extrapolation 形成八步骤加四值的 rail。Blender 4.5.3/5.1.1
+          已验证 19 条混合 FCurve、真实变形、强 Observation、注入失败零残留与 compare-and-restore rollback。
+    - [x] Light Trails 完整连接与参数控件轨迹：InteractionCatalog `1.53.0` 冻结 `1.52.0`，在既有 20 个
+          具名节点和 12 个就地参数之外补齐 19 条稳定 socket-identifier 连接，形成 42 个图级步骤、54 个
+          叶子操作。12 个标量进入 OperatingLine 自有 revision 控件和收据绑定主 Socket 解析；连接 overlay
+          使用具名端点消除重复 Node type 歧义。真实 Blender 4.5.3/5.1.1 已逐条比对 catalog 与实际 NodeTree
+          links，并通过保存/重开、强 Observation、rollback 和零 bake。逐操作 mutation executor 与 4.5/5.1
+          原生 socket 像素仍未声称完成。
+    - [x] Light Trails 本地 54 步 mutation executor：Blender Guided Control 按目录严格执行预检、modifier、
+          20 个节点、12 个参数、19 条连接和 no-bake 验证；每步形成连续指纹、operation receipt 与 LIFO
+          inverse，写入后失败会确定性补偿，最终 strong Observation 才 promotion。Blender 4.5.3/5.1.1
+          已通过 54 步正向、54 步反向、中途失败恢复，以及第 15 步、最终 promotion 和整叶 Back 的原生
+          Undo/Redo。menu/shortcut 与原生 socket 像素未提升权限。见
+          [ADR 0110](adr/0110-light-trails-local-operation-execution.md)。
+    - [x] Light Trails 远程 54 步 operation-level MCP：InteractionCatalog `1.55.0` 冻结 `1.54.0`，把当前
+          Light Trails MCP 物化为固定 `execute-next/status` 轨迹；Runtime 从不可变 replay 与成功前缀派生
+          每个 ordinal、operation ID 和参数，Companion 逐项执行同一本地 executor。最终 report 必须携带
+          从授权起点经过全部 54 个微操作的唯一原生 Undo checkpoint lineage，并按 Blender RNA float32
+          核对 socket evidence。真实 Blender 4.5.3/5.1.1 Companion E2E 均通过 54 delivery/result、20 节点、
+          19 连接、13,824 evaluated vertices、强 Observation 与零 Bake。见
+          [ADR 0111](adr/0111-light-trails-operation-level-mcp.md)。
+    - [x] Axis-Angle pose 通道：ActionCatalog `1.26.0` 冻结 `1.25.0`，每个 pose 在 Euler、单位 Quaternion、
+          单位轴 Axis-Angle 中严格三选一，并保持同 bone 跨帧 channel 一致；InteractionCatalog `1.54.0` 冻结
+          `1.53.0` 并保持八步骤/四值的完整 keyframe JSON 轨迹。Blender 4.5.3/5.1.1 已验证三骨骼、29 条
+          FCurve、真实形变、强 Observation、Axis-Angle 中途失败零残留及完整 compare-and-restore rollback。
+    - [x] Pose Animation 本地及远程 12 步 operation executor：InteractionCatalog `1.56.0` 冻结 `1.55.0`，
+          把八个语义步骤与四个就地值物化为固定 `01→12` Guided Control/MCP 轨迹。Action 创建、命名、完整
+          keyframe JSON、插值和外推只在 04/05/07/09/11 变更 RNA；其余步骤保留为显式预检、上下文和验证，
+          不冒充原生控件点击。每项有连续指纹、稀疏 mutation receipt、LIFO Back/Abort、失败补偿和原生
+          Undo/Redo；最终 `pose_animation_ready` 后才 promotion。真实 Blender 4.5.3/5.1.1 Companion E2E
+          均通过 12 delivery/result、29 FCurves、87 keyframe points、完整 checkpoint lineage 与强 Observation。
+          见 [ADR 0112](adr/0112-pose-animation-operation-level-mcp.md)。
+      - [x] Pose Animation operation 07 已拆为严格 `rnaKeyframeInsertions`：当前三骨骼轨迹按 frame/pose/channel
+            保存 27 次真实 `PoseBone.keyframe_insert`，逐项绑定 bone、data path、accepted values 与 87 个实际
+            FCurve 点。Guided Control 显示 `KEYFRAME RNA` 子序列，Runtime 从 accepted replay 重建完整数组；
+            Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过，且合法格式的伪造 action identity 被成功门拒绝。
+            该切片不冒充 Insert Keyframe 菜单、Dope Sheet 手势或通用动画 executor。见
+            [ADR 0122](adr/0122-pose-animation-rna-keyframe-insertion-evidence.md)。
+      - [x] Pose Animation operation 09/11 已形成严格 `rnaAnimationPropertyWrites`：当前三骨骼轨迹沿 accepted
+            曲线/帧顺序保存 87 条 keyframe interpolation 与 29 条 FCurve extrapolation 写入，包含默认 before、
+            accepted/observed 值和 UI path。Guided Control 显示 `ANIMATION RNA` 子序列，Runtime 独立重建并拒绝
+            合法格式的伪造 action identity；Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过。该切片不冒充
+            Dope Sheet/Graph Editor 控件或通用曲线 executor。见
+            [ADR 0123](adr/0123-pose-animation-rna-property-write-evidence.md)。
+      - [x] Pose Animation operation 04/05 已形成严格 `rnaActionResourceMutations`：Action create 与 Armature bind
+            按 `.01/.02` 保存 receipt-derived pending identity，Action Name write 按 `.01` 保存 before/accepted/
+            observed name。Guided Control 显示 `ACTION RESOURCE RNA`，Runtime 从 durable receipt ID 与 replay
+            独立重建并拒绝合法格式的伪造 action identity；Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过。
+            该切片不冒充 Action Editor/selector 控件或通用 Action executor。见
+            [ADR 0124](adr/0124-pose-animation-action-resource-evidence.md)。
+    - [x] Armature 本地及远程 9 步 operation executor：InteractionCatalog `1.57.0` 冻结 `1.56.0`，把 Armature
+          whole-action MCP 升级为固定 `01→09` Guided Control/MCP 轨迹。02/03/04/06/08 分别创建 pending
+          object/data、应用两个名称、创建有序 bones、应用 rigid bindings；其余步骤是显式预检、上下文和最终
+          `armature_ready`。执行器使用改名后 ResourceIdentity 重绑、连续 pointer-free fingerprint、稀疏 receipt、
+          LIFO inverse、失败补偿和 native Undo/Redo rebind。真实 Blender 4.5.3/5.1.1 本地与 Companion E2E
+          均通过九次 delivery/result、精确骨骼/绑定、整叶 Back、完整 checkpoint lineage 与强 Observation。
+          见 [ADR 0113](adr/0113-armature-operation-level-mcp.md)。
+      - [x] Armature operation 02/03/04/06/08 已形成严格 RNA 证据数组：资源 data/Object create、collection link
+            与名称写入进入 `rnaArmatureResourceMutations`；EditBone create/parent 与 PoseBone rotation mode 进入
+            `rnaArmatureBoneMutations`；刚性 target/bone parenting 进入 `rnaArmatureBindingMutations`。Guided
+            Control 显示 `ARMATURE RESOURCE/BONE/BINDING RNA`，Runtime 从 receipt/replay 独立重建并拒绝三类
+            合法格式的伪造 identity；Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过。见
+            [ADR 0125](adr/0125-armature-rna-mutation-evidence.md)。
+    - [x] Skin Weights 本地及远程 9 步 operation executor：ActionCatalog `1.27.0` 冻结 `1.26.0`，把实际创建的
+          Armature Modifier resource effect 从 `mutate` 修正为 `create`；InteractionCatalog `1.58.0` 冻结
+          `1.57.0`，把 Skin Weights whole-action MCP 升级为固定 `01→09` Guided Control/MCP 轨迹。05/07/08
+          分别写入完整归一化权重和 bone deform flags、创建 Preserve Volume Modifier、应用精确 Modifier Name；
+          其余步骤保持 receipt-free 预检、上下文和最终 `skin_weights_ready`。执行器使用连续 pointer-free
+          fingerprint、合并 partial receipt、LIFO inverse、失败补偿和 native Undo/Redo rebind。真实 Blender
+          4.5.3/5.1.1 本地与 Companion E2E 均通过九次 delivery/result、完整顶点覆盖、精确 groups/weights、
+          Modifier ownership/settings/name、整叶 Back、完整 checkpoint lineage 与强 Observation。
+          见 [ADR 0114](adr/0114-skin-weights-operation-level-mcp.md)。
+      - [x] Skin Weights operation 05/07/08 已形成严格 RNA 证据数组：bone deform、Vertex Group create 和每条
+            accepted vertex/influence assignment 进入 `rnaSkinWeightMutations`；Armature Modifier create/object
+            bind/三项 property write/name write 进入 `rnaSkinModifierMutations`。Guided Control 显示
+            `SKIN WEIGHT/MODIFIER RNA`，Runtime 从 durable receipt ID 与 replay 独立重建并拒绝两类合法格式的
+            伪造 identity；Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过。见
+            [ADR 0126](adr/0126-skin-weights-rna-mutation-evidence.md)。
+    - [x] Solidify 本地及远程 4 步 operation executor：InteractionCatalog `1.59.0` 冻结 `1.58.0`，把 Solidify
+          whole-action MCP 升级为固定 `01→04` Guided Control/MCP 轨迹。03 创建 receipt-derived pending
+          `SOLIDIFY` Modifier，04 写入 accepted name、thickness、offset 与其余固定属性；01/02 保持 receipt-free
+          预检和面板上下文。执行器使用连续 pointer-free fingerprint、partial receipt、LIFO inverse、失败补偿
+          和 native Undo/Redo rebind。真实 Blender 4.5.3/5.1.1 本地与 Companion E2E 均通过四次
+          delivery/result、精确 Modifier ownership/settings/name、inverse/replay、整叶 Back、完整 checkpoint
+          lineage 与强 `modifier_ready`。见
+          [ADR 0127](adr/0127-solidify-operation-level-mcp-and-rna-evidence.md)。
+      - [x] Solidify operation 03/04 已形成严格 `rnaSolidifyModifierMutations`：一条 Modifier create、accepted
+            name write 和 25 条固定 property write 按实际执行顺序保存 receipt-derived identity、before/accepted/
+            observed 值、MCP 与 UI path。Guided Control 显示 `SOLIDIFY RESOURCE/PROPERTY RNA`，Runtime 从
+            durable receipt 与 replay 独立重建并拒绝合法格式的伪造 identity 或参数；Blender 4.5.3/5.1.1
+            本地及 Companion E2E 均通过。
+    - [x] Mirror 本地及远程 7 步 operation executor：InteractionCatalog `1.60.0` 冻结 `1.59.0`，把 Mirror
+          whole-action MCP 升级为固定 `01→07` Guided Control/MCP 轨迹。01–05 显示 Layout、owned Mesh、
+          Modifiers、Add Modifier 与 Generate 上下文，06 创建 receipt-derived pending `MIRROR` Modifier，07
+          写入 accepted name、单轴分量与其余固定属性。执行器使用连续 pointer-free fingerprint、partial
+          receipt、LIFO inverse、失败补偿和 native Undo/Redo rebind。真实 Blender 4.5.3/5.1.1 本地及
+          Companion E2E 均通过七次 delivery/result、精确 Modifier ownership/settings/name、inverse/replay、
+          整叶 Back、完整 checkpoint lineage 与强 `modifier_ready`。见
+          [ADR 0128](adr/0128-mirror-operation-level-mcp-and-rna-evidence.md)。
+      - [x] Mirror operation 06/07 已形成严格 `rnaMirrorModifierMutations`：一条 Modifier create、accepted
+            name write、三个轴分量 write 和 24 条固定 property write 按实际执行顺序保存 receipt-derived
+            identity、before/accepted/observed 值、MCP 与 UI path。Guided Control 显示
+            `MIRROR RESOURCE/PROPERTY RNA`，Runtime 从 durable receipt 与 replay 独立重建并拒绝合法格式的
+            伪造 identity 或轴组合；Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过。
+    - [x] Subdivision Surface 本地及远程 4 步 operation executor：InteractionCatalog `1.61.0` 冻结
+          `1.60.0`，把 Subdivision Surface whole-action MCP 升级为固定 `01→04` Guided Control/MCP 轨迹。
+          01–02 显示 Layout 与 receipt-owned Mesh，03 创建 receipt-derived pending `SUBSURF` Modifier，04
+          写入 accepted name、viewport level 与其余固定属性。执行器使用连续 pointer-free fingerprint、
+          partial receipt、LIFO inverse、失败补偿和 native Undo/Redo rebind。真实 Blender 4.5.3/5.1.1
+          本地及 Companion E2E 均通过四次 delivery/result、精确 Modifier ownership/settings/name、
+          inverse/replay、整叶 Back、完整 checkpoint lineage 与强 `modifier_ready`。原生快捷键轨迹继续是
+          candidate-only。见
+          [ADR 0129](adr/0129-subdivision-surface-operation-level-mcp-and-rna-evidence.md)。
+      - [x] Subdivision Surface operation 03/04 已形成严格 `rnaSubdivisionSurfaceModifierMutations`：一条
+            Modifier create、accepted name write 和 14 条固定 property write 按实际执行顺序保存
+            receipt-derived identity、before/accepted/observed 值、MCP 与 UI path。Guided Control 显示
+            `SUBDIVISION SURFACE RESOURCE/PROPERTY RNA`，Runtime 从 durable receipt 与 replay 独立重建并
+            拒绝合法格式的伪造 identity、level 或 mutation 顺序；Blender 4.5.3/5.1.1 本地及 Companion E2E
+            均通过。
+    - [x] Edit Bevel 本地及远程 6 步 operation executor：InteractionCatalog `1.62.0` 冻结 `1.61.0`，
+          把 Edit Bevel whole-action MCP 升级为固定 `01→06` Guided Control/MCP 轨迹。01–04 显示 Layout、
+          receipt-owned Mesh、Edit Mode 和 Edge 菜单教学上下文；05 创建 pending replacement Mesh、投影
+          accepted `width/segments/profile` 并执行固定 BMesh bevel，06 写入 accepted Mesh name 与 Object
+          data link。执行器使用连续 pointer-free fingerprint、partial receipt、LIFO inverse、失败补偿和
+          native Undo/Redo rebind。真实 Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过六次
+          delivery/result、`8/12/6 → 96/192/98`、源内容保留、inverse/replay、整叶 Back、完整 checkpoint
+          lineage、伪造证据拒绝与强 `mesh_edges_beveled`。原生十步快捷键轨迹继续 candidate-only。见
+          [ADR 0130](adr/0130-edit-bevel-operation-level-mcp-and-bmesh-evidence.md)。
+      - [x] Edit Bevel operation 05/06 已形成严格 `editBevelMeshOperations`：五条 Mesh create、参数投影、
+            BMesh content write 与两条 accepted name/Object data-link write 按实际执行顺序保存 identity、
+            accepted/observed 值、固定 BMesh 常量、source/result topology、MCP 与 UI path。Runtime 独立重建
+            确定性字段，并把 schema 验证后的动态 topology 与最终强 Observation 交叉核对；双版本本地及
+            Companion E2E 均通过。
+    - [x] Edit Inset 本地及远程 6 步 operation executor：InteractionCatalog `1.63.0` 冻结 `1.62.0`，
+          把 Individual Inset Faces whole-action MCP 升级为固定 `01→06` Guided Control/MCP 轨迹。01–04
+          显示 Layout、receipt-owned Mesh、Edit Mode 和 Face 菜单教学上下文；05 创建 pending replacement
+          Mesh、投影 accepted `thickness/depth` 并执行固定 BMesh individual inset，06 写入 accepted Mesh
+          name 与 Object data link。真实 Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过六次
+          delivery/result、`8/12/6 → 32/60/30`、源内容保留、inverse/replay、整叶 Back、完整 checkpoint
+          lineage、伪造证据拒绝与强 `mesh_faces_inset`。原生十步快捷键轨迹继续 candidate-only。见
+          [ADR 0131](adr/0131-edit-inset-operation-level-mcp-and-bmesh-evidence.md)。
+      - [x] Edit Inset operation 05/06 已形成严格 `editInsetMeshOperations`：四条 Mesh create、参数投影、
+            BMesh content write 与两条 accepted name/Object data-link write 按实际执行顺序保存 identity、
+            accepted/observed 值、固定 BMesh 常量、source loop count、严格
+            `[V+L, E+2L, F+L]` topology、nondegeneracy、MCP 与 UI path。Runtime 独立重建确定性字段，并与
+            最终强 Observation 交叉核对；双版本本地及 Companion E2E 均通过。
+    - [x] Edit Poke 本地及远程 6 步 operation executor：InteractionCatalog `1.64.0` 冻结 `1.63.0`，
+          把 Poke Faces whole-action MCP 升级为固定 `01→06` Guided Control/MCP 轨迹。01–04 显示 Layout、
+          receipt-owned Mesh、Edit Mode 和 Face 菜单教学上下文；05 创建 pending replacement Mesh、投影
+          accepted `offset` 并执行固定 BMesh poke，06 写入 accepted Mesh name 与 Object data link。真实
+          Blender 4.5.3/5.1.1 本地及 Companion E2E 验证六次 delivery/result、`8/12/6 → 14/36/24`、
+          triangle-only、源内容保留、inverse/replay、整叶 Back、完整 checkpoint lineage、伪造证据拒绝与
+          强 `mesh_faces_poked`。原生九步快捷键轨迹继续 candidate-only。见
+          [ADR 0132](adr/0132-edit-poke-operation-level-mcp-and-bmesh-evidence.md)。
+      - [x] Edit Poke operation 05/06 已形成严格 `editPokeMeshOperations`：三条 Mesh create、offset 投影、
+            BMesh content write 与两条 accepted name/Object data-link write 按实际执行顺序保存 identity、
+            accepted/observed 值、固定 BMesh 常量、source loop count、严格 `[V+F, E+L, L]` topology、
+            triangle/nondegeneracy、MCP 与 UI path。Runtime 独立重建确定性字段，并与最终强 Observation
+            交叉核对；双版本本地及 Companion E2E 均通过。
+    - [x] Edit Triangulate 本地及远程 6 步 operation executor：InteractionCatalog `1.65.0` 冻结
+          `1.64.0`，把 Triangulate whole-action MCP 升级为固定 `01→06` Guided Control/MCP 轨迹。
+          01–04 显示 Layout、receipt-owned Mesh、Edit Mode 和 Face 菜单教学上下文；05 创建 pending
+          replacement Mesh 并以固定 `FIXED`/`EAR_CLIP` 方法执行 BMesh triangulate，06 写入 accepted
+          Mesh name 与 Object data link。真实 Blender 4.5.3/5.1.1 本地及 Companion E2E 验证六次
+          delivery/result、`8/12/6 → 8/18/12`、triangle-only、源内容保留、inverse/replay、整叶 Back、
+          完整 checkpoint lineage、伪造 binding/name 拒绝与强 `mesh_triangulated`。见
+          [ADR 0133](adr/0133-edit-triangulate-operation-level-mcp-and-bmesh-evidence.md)。
+      - [x] Edit Triangulate operation 05/06 已形成严格 `editTriangulateMeshOperations`：两条 Mesh
+            create/BMesh content write 与两条 accepted name/Object data-link write 按实际顺序保存
+            identity、固定方法、source loop count、严格 `[V, E+L-3F, L-2F]` topology、源/结果内容、
+            triangle-only、MCP 与 UI path。Runtime 与最终强 Observation 交叉核对；双版本本地及
+            Companion E2E 均通过。
+    - [x] Extrude Region 本地及远程 6 步 operation executor：InteractionCatalog `1.66.0` 冻结
+          `1.65.0`，把 Extrude Region whole-action MCP 升级为固定 `01→06` Guided Control/MCP 轨迹。
+          01–03 显示 Layout、receipt-owned Mesh 与 Edit Mode；04 验证 accepted 连通面区域，05 创建
+          pending replacement Mesh、执行 BMesh region extrusion 并按 accepted local-space translation
+          平移新顶点，06 写入 accepted Mesh name 与 Object data link。真实 Blender 4.5.3/5.1.1 本地及
+          Companion E2E 验证六次 delivery/result、单面选区 `1/4/4/4`、`8/12/6 → 12/20/10`、源内容
+          保留、inverse/replay、整叶 Back、完整 checkpoint lineage、伪造 binding/name 拒绝与强
+          `mesh_region_extruded`。见
+          [ADR 0134](adr/0134-edit-extrude-region-operation-level-mcp-and-bmesh-evidence.md)。
+      - [x] Extrude Region operation 04/05/06 已形成严格 `editExtrudeRegionMeshOperations`：selection、
+            Mesh create、translation projection、BMesh content write 与 accepted name/Object data-link
+            write 按实际顺序保存 identity、accepted/observed 值、选区计数、严格
+            `[V+selectedVertexCount, E+selectedEdgeCount+boundaryEdgeCount, F+boundaryEdgeCount]`
+            topology、源/结果内容、MCP 与 UI path。Runtime 与最终强 Observation 交叉核对；双版本本地及
+            Companion E2E 均通过。
+    - [x] Bevel Modifier 本地及远程 4 步 operation executor：InteractionCatalog `1.67.0` 冻结
+          `1.66.0`，首次为当前 Bevel recipe 增加固定 `01→04` Guided Control/MCP 轨迹。01–02 显示 Layout
+          与 Modifier Properties 上下文；03 创建 receipt-derived pending `BEVEL` Modifier，04 依次写入
+          accepted name、width、segments、固定 `limit_method=ANGLE` 与 accepted angle limit。真实 Blender
+          4.5.3/5.1.1 本地及 Companion E2E 验证四次 delivery/result、inverse/replay、整叶 Back、完整
+          checkpoint lineage、强 `modifier_ready` 与伪造 identity/value/order/constant 拒绝。见
+          [ADR 0135](adr/0135-bevel-modifier-operation-level-mcp-and-rna-evidence.md)。
+      - [x] Bevel Modifier operation 03/04 已形成严格 `rnaBevelModifierMutations`：一条 Modifier create 与
+            五条 accepted name/width/segments/limit-method/angle-limit write 按实际顺序保存 logical identity、
+            值来源、before/accepted/observed 值、MCP 与 UI path。Runtime 独立重建确定性字段，并与最终强
+            Observation、源 Mesh 内容保护及有界 evaluated topology 交叉核对；双版本本地及 Companion E2E
+            均通过。
+    - [x] Single Material 本地及远程 4 步 operation executor：InteractionCatalog `1.68.0` 冻结
+          `1.67.0`，首次为当前 material recipe 增加固定 `01→04` Guided Control/MCP 轨迹。01–02 显示
+          Shading 与 Material Properties 上下文；03 创建 receipt-derived pending Material 并启用 Use Nodes，
+          04 依次写入 accepted name、Material/Principled surface 与 ordered multi-target slots。真实 Blender
+          4.5.3/5.1.1 本地及 Companion E2E 验证四次 delivery/result、双目标顺序、inverse/replay、整叶
+          Back、完整 checkpoint lineage、强 `material_assigned` 与伪造 identity/surface evidence 拒绝。见
+          [ADR 0136](adr/0136-single-material-operation-level-mcp-and-rna-evidence.md)。
+      - [x] Single Material operation 03/04 已形成严格 `rnaMaterialMutations`：03 保存 Material create 与
+            Use Nodes write；04 保存 accepted name、Material diffuse color/roughness/metallic、Principled
+            Base Color/Roughness/Metallic 与每个 ordered target slot replacement，共 `13 + targetCount` 条。
+            Runtime 从 accepted replay 重建 identity、值与 target order，并与最终强 Observation、唯一
+            Principled/Material Output、assignment、ownership、receipt 和源 Mesh 内容证明交叉核对；双版本
+            本地及 Companion E2E 均通过。
+    - [x] Material Palette 本地及远程 4 步 operation executor：InteractionCatalog `1.69.0` 冻结
+          `1.68.0`，首次为当前 palette recipe 增加固定 `01→04` Guided Control/MCP 轨迹。01–02 显示
+          Shading 与 Material Properties 上下文；03 携带完整有序 `materials` 数组并保持非变更；04 原子创建、
+          配置并分配全部材质。真实 Blender 4.5.3/5.1.1 本地及 Companion E2E 验证两种材质、三个目标、
+          两个有序成功门、inverse/replay、整叶 Back、完整 checkpoint lineage，以及伪造材质 identity/value
+          拒绝。见 [ADR 0137](adr/0137-material-palette-operation-level-mcp-and-rna-evidence.md)。
+      - [x] Material Palette operation 04 已形成严格 `rnaMaterialPaletteMutations`：每个材质按
+            `create → use_nodes → Material surface → Principled surface → ordered target assignments` 保存
+            `14 + targetCount` 条记录，所有材质再用连续全局 order 串联。Runtime 从 accepted replay 重建
+            identity、嵌套值和全局 target order，并与多个有序强 Observation、ownership、receipt、节点唯一性
+            和源 Mesh 内容证明交叉核对；双版本本地及 Companion E2E 均通过。
+    - [ ] 真实逐控件 menu/shortcut 与 socket executor，以及当前有界 managed action 集合之外的复合、Edit、
+          Modifier、Geometry Nodes、骨骼和动画叶节点覆盖。
+      - [x] Transform Geometry 05–07 已把 Translation/Rotation/Scale 拆为 `X→Y→Z` 九次真实 Blender RNA
+            分量写入，并持久化严格的 operation/socket/property/value/MCP/UI-path 数组；Runtime 对新结果执行
+            canonical equality，Blender 4.5.3/5.1.1 验证实际 float32 回读与恢复。该切片明确不是鼠标点击或通用
+            socket executor。见 [ADR 0116](adr/0116-transform-geometry-rna-component-write-evidence.md)。
+      - [x] Light Trails 十二项参数 operation 已拆为十五次真实 Blender RNA 写入；09/10/31 分别保存两个目标，
+            每条绑定 accepted 参数、受限投影、before/projected/float32 observed、精确 node/socket/component、
+            MCP 和 UI path。Guided Control 按 `.01/.02` 显示并与 native targeting 共用目标表，Runtime 对新结果
+            执行 canonical equality；双版本本地与 Companion E2E 均通过。该切片仍不是通用节点或鼠标执行器。
+            见 [ADR 0117](adr/0117-light-trails-rna-control-write-evidence.md)。
+      - [x] Light Trails 九个节点创建 operation 已拆为三十九次稳定 RNA 初始化写入，覆盖 node enum/property、
+            socket scalar 与 vector component，并保存 assigned/float32 observed、值来源、MCP 和 UI path。
+            Guided Control 按 `INITIAL RNA` 子序列显示，Runtime 从 accepted replay 与 recipe 常量重建完整数组；
+            Blender 4.5.3/5.1.1 本地及 Companion E2E 均通过。Resample Curve mode 的版本差异仍由适配器与最终图
+            验证，不伪造统一目标。见
+            [ADR 0118](adr/0118-light-trails-node-initialization-rna-evidence.md)。
+      - [x] Light Trails 35–53 的十九项连接 operation 已各自形成严格 `rnaLinkCreations`：执行器从 Blender 返回的
+            `NodeLink` 回读并核对 from/to node type、socket identifier 与方向，Guided Control 显示
+            `35.01…53.01 LINK RNA`，Runtime 从固定 recipe 重建当前唯一端点。双版本本地及 Companion E2E 均
+            通过；该切片证明数据模型连接，不冒充鼠标拖线或通用 socket executor。见
+            [ADR 0119](adr/0119-light-trails-rna-link-creation-evidence.md)。
+      - [x] Light Trails 二十项节点 operation 已形成二十二条严格 `rnaStructureCreations`：普通节点回读精确
+            name/type，Group Input/Output 按 `.01 interface socket → .02 node` 保存 Geometry 方向/type 与节点。
+            Guided Control 显示 `STRUCTURE/INTERFACE/NODE RNA`，Runtime 从固定 recipe 重建完整数组；双版本本地
+            与 Companion E2E 均通过。该切片不冒充 Add/Search 菜单或鼠标放置节点。见
+            [ADR 0120](adr/0120-light-trails-rna-structure-creation-evidence.md)。
+      - [x] Light Trails operation 02 已形成三条严格 `rnaResourceMutations`，按 `.01 Node Group → .02 NODES
+Modifier → .03 Bind` 保存实际返回资源、type、logical identity 与 UI path。Guided Control 显示
+            `RESOURCE RNA` 子序列，Runtime 从 accepted replay 独立派生并 canonical-equality 核对；Blender
+            4.5.3/5.1.1 本地及 Companion E2E 均通过，且合法格式的伪造资源收据被成功门拒绝。该切片不冒充
+            Add Modifier 菜单、工作区切换或通用资源 executor。见
+            [ADR 0121](adr/0121-light-trails-rna-resource-mutation-evidence.md)。
     - [x] 可信 action failure 的确定性候选：只有唯一终态失败与 finalized automatic-rollback attestation、不可变
           replay binding 和精确目录全部一致时，Runtime 才按服务端 schema policy 生成待审参数修复，或从同一叶
           选择携带 `proofExecution` 的备用轨迹；启动可幂等补齐，只读查询不接受 caller evidence，不调用 Provider、
@@ -688,9 +963,12 @@ Cuts → Smoothness → ENTER → TAB` 前台事件执行。协议、Coordinator
           fail closed。见 [ADR 0103](adr/0103-human-reviewed-execution-failure-replan.md)。
     - [x] Guide `1.6.0` 的可审查 execution-track 表达：proof-backed strategy switch 只把精确目录、recipe、
           menu/shortcut track 与 proof execution 摘要物化到失败 action leaf；durable review、revision、候选和
-          replay proof 形成接受前的完整授权链。通用创建/发布与 action-level MCP 均不能绕过；专用逐控件
-          executor 尚未实现，因此 Blender 在任何宿主副作用前锁住 Next。见
-          [ADR 0104](adr/0104-reviewed-execution-track-override.md)。
+          replay proof 形成接受前的完整授权链。通用创建/发布、公开 Next 与 action-level MCP 均不能绕过。
+          专用 execution-track MCP 已实现有界 UV Sphere v2 executor：七个前台事件模拟收据、八个 native
+          mutation stage、精确 native Undo baseline restore、Redo barrier、managed-start ACK、单次 managed
+          commit、强 Observation 和 durable recovery；它不扩大到其他叶节点。见
+          [ADR 0104](adr/0104-reviewed-execution-track-override.md) 与
+          [ADR 0115](adr/0115-uv-sphere-execution-track-v2.md)。
     - [ ] 在确定性候选耗尽后复用签名、单次消费的 Provider authority 触发语义局部重规划。自动应用或自动
           执行仍禁止。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
