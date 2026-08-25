@@ -1,0 +1,792 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 624,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 624
+          },
+          "materialOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "materialMutationOrder": {
+            "type": "number",
+            "const": 1
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.material.palette.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "materialId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "materialName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_material_create"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "materials[].materialName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "palette_material_create"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "Material"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Shading"
+              },
+              {
+                "type": "string",
+                "const": "Material Properties"
+              },
+              {
+                "type": "string",
+                "const": "Palette"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "New"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 6,
+            "maxItems": 6
+          }
+        },
+        "required": [
+          "order",
+          "materialOrder",
+          "materialMutationOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "materialId",
+          "materialName",
+          "executionMethod",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "resourceType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 624
+          },
+          "materialOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "materialMutationOrder": {
+            "type": "number",
+            "const": 2
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.material.palette.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "materialId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "materialName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_material_use_nodes_write"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "catalog_constant"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "palette_material_use_nodes_write"
+          },
+          "beforeValue": {
+            "type": "boolean"
+          },
+          "acceptedValue": {
+            "type": "boolean",
+            "const": true
+          },
+          "observedValue": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Shading"
+              },
+              {
+                "type": "string",
+                "const": "Material Properties"
+              },
+              {
+                "type": "string",
+                "const": "Palette"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Use Nodes"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 6,
+            "maxItems": 6
+          }
+        },
+        "required": [
+          "order",
+          "materialOrder",
+          "materialMutationOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "materialId",
+          "materialName",
+          "executionMethod",
+          "valueSource",
+          "mutationKind",
+          "beforeValue",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 624
+          },
+          "materialOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "materialMutationOrder": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 8
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.material.palette.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "materialId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "materialName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_material_property_write"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "enum": [
+              "materials[].baseColor",
+              "materials[].roughness",
+              "materials[].metallic"
+            ]
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "palette_material_property_write"
+          },
+          "surface": {
+            "type": "string",
+            "const": "Material"
+          },
+          "propertyName": {
+            "type": "string",
+            "enum": [
+              "diffuse_color",
+              "roughness",
+              "metallic"
+            ]
+          },
+          "component": {
+            "type": "string",
+            "enum": [
+              "R",
+              "G",
+              "B",
+              "A"
+            ]
+          },
+          "beforeValue": {
+            "type": "number"
+          },
+          "acceptedValue": {
+            "type": "number"
+          },
+          "observedValue": {
+            "type": "number"
+          },
+          "uiPath": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "string",
+                    "const": "Shading"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Material Properties"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Palette"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Material",
+                      "Principled BSDF"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 7,
+                "maxItems": 7
+              },
+              {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "string",
+                    "const": "Shading"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Material Properties"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Palette"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Material",
+                      "Principled BSDF"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "R",
+                      "G",
+                      "B",
+                      "A"
+                    ]
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 8,
+                "maxItems": 8
+              }
+            ]
+          }
+        },
+        "required": [
+          "order",
+          "materialOrder",
+          "materialMutationOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "materialId",
+          "materialName",
+          "executionMethod",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "surface",
+          "propertyName",
+          "beforeValue",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 624
+          },
+          "materialOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "materialMutationOrder": {
+            "type": "integer",
+            "minimum": 9,
+            "maximum": 14
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.material.palette.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "materialId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "materialName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_principled_input_write"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "enum": [
+              "materials[].baseColor",
+              "materials[].roughness",
+              "materials[].metallic"
+            ]
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "palette_principled_input_write"
+          },
+          "surface": {
+            "type": "string",
+            "const": "Principled BSDF"
+          },
+          "propertyName": {
+            "type": "string",
+            "enum": [
+              "Base Color",
+              "Roughness",
+              "Metallic"
+            ]
+          },
+          "component": {
+            "type": "string",
+            "enum": [
+              "R",
+              "G",
+              "B",
+              "A"
+            ]
+          },
+          "beforeValue": {
+            "type": "number"
+          },
+          "acceptedValue": {
+            "type": "number"
+          },
+          "observedValue": {
+            "type": "number"
+          },
+          "uiPath": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "string",
+                    "const": "Shading"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Material Properties"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Palette"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Material",
+                      "Principled BSDF"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 7,
+                "maxItems": 7
+              },
+              {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "string",
+                    "const": "Shading"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Material Properties"
+                  },
+                  {
+                    "type": "string",
+                    "const": "Palette"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Material",
+                      "Principled BSDF"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "R",
+                      "G",
+                      "B",
+                      "A"
+                    ]
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 8,
+                "maxItems": 8
+              }
+            ]
+          }
+        },
+        "required": [
+          "order",
+          "materialOrder",
+          "materialMutationOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "materialId",
+          "materialName",
+          "executionMethod",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "surface",
+          "propertyName",
+          "beforeValue",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 624
+          },
+          "materialOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "materialMutationOrder": {
+            "type": "integer",
+            "minimum": 15,
+            "maximum": 78
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.material.palette.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.assign_targets"
+          },
+          "materialId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "materialName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_material_slot_replace"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "materials[].targets"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "palette_material_slot_replace"
+          },
+          "targetOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "beforeSlotCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "observedSlotCount": {
+            "type": "number",
+            "const": 1
+          },
+          "observedAssignment": {
+            "type": "boolean",
+            "const": true
+          },
+          "sourceMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceContentIntact": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Shading"
+              },
+              {
+                "type": "string",
+                "const": "Material Properties"
+              },
+              {
+                "type": "string",
+                "const": "Palette"
+              },
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Material Slots"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 7,
+            "maxItems": 7
+          }
+        },
+        "required": [
+          "order",
+          "materialOrder",
+          "materialMutationOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "materialId",
+          "materialName",
+          "executionMethod",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "targetOrder",
+          "targetId",
+          "beforeSlotCount",
+          "observedSlotCount",
+          "observedAssignment",
+          "sourceMeshId",
+          "sourceContentIntact",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact ordered palette material groups, nested accepted surface controls, globally unique target assignments, source-content guards, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-material-palette-rna-mutations.json"
+}

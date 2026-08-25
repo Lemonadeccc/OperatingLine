@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 6144,
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "order": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 6144
+      },
+      "frameOrder": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 64
+      },
+      "poseOrder": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 32
+      },
+      "channelOrder": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 3
+      },
+      "executionMethod": {
+        "type": "string",
+        "const": "blender_rna_pose_bone_keyframe_insert"
+      },
+      "mcpTool": {
+        "type": "string",
+        "const": "operatingline.blender.animation.pose-keyframes.execute-next"
+      },
+      "sourceOperationId": {
+        "type": "string",
+        "const": "projection.semantic.pose_animation.keyframes"
+      },
+      "semanticAction": {
+        "type": "string",
+        "const": "projection.semantic.pose_animation.keyframes"
+      },
+      "actionArgument": {
+        "type": "string",
+        "const": "keyframes"
+      },
+      "armatureId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "actionId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "actionName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "frame": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100000
+      },
+      "boneName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "dataPath": {
+        "type": "string",
+        "enum": [
+          "rotation_euler",
+          "rotation_quaternion",
+          "rotation_axis_angle",
+          "location",
+          "scale"
+        ]
+      },
+      "acceptedValues": {
+        "minItems": 3,
+        "maxItems": 4,
+        "type": "array",
+        "items": {
+          "type": "number"
+        }
+      },
+      "observedPoints": {
+        "minItems": 3,
+        "maxItems": 4,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "componentIndex": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3
+            },
+            "acceptedValue": {
+              "type": "number"
+            },
+            "observedFrame": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "observedValue": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "componentIndex",
+            "acceptedValue",
+            "observedFrame",
+            "observedValue"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "observedInserted": {
+        "type": "boolean",
+        "const": true
+      },
+      "uiPath": {
+        "type": "array",
+        "items": [
+          {
+            "type": "string",
+            "const": "Animation"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "enum": [
+              "rotation_euler",
+              "rotation_quaternion",
+              "rotation_axis_angle",
+              "location",
+              "scale"
+            ]
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          }
+        ],
+        "additionalItems": false,
+        "minItems": 5,
+        "maxItems": 5
+      }
+    },
+    "required": [
+      "order",
+      "frameOrder",
+      "poseOrder",
+      "channelOrder",
+      "executionMethod",
+      "mcpTool",
+      "sourceOperationId",
+      "semanticAction",
+      "actionArgument",
+      "armatureId",
+      "actionId",
+      "actionName",
+      "frame",
+      "boneName",
+      "dataPath",
+      "acceptedValues",
+      "observedPoints",
+      "observedInserted",
+      "uiPath"
+    ],
+    "additionalProperties": false
+  },
+  "$comment": "Exact Pose frame/pose/channel order, accepted-to-observed component values, resource identity, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-pose-rna-keyframe-insertions.json"
+}

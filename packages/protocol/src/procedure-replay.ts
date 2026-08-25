@@ -13,8 +13,8 @@ import {
 } from './companion.js';
 import { guideStepIdSchema } from './guide.js';
 import {
-  actionLevelMcpActionNameSchema,
-  type ActionLevelMcpActionName,
+  procedureReplayActionNameSchema,
+  type ProcedureReplayActionName,
 } from './managed-primitive-action.js';
 import {
   procedureAuthoringMaterializationRequestSchema,
@@ -26,10 +26,10 @@ export const procedureLeafReplayFormatVersion = '1.0.0' as const;
 export const procedureLeafReplayFormatVersionSchema = z.literal(procedureLeafReplayFormatVersion);
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
-const procedureLeafReplayNativeUndoProtocolVersionSchema = z.enum(['1.5.0', '1.6.0']);
+const procedureLeafReplayNativeUndoProtocolVersionSchema = z.enum(['1.5.0', '1.6.0', '1.7.0']);
 
-export const procedureLeafReplayActionNameSchema = actionLevelMcpActionNameSchema;
-export type ProcedureLeafReplayActionName = ActionLevelMcpActionName;
+export const procedureLeafReplayActionNameSchema = procedureReplayActionNameSchema;
+export type ProcedureLeafReplayActionName = ProcedureReplayActionName;
 
 const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_uv_sphere': 'uv_sphere_ready',
@@ -45,8 +45,15 @@ const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.edit_bevel_edges': 'mesh_edges_beveled',
   'blender.mesh.edit_inset_faces': 'mesh_faces_inset',
   'blender.mesh.edit_poke_faces': 'mesh_faces_poked',
+  'blender.modifier.add_subdivision_surface': 'modifier_ready',
   'blender.modifier.add_solidify': 'modifier_ready',
+  'blender.modifier.add_bevel': 'modifier_ready',
   'blender.modifier.add_mirror': 'modifier_ready',
+  'blender.material.create_and_assign': 'material_assigned',
+  'blender.material.create_palette_and_assign': 'material_assigned',
+  'blender.geometry_nodes.create_transform': 'geometry_nodes_ready',
+  'blender.geometry_nodes.create_light_trails': 'light_trails_ready',
+  'blender.lookdev.create_light_trails_scene': 'light_trails_scene_ready',
   'blender.rig.create_armature': 'armature_ready',
   'blender.rig.bind_skin_weights': 'skin_weights_ready',
   'blender.animation.create_pose_keyframes': 'pose_animation_ready',
@@ -791,6 +798,13 @@ const procedureLeafReplayCylinderDetailsSchema = z
     }
   });
 
+const replayLogicalIdSchema = z
+  .string()
+  .min(1)
+  .max(180)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const replayOwnedNameSchema = z.string().min(1).max(180).startsWith('OperatingLine.');
+
 const procedureLeafReplayMirrorParametersSchema = z.strictObject({
   targetId: z.string().min(1),
   modifierId: z.string().min(1),
@@ -809,6 +823,74 @@ const procedureLeafReplaySolidifyParametersSchema = z.strictObject({
   useRim: z.literal(true),
   useRimOnly: z.literal(false),
 });
+
+const procedureLeafReplayBevelModifierParametersSchema = z.strictObject({
+  targetId: z.string().min(1),
+  modifierId: z.string().min(1),
+  modifierType: z.literal('BEVEL'),
+  width: z.number().min(0.0001).max(100).finite(),
+  segments: z.number().int().min(1).max(16),
+  angleLimit: z.number().min(0).max(Math.PI).finite(),
+});
+
+const procedureLeafReplaySingleMaterialParametersSchema = z
+  .strictObject({
+    materialId: replayLogicalIdSchema,
+    targets: z.array(replayLogicalIdSchema).min(1).max(64),
+  })
+  .refine((parameters) => new Set(parameters.targets).size === parameters.targets.length, {
+    path: ['targets'],
+    message: 'Material replay targets must be unique and ordered',
+  });
+
+const procedureLeafReplaySubdivisionSurfaceParametersSchema = z.strictObject({
+  targetId: z.string().min(1),
+  modifierId: z.string().min(1),
+  modifierType: z.literal('SUBSURF'),
+  levels: z.number().int().min(1).max(3),
+  renderLevels: z.literal(2),
+  subdivisionType: z.literal('CATMULL_CLARK'),
+  quality: z.literal(3),
+  showOnlyControlEdges: z.literal(true),
+  useCreases: z.literal(true),
+  useLimitSurface: z.literal(true),
+  boundarySmooth: z.literal('ALL'),
+  uvSmooth: z.literal('PRESERVE_BOUNDARIES'),
+  useCustomNormals: z.literal(false),
+  showViewport: z.literal(true),
+  showRender: z.literal(true),
+  showInEditMode: z.literal(true),
+  showOnCage: z.literal(false),
+});
+
+const procedureLeafReplaySubdivisionSurfaceDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplaySubdivisionSurfaceParametersSchema,
+    supported: z.literal(true),
+    targetId: z.string().min(1),
+    modifierId: z.string().min(1),
+    modifierType: z.literal('SUBSURF'),
+    propertiesMatch: z.literal(true),
+    sourceContentIntact: z.literal(true),
+    evaluatedVertexCount: z.number().int().positive().max(8192),
+    evaluatedEdgeCount: z.number().int().positive().max(16384),
+    evaluatedFaceCount: z.number().int().positive().max(8192),
+    evaluatedFinite: z.literal(true),
+    evaluatedWithinLimits: z.literal(true),
+  })
+  .superRefine((details, context) => {
+    if (
+      details.targetId !== details.parameters.targetId ||
+      details.modifierId !== details.parameters.modifierId ||
+      details.modifierType !== details.parameters.modifierType
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Subdivision Surface replay details must match their evaluated parameters',
+      });
+    }
+  });
 
 const procedureLeafReplaySolidifyDetailsSchema = z
   .strictObject({
@@ -852,6 +934,77 @@ const procedureLeafReplaySolidifyDetailsSchema = z
     }
   });
 
+const procedureLeafReplayBevelModifierDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplayBevelModifierParametersSchema,
+    supported: z.literal(true),
+    targetId: z.string().min(1),
+    modifierId: z.string().min(1),
+    modifierType: z.literal('BEVEL'),
+    propertiesMatch: z.literal(true),
+    width: z.number().min(0.0001).max(100).finite(),
+    segments: z.number().int().min(1).max(16),
+    angleLimit: z.number().min(0).max(Math.PI).finite(),
+    limitMethod: z.literal('ANGLE'),
+    bevelFixedStateMatches: z.literal(true),
+    sourceContentIntact: z.literal(true),
+    evaluatedVertexCount: z.number().int().positive().max(8192),
+    evaluatedEdgeCount: z.number().int().positive().max(16384),
+    evaluatedFaceCount: z.number().int().positive().max(8192),
+    evaluatedFinite: z.literal(true),
+    evaluatedWithinLimits: z.literal(true),
+  })
+  .superRefine((details, context) => {
+    if (
+      details.targetId !== details.parameters.targetId ||
+      details.modifierId !== details.parameters.modifierId ||
+      details.modifierType !== details.parameters.modifierType ||
+      Math.abs(details.width - details.parameters.width) > 1e-6 ||
+      details.segments !== details.parameters.segments ||
+      Math.abs(details.angleLimit - details.parameters.angleLimit) > 1e-6
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Bevel Modifier replay details must match their evaluated parameters',
+      });
+    }
+  });
+
+const procedureLeafReplaySingleMaterialDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplaySingleMaterialParametersSchema,
+    supported: z.literal(true),
+    materialId: replayLogicalIdSchema,
+    materialName: replayOwnedNameSchema,
+    targetIds: z.array(replayLogicalIdSchema).min(1).max(64),
+    assignedTargetIds: z.array(replayLogicalIdSchema).min(1).max(64),
+    useNodes: z.literal(true),
+    principledNodeCount: z.literal(1),
+    outputNodeCount: z.literal(1),
+    baseColor: z.array(z.number().finite().min(0).max(1)).length(4),
+    roughness: z.number().finite().min(0).max(1),
+    metallic: z.number().finite().min(0).max(1),
+    receiptMatches: z.literal(true),
+    ownershipMatches: z.literal(true),
+    materialSurfaceMatches: z.literal(true),
+    assignmentsMatch: z.literal(true),
+    sourceContentIntact: z.literal(true),
+  })
+  .superRefine((details, context) => {
+    if (
+      details.materialId !== details.parameters.materialId ||
+      !equalStepIds(details.targetIds, details.parameters.targets) ||
+      !equalStepIds(details.assignedTargetIds, details.parameters.targets)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Material replay details must match the requested material and ordered targets',
+      });
+    }
+  });
+
 const procedureLeafReplayMirrorDetailsSchema = z
   .strictObject({
     parameters: procedureLeafReplayMirrorParametersSchema,
@@ -887,17 +1040,613 @@ const procedureLeafReplayMirrorDetailsSchema = z
     }
   });
 
-const replayLogicalIdSchema = z
-  .string()
-  .min(1)
-  .max(180)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
-const replayOwnedNameSchema = z.string().min(1).max(180).startsWith('OperatingLine.');
 const replayVector3Schema = (minimum: number, maximum: number) =>
   z.array(z.number().min(minimum).max(maximum).finite()).length(3);
 const replayVertexCountSchema = z.number().int().positive().max(8192);
 const replayEdgeCountSchema = z.number().int().positive().max(16384);
 const replayFaceCountSchema = z.number().int().positive().max(8192);
+
+const replayGeometryNodeTypeSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z][A-Za-z0-9_]*$/);
+const replayCanonicalLightTrailsNodeTypes = [
+  'GeometryNodeCurvePrimitiveCircle',
+  'GeometryNodeCurvePrimitiveLine',
+  'GeometryNodeCurveToMesh',
+  'GeometryNodeInputPosition',
+  'GeometryNodeInstanceOnPoints',
+  'GeometryNodeInstanceOnPoints',
+  'GeometryNodeJoinGeometry',
+  'GeometryNodeMeshLine',
+  'GeometryNodeMeshLine',
+  'GeometryNodeRealizeInstances',
+  'GeometryNodeRealizeInstances',
+  'GeometryNodeResampleCurve',
+  'GeometryNodeSetPosition',
+  'GeometryNodeTransform',
+  'NodeGroupInput',
+  'NodeGroupOutput',
+  'ShaderNodeCombineXYZ',
+  'ShaderNodeMath',
+  'ShaderNodeMath',
+  'ShaderNodeTexNoise',
+] as const;
+const replayCanonicalLightTrailsNodeTypesSorted = [...replayCanonicalLightTrailsNodeTypes].sort();
+const replayCanonicalLightTrailsNodeTypesSchema = z
+  .array(replayGeometryNodeTypeSchema)
+  .length(replayCanonicalLightTrailsNodeTypes.length)
+  .refine(
+    (nodeTypes) => equalStepIds([...nodeTypes].sort(), replayCanonicalLightTrailsNodeTypesSorted),
+    { message: 'Light-trails node types must match the fixed executor topology' },
+  );
+const replayCanonicalLightTrailsInterface = [
+  ['INPUT', 'NodeSocketGeometry', 'Geometry'],
+  ['OUTPUT', 'NodeSocketGeometry', 'Geometry'],
+] as const;
+const replayCanonicalLightTrailsLinks = [
+  ['OperatingLine Center Noise', 'Value', 'OperatingLine Scale Height', 'Value'],
+  ['OperatingLine Curve To Mesh', 'Mesh', 'OperatingLine Tile Instances', 'Instance'],
+  ['OperatingLine Displace Trails', 'Geometry', 'OperatingLine Mirror Half Tile', 'Geometry'],
+  ['OperatingLine Displace Trails', 'Geometry', 'OperatingLine Mirrored Tile', 'Geometry'],
+  ['OperatingLine Half Tile Line', 'Curve', 'OperatingLine Trail Resolution', 'Curve'],
+  ['OperatingLine Loop Tiles', 'Mesh', 'OperatingLine Tile Instances', 'Points'],
+  ['OperatingLine Mirror Half Tile', 'Geometry', 'OperatingLine Mirrored Tile', 'Geometry'],
+  ['OperatingLine Mirrored Tile', 'Geometry', 'OperatingLine Curve To Mesh', 'Curve'],
+  ['OperatingLine Realize Tiles', 'Geometry', 'OperatingLine Output', 'GROUP_OUTPUT_GEOMETRY'],
+  ['OperatingLine Realize Trails', 'Geometry', 'OperatingLine Displace Trails', 'Geometry'],
+  ['OperatingLine Scale Height', 'Value', 'OperatingLine Z Offset', 'Z'],
+  ['OperatingLine Terrain Noise', 'Fac', 'OperatingLine Center Noise', 'Value'],
+  ['OperatingLine Tile Instances', 'Instances', 'OperatingLine Realize Tiles', 'Geometry'],
+  ['OperatingLine Trail Instances', 'Instances', 'OperatingLine Realize Trails', 'Geometry'],
+  ['OperatingLine Trail Position', 'Position', 'OperatingLine Terrain Noise', 'Vector'],
+  ['OperatingLine Trail Profile', 'Curve', 'OperatingLine Curve To Mesh', 'Profile Curve'],
+  ['OperatingLine Trail Resolution', 'Curve', 'OperatingLine Trail Instances', 'Instance'],
+  ['OperatingLine Trail Rows', 'Mesh', 'OperatingLine Trail Instances', 'Points'],
+  ['OperatingLine Z Offset', 'Vector', 'OperatingLine Displace Trails', 'Offset'],
+] as const;
+const replayTopologyStringSchema = z.string().min(1).max(180);
+const replayLightTrailsInterfaceItemSchema = z.array(replayTopologyStringSchema).length(3);
+const replayLightTrailsLinkItemSchema = z.array(replayTopologyStringSchema).length(4);
+function equalStringTuples(
+  actual: readonly (readonly string[])[],
+  expected: readonly (readonly string[])[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every(
+      (tuple, index) =>
+        tuple.length === expected[index]!.length &&
+        tuple.every((value, valueIndex) => value === expected[index]![valueIndex]),
+    )
+  );
+}
+const replayCanonicalLightTrailsInterfaceSchema = z
+  .array(replayLightTrailsInterfaceItemSchema)
+  .length(replayCanonicalLightTrailsInterface.length)
+  .refine((signature) => equalStringTuples(signature, replayCanonicalLightTrailsInterface), {
+    message: 'Light-trails interface must match the fixed executor interface',
+  });
+const replayCanonicalLightTrailsLinksSchema = z
+  .array(replayLightTrailsLinkItemSchema)
+  .length(replayCanonicalLightTrailsLinks.length)
+  .refine((links) => equalStringTuples(links, replayCanonicalLightTrailsLinks), {
+    message: 'Light-trails links must match the fixed executor topology',
+  });
+const replayLightTrailsSemanticParameterShape = {
+  trailCount: z.number().int().min(1).max(128),
+  pointsPerTrail: z.number().int().min(8).max(512),
+  tileLength: z.number().min(0.1).max(1000).finite(),
+  trailSpacing: z.number().min(0.0001).max(100).finite(),
+  noiseScale: z.number().min(0.0001).max(1000).finite(),
+  noiseDetail: z.number().min(0).max(15).finite(),
+  noiseRoughness: z.number().min(0).max(1).finite(),
+  noiseSeed: z.number().min(-10_000).max(10_000).finite(),
+  height: z.number().min(0).max(100).finite(),
+  profileSides: z.number().int().min(3).max(8),
+  profileRadius: z.number().min(0.0001).max(10).finite(),
+  tileRepeatCount: z.number().int().min(1).max(5),
+} as const;
+const replayLightTrailsSemanticParameterKeys = Object.keys(
+  replayLightTrailsSemanticParameterShape,
+) as (keyof typeof replayLightTrailsSemanticParameterShape)[];
+const replayLightTrailsResolvedParametersSchema = z.strictObject(
+  replayLightTrailsSemanticParameterShape,
+);
+const replayLightTrailsFailureResolvedParametersSchema = z.strictObject({
+  trailCount: z.number().int().min(0).max(1024),
+  pointsPerTrail: z.number().int().min(0).max(4096),
+  tileLength: z.number().min(-10_000).max(10_000).finite(),
+  trailSpacing: z.number().min(-1000).max(1000).finite(),
+  noiseScale: z.number().min(-10_000).max(10_000).finite(),
+  noiseDetail: z.number().min(-100).max(100).finite(),
+  noiseRoughness: z.number().min(-10).max(10).finite(),
+  noiseSeed: z.number().min(-1_000_000).max(1_000_000).finite(),
+  height: z.number().min(-1000).max(1000).finite(),
+  profileSides: z.number().int().min(0).max(64),
+  profileRadius: z.number().min(-100).max(100).finite(),
+  tileRepeatCount: z.number().int().min(0).max(64),
+});
+const replayLightTrailsParametersSchema = z
+  .strictObject({
+    targetId: replayLogicalIdSchema,
+    modifierId: replayLogicalIdSchema,
+    modifierName: replayOwnedNameSchema,
+    nodeGroupId: replayLogicalIdSchema,
+    nodeGroupName: replayOwnedNameSchema,
+    ...replayLightTrailsSemanticParameterShape,
+    nodeTypes: replayCanonicalLightTrailsNodeTypesSchema,
+  })
+  .refine(
+    (parameters) =>
+      parameters.trailCount *
+        parameters.pointsPerTrail *
+        parameters.profileSides *
+        parameters.tileRepeatCount *
+        2 <=
+      3_000_000,
+    {
+      path: ['trailCount'],
+      message: 'Light-trails evaluated vertex count must remain within executor bounds',
+    },
+  );
+type ReplayLightTrailsParameters = z.infer<typeof replayLightTrailsParametersSchema>;
+type ReplayLightTrailsResolvedParameters = z.infer<
+  typeof replayLightTrailsFailureResolvedParametersSchema
+>;
+
+function lightTrailsSemanticParametersMatch(
+  parameters: ReplayLightTrailsParameters,
+  resolvedParameters: ReplayLightTrailsResolvedParameters,
+): boolean {
+  return replayLightTrailsSemanticParameterKeys.every((key) => {
+    const expected = parameters[key];
+    const actual = resolvedParameters[key];
+    return (
+      Math.abs(expected - actual) <=
+      Math.max(1e-6, 1e-6 * Math.max(Math.abs(expected), Math.abs(actual)))
+    );
+  });
+}
+const replayLightTrailsForbiddenNodeTypeSchema = z.enum([
+  'GeometryNodeBake',
+  'GeometryNodeSimulationInput',
+  'GeometryNodeSimulationOutput',
+]);
+const replayLightTrailsFailureEvidenceDetailsSchema = z
+  .strictObject({
+    parameters: replayLightTrailsParametersSchema,
+    supported: z.literal(true),
+    targetId: replayLogicalIdSchema,
+    modifierId: replayLogicalIdSchema,
+    modifierName: replayOwnedNameSchema.nullable(),
+    nodeGroupId: replayLogicalIdSchema,
+    nodeGroupName: replayOwnedNameSchema.nullable(),
+    nodeTypes: z.array(replayGeometryNodeTypeSchema).max(128),
+    interfaceSignature: z.array(replayLightTrailsInterfaceItemSchema).max(16),
+    interfaceMatches: z.boolean(),
+    linkTopology: z.array(replayLightTrailsLinkItemSchema).max(128),
+    linkTopologyMatches: z.boolean(),
+    forbiddenNodeTypes: z
+      .array(replayLightTrailsForbiddenNodeTypeSchema)
+      .max(3)
+      .refine((nodeTypes) => new Set(nodeTypes).size === nodeTypes.length),
+    bakeCount: z.number().int().min(-1).max(128),
+    bakeDirectory: z.string().max(4096).nullable(),
+    semanticSignatureMatches: z.boolean(),
+    fixedSemanticsMatch: z.boolean(),
+    resolvedParameters: replayLightTrailsFailureResolvedParametersSchema.nullable(),
+    semanticParametersMatch: z.boolean(),
+    evaluatedVertexCount: z.number().int().nonnegative().max(12_000_000),
+    expectedEvaluatedVertexCount: z.number().int().nonnegative().max(3_000_000),
+    evaluatedVertexCountMatches: z.boolean(),
+    evaluatedEdgeCount: z.number().int().nonnegative().max(12_000_000),
+    evaluatedPolygonCount: z.number().int().nonnegative().max(12_000_000),
+    evaluatedFinite: z.boolean(),
+  })
+  .superRefine((details, context) => {
+    const expectedNodeTypes = [...details.parameters.nodeTypes].sort();
+    const actualNodeTypes = [...details.nodeTypes].sort();
+    const identitiesMatch =
+      details.targetId === details.parameters.targetId &&
+      details.modifierId === details.parameters.modifierId &&
+      details.modifierName === details.parameters.modifierName &&
+      details.nodeGroupId === details.parameters.nodeGroupId &&
+      details.nodeGroupName === details.parameters.nodeGroupName;
+    const resolvedParametersMatch =
+      details.resolvedParameters !== null &&
+      lightTrailsSemanticParametersMatch(details.parameters, details.resolvedParameters);
+    const interfaceMatches = equalStringTuples(
+      details.interfaceSignature,
+      replayCanonicalLightTrailsInterface,
+    );
+    const linkTopologyMatches = equalStringTuples(
+      details.linkTopology,
+      replayCanonicalLightTrailsLinks,
+    );
+    const expectedEvaluatedVertexCount =
+      details.parameters.trailCount *
+      details.parameters.pointsPerTrail *
+      details.parameters.profileSides *
+      details.parameters.tileRepeatCount *
+      2;
+    const evaluatedVertexCountMatches =
+      details.evaluatedVertexCount === expectedEvaluatedVertexCount;
+    const actualForbiddenNodeTypes = [
+      ...new Set(
+        details.nodeTypes.filter(
+          (nodeType) => replayLightTrailsForbiddenNodeTypeSchema.safeParse(nodeType).success,
+        ),
+      ),
+    ].sort();
+    if (!equalStepIds(actualForbiddenNodeTypes, [...details.forbiddenNodeTypes].sort())) {
+      context.addIssue({
+        code: 'custom',
+        path: ['forbiddenNodeTypes'],
+        message: 'Light-trails forbidden-node evidence must match the observed node types',
+      });
+    }
+    if (details.semanticParametersMatch !== resolvedParametersMatch) {
+      context.addIssue({
+        code: 'custom',
+        path: ['semanticParametersMatch'],
+        message: 'Light-trails semantic parameter proof must match the resolved parameters',
+      });
+    }
+    if (
+      details.interfaceMatches !== interfaceMatches ||
+      details.linkTopologyMatches !== linkTopologyMatches
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['interfaceMatches'],
+        message: 'Light-trails topology proof booleans must match the observed topology',
+      });
+    }
+    if (
+      details.expectedEvaluatedVertexCount !== expectedEvaluatedVertexCount ||
+      details.evaluatedVertexCountMatches !== evaluatedVertexCountMatches
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedEvaluatedVertexCount'],
+        message: 'Light-trails vertex-count proof must match the accepted action parameters',
+      });
+    }
+    if (
+      identitiesMatch &&
+      equalStepIds(actualNodeTypes, expectedNodeTypes) &&
+      details.interfaceMatches &&
+      details.linkTopologyMatches &&
+      details.forbiddenNodeTypes.length === 0 &&
+      details.bakeCount === 0 &&
+      details.bakeDirectory === '' &&
+      details.semanticSignatureMatches &&
+      details.fixedSemanticsMatch &&
+      details.semanticParametersMatch &&
+      resolvedParametersMatch &&
+      details.evaluatedVertexCountMatches &&
+      details.evaluatedEdgeCount > 0 &&
+      details.evaluatedPolygonCount > 0 &&
+      details.evaluatedFinite
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['evaluatedFinite'],
+        message: 'A failed light-trails observation must identify at least one failed invariant',
+      });
+    }
+  });
+const replayLightTrailsEvaluationErrorDetailsSchema = z.strictObject({
+  parameters: replayLightTrailsParametersSchema,
+  supported: z.literal(true),
+  evaluationError: z.string().min(1).max(180),
+});
+const replayLightTrailsSuccessDetailsSchema = z
+  .strictObject({
+    parameters: replayLightTrailsParametersSchema,
+    supported: z.literal(true),
+    targetId: replayLogicalIdSchema,
+    modifierId: replayLogicalIdSchema,
+    modifierName: replayOwnedNameSchema,
+    nodeGroupId: replayLogicalIdSchema,
+    nodeGroupName: replayOwnedNameSchema,
+    nodeTypes: replayCanonicalLightTrailsNodeTypesSchema,
+    interfaceSignature: replayCanonicalLightTrailsInterfaceSchema,
+    interfaceMatches: z.literal(true),
+    linkTopology: replayCanonicalLightTrailsLinksSchema,
+    linkTopologyMatches: z.literal(true),
+    forbiddenNodeTypes: z.array(replayLightTrailsForbiddenNodeTypeSchema).length(0),
+    bakeCount: z.literal(0),
+    bakeDirectory: z.literal(''),
+    semanticSignatureMatches: z.literal(true),
+    fixedSemanticsMatch: z.literal(true),
+    resolvedParameters: replayLightTrailsResolvedParametersSchema,
+    semanticParametersMatch: z.literal(true),
+    evaluatedVertexCount: z.number().int().positive().max(3_000_000),
+    expectedEvaluatedVertexCount: z.number().int().positive().max(3_000_000),
+    evaluatedVertexCountMatches: z.literal(true),
+    evaluatedEdgeCount: z.number().int().positive().max(12_000_000),
+    evaluatedPolygonCount: z.number().int().positive().max(12_000_000),
+    evaluatedFinite: z.literal(true),
+  })
+  .superRefine((details, context) => {
+    const expectedNodeTypes = [...details.parameters.nodeTypes].sort();
+    const actualNodeTypes = [...details.nodeTypes].sort();
+    if (
+      details.targetId !== details.parameters.targetId ||
+      details.modifierId !== details.parameters.modifierId ||
+      details.modifierName !== details.parameters.modifierName ||
+      details.nodeGroupId !== details.parameters.nodeGroupId ||
+      details.nodeGroupName !== details.parameters.nodeGroupName ||
+      !equalStepIds(actualNodeTypes, expectedNodeTypes) ||
+      !lightTrailsSemanticParametersMatch(details.parameters, details.resolvedParameters) ||
+      details.expectedEvaluatedVertexCount !==
+        details.parameters.trailCount *
+          details.parameters.pointsPerTrail *
+          details.parameters.profileSides *
+          details.parameters.tileRepeatCount *
+          2 ||
+      details.evaluatedVertexCount !== details.expectedEvaluatedVertexCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message:
+          'Light-trails replay identities and node types must match the observation parameters',
+      });
+    }
+  });
+
+const replayCanonicalTrailMaterialNodeTypes = [
+  'ShaderNodeBsdfPrincipled',
+  'ShaderNodeMapping',
+  'ShaderNodeMixRGB',
+  'ShaderNodeOutputMaterial',
+  'ShaderNodeTexCoord',
+  'ShaderNodeTexGradient',
+  'ShaderNodeTexWave',
+  'ShaderNodeValToRGB',
+  'ShaderNodeValToRGB',
+] as const;
+const replayCanonicalFloorMaterialNodeTypes = [
+  'ShaderNodeBsdfPrincipled',
+  'ShaderNodeBump',
+  'ShaderNodeMapping',
+  'ShaderNodeOutputMaterial',
+  'ShaderNodeTexCoord',
+  'ShaderNodeTexVoronoi',
+  'ShaderNodeValToRGB',
+  'ShaderNodeValToRGB',
+] as const;
+const replayCanonicalCompositorNodeTypes = [
+  'CompositorNodeComposite',
+  'CompositorNodeGlare',
+  'CompositorNodeRLayers',
+] as const;
+const replaySceneNodeTypeSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z][A-Za-z0-9_]*$/);
+const exactNodeTypesSchema = (expected: readonly string[], label: string) =>
+  z
+    .array(replaySceneNodeTypeSchema)
+    .length(expected.length)
+    .refine((actual) => equalStepIds(actual, expected), {
+      message: `${label} node types must match the fixed executor topology`,
+    });
+const replayCanonicalTrailMaterialNodeTypesSchema = exactNodeTypesSchema(
+  replayCanonicalTrailMaterialNodeTypes,
+  'Light-trails material',
+);
+const replayCanonicalFloorMaterialNodeTypesSchema = exactNodeTypesSchema(
+  replayCanonicalFloorMaterialNodeTypes,
+  'Floor material',
+);
+const replayCanonicalCompositorNodeTypesSchema = exactNodeTypesSchema(
+  replayCanonicalCompositorNodeTypes,
+  'Compositor',
+);
+const replayColor4Schema = z.array(z.number().min(0).max(1).finite()).length(4);
+const replayScenePositionSchema = replayVector3Schema(-1000, 1000);
+const replayLightTrailsSceneParametersSchema = z
+  .strictObject({
+    collectionId: z.literal('snowman.collection'),
+    trailTargetId: replayLogicalIdSchema,
+    floorTargetId: replayLogicalIdSchema,
+    sceneId: replayLogicalIdSchema,
+    sceneName: replayOwnedNameSchema,
+    worldId: replayLogicalIdSchema,
+    worldName: replayOwnedNameSchema,
+    cameraId: replayLogicalIdSchema,
+    cameraObjectName: replayOwnedNameSchema,
+    cameraDataName: replayOwnedNameSchema,
+    controllerId: replayLogicalIdSchema,
+    controllerObjectName: replayOwnedNameSchema,
+    trailMaterialId: replayLogicalIdSchema,
+    trailMaterialName: replayOwnedNameSchema,
+    floorMaterialId: replayLogicalIdSchema,
+    floorMaterialName: replayOwnedNameSchema,
+    cameraActionId: replayLogicalIdSchema,
+    cameraActionName: replayOwnedNameSchema,
+    frameStart: z.number().int().min(0).max(99_999),
+    frameEnd: z.number().int().min(1).max(100_000),
+    cameraStart: replayScenePositionSchema,
+    cameraEnd: replayScenePositionSchema,
+    cameraTarget: replayScenePositionSchema,
+    lens: z.number().min(1).max(1000).finite(),
+    fStop: z.number().min(0.1).max(64).finite(),
+    focusDistance: z.number().min(0.001).max(1000).finite(),
+    trailBaseColor: replayColor4Schema,
+    trailGlowColor: replayColor4Schema,
+    trailEmissionStrength: z.number().min(0).max(10_000).finite(),
+    gradientRotationDegrees: z.number().min(-360).max(360).finite(),
+    gradientStart: z.number().min(0).max(1).finite(),
+    glowBandStart: z.number().min(0).max(1).finite(),
+    glowBandEnd: z.number().min(0).max(1).finite(),
+    gradientEnd: z.number().min(0).max(1).finite(),
+    waveScale: z.number().min(0.0001).max(1000).finite(),
+    floorBaseColor: replayColor4Schema,
+    floorEmissionColor: replayColor4Schema,
+    floorEmissionStrength: z.number().min(0).max(10_000).finite(),
+    floorMetallic: z.number().min(0).max(1).finite(),
+    floorVoronoiScale: z.number().min(0.0001).max(1000).finite(),
+    floorRoughnessMinimum: z.number().min(0).max(1).finite(),
+    floorRoughnessMaximum: z.number().min(0).max(1).finite(),
+    floorBumpStrength: z.number().min(0).max(100).finite(),
+    floorBumpDistance: z.number().min(0.0001).max(1000).finite(),
+    trailMaterialNodeTypes: replayCanonicalTrailMaterialNodeTypesSchema,
+    floorMaterialNodeTypes: replayCanonicalFloorMaterialNodeTypesSchema,
+    compositorNodeTypes: replayCanonicalCompositorNodeTypesSchema,
+  })
+  .superRefine((parameters, context) => {
+    const samePosition = (left: number[], right: number[]) =>
+      left.every((component, index) => component === right[index]);
+    if (parameters.frameEnd <= parameters.frameStart) {
+      context.addIssue({
+        code: 'custom',
+        path: ['frameEnd'],
+        message: 'Light-trails scene frameEnd must be greater than frameStart',
+      });
+    }
+    if (samePosition(parameters.cameraStart, parameters.cameraEnd)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['cameraEnd'],
+        message: 'Light-trails cameraEnd must differ from cameraStart',
+      });
+    }
+    if (samePosition(parameters.cameraStart, parameters.cameraTarget)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['cameraTarget'],
+        message: 'Light-trails cameraTarget must differ from cameraStart',
+      });
+    }
+    if (parameters.trailTargetId === parameters.floorTargetId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['floorTargetId'],
+        message: 'Light-trails trail and floor targets must differ',
+      });
+    }
+    if (parameters.cameraObjectName === parameters.controllerObjectName) {
+      context.addIssue({
+        code: 'custom',
+        path: ['controllerObjectName'],
+        message: 'Light-trails camera and controller object names must differ',
+      });
+    }
+    if (parameters.trailMaterialName === parameters.floorMaterialName) {
+      context.addIssue({
+        code: 'custom',
+        path: ['floorMaterialName'],
+        message: 'Light-trails trail and floor material names must differ',
+      });
+    }
+    if (!(
+      parameters.gradientStart < parameters.glowBandStart &&
+      parameters.glowBandStart < parameters.glowBandEnd &&
+      parameters.glowBandEnd < parameters.gradientEnd
+    )) {
+      context.addIssue({
+        code: 'custom',
+        path: ['gradientStart'],
+        message: 'Light-trails gradient positions must be strictly increasing',
+      });
+    }
+    if (parameters.floorRoughnessMinimum >= parameters.floorRoughnessMaximum) {
+      context.addIssue({
+        code: 'custom',
+        path: ['floorRoughnessMinimum'],
+        message: 'Floor roughness minimum must be less than its maximum',
+      });
+    }
+  });
+
+const replayLightTrailsSceneSuccessDetailsSchema = z
+  .strictObject({
+    parameters: replayLightTrailsSceneParametersSchema,
+    supported: z.literal(true),
+    shape: z.literal('managed_light_trails_scene'),
+    collectionId: replayLogicalIdSchema,
+    trailTargetId: replayLogicalIdSchema,
+    floorTargetId: replayLogicalIdSchema,
+    sceneId: replayLogicalIdSchema,
+    sceneName: replayOwnedNameSchema,
+    worldId: replayLogicalIdSchema,
+    worldName: replayOwnedNameSchema,
+    cameraId: replayLogicalIdSchema,
+    cameraObjectName: replayOwnedNameSchema,
+    cameraDataName: replayOwnedNameSchema,
+    controllerId: replayLogicalIdSchema,
+    controllerObjectName: replayOwnedNameSchema,
+    trailMaterialId: replayLogicalIdSchema,
+    trailMaterialName: replayOwnedNameSchema,
+    floorMaterialId: replayLogicalIdSchema,
+    floorMaterialName: replayOwnedNameSchema,
+    cameraActionId: replayLogicalIdSchema,
+    cameraActionName: replayOwnedNameSchema,
+    sceneMatches: z.literal(true),
+    collectionMatches: z.literal(true),
+    worldMatches: z.literal(true),
+    cameraMatches: z.literal(true),
+    controllerMatches: z.literal(true),
+    animationMatches: z.literal(true),
+    trailMaterialMatches: z.literal(true),
+    floorMaterialMatches: z.literal(true),
+    compositorMatches: z.literal(true),
+    noBakeNodes: z.literal(true),
+    noRenderArtifacts: z.literal(true),
+    frameStart: z.number().int().min(0).max(99_999),
+    frameEnd: z.number().int().min(1).max(100_000),
+    cameraKeyframeCount: z.literal(6),
+    trailMaterialNodeTypes: replayCanonicalTrailMaterialNodeTypesSchema,
+    floorMaterialNodeTypes: replayCanonicalFloorMaterialNodeTypesSchema,
+    compositorNodeTypes: replayCanonicalCompositorNodeTypesSchema,
+  })
+  .superRefine((details, context) => {
+    const identityKeys = [
+      'collectionId',
+      'trailTargetId',
+      'floorTargetId',
+      'sceneId',
+      'sceneName',
+      'worldId',
+      'worldName',
+      'cameraId',
+      'cameraObjectName',
+      'cameraDataName',
+      'controllerId',
+      'controllerObjectName',
+      'trailMaterialId',
+      'trailMaterialName',
+      'floorMaterialId',
+      'floorMaterialName',
+      'cameraActionId',
+      'cameraActionName',
+      'frameStart',
+      'frameEnd',
+      'trailMaterialNodeTypes',
+      'floorMaterialNodeTypes',
+      'compositorNodeTypes',
+    ] as const;
+    if (identityKeys.some((key) => !equalStepIdsOrValue(details[key], details.parameters[key]))) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Light-trails scene replay details must match the accepted parameters',
+      });
+    }
+  });
+
+function equalStepIdsOrValue(left: unknown, right: unknown): boolean {
+  return Array.isArray(left) && Array.isArray(right)
+    ? equalStepIds(left as string[], right as string[])
+    : left === right;
+}
 
 const replayReplacementMeshBaseParametersShape = {
   targetId: replayLogicalIdSchema,
@@ -1023,7 +1772,41 @@ const replayGrewDetailsSchema = (
     });
 
 const replaySubdivideDetailsSchema = replayGrewDetailsSchema(replaySubdivideParametersSchema);
-const replayExtrudeDetailsSchema = replayGrewDetailsSchema(replayExtrudeParametersSchema);
+const replayExtrudeDetailsSchema = z
+  .strictObject({
+    parameters: replayExtrudeParametersSchema,
+    ...replayReplacementMeshDetailsShape,
+    topologyGrew: z.literal(true),
+    selectedFaceCount: z.number().int().positive().max(256),
+    selectedEdgeCount: replayEdgeCountSchema,
+    selectedVertexCount: replayVertexCountSchema,
+    boundaryEdgeCount: replayEdgeCountSchema,
+    expectedVertexCount: replayVertexCountSchema,
+    expectedEdgeCount: replayEdgeCountSchema,
+    expectedFaceCount: replayFaceCountSchema,
+  })
+  .superRefine((details, context) => {
+    validateReplacementMeshIdentity(details, context);
+    if (
+      details.selectedFaceCount !== details.parameters.polygonIndices.length ||
+      details.selectedEdgeCount <= 0 ||
+      details.selectedVertexCount <= 0 ||
+      details.boundaryEdgeCount <= 0 ||
+      details.expectedVertexCount !== details.sourceVertexCount + details.selectedVertexCount ||
+      details.expectedEdgeCount !==
+        details.sourceEdgeCount + details.selectedEdgeCount + details.boundaryEdgeCount ||
+      details.expectedFaceCount !== details.sourceFaceCount + details.boundaryEdgeCount ||
+      details.vertexCount !== details.expectedVertexCount ||
+      details.edgeCount !== details.expectedEdgeCount ||
+      details.faceCount !== details.expectedFaceCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['vertexCount'],
+        message: 'Extrude replay topology must satisfy the exact selected-region formula',
+      });
+    }
+  });
 const replayBevelDetailsSchema = replayGrewDetailsSchema(replayBevelParametersSchema);
 const replayTriangulateDetailsSchema = z
   .strictObject({
@@ -1031,8 +1814,29 @@ const replayTriangulateDetailsSchema = z
     ...replayReplacementMeshDetailsShape,
     nonempty: z.literal(true),
     allTriangles: z.literal(true),
+    sourceLoopCount: z.number().int().positive().max(32768),
+    expectedVertexCount: replayVertexCountSchema,
+    expectedEdgeCount: replayEdgeCountSchema,
+    expectedFaceCount: replayFaceCountSchema,
   })
-  .superRefine(validateReplacementMeshIdentity);
+  .superRefine((details, context) => {
+    validateReplacementMeshIdentity(details, context);
+    if (
+      details.expectedVertexCount !== details.sourceVertexCount ||
+      details.expectedEdgeCount !==
+        details.sourceEdgeCount + details.sourceLoopCount - 3 * details.sourceFaceCount ||
+      details.expectedFaceCount !== details.sourceLoopCount - 2 * details.sourceFaceCount ||
+      details.vertexCount !== details.expectedVertexCount ||
+      details.edgeCount !== details.expectedEdgeCount ||
+      details.faceCount !== details.expectedFaceCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedVertexCount'],
+        message: 'Triangulate replay counts must match the source-loop topology proof',
+      });
+    }
+  });
 
 const replayInsetDetailsSchema = z
   .strictObject({
@@ -1278,12 +2082,45 @@ const replaySkinWeightsDetailsSchema = z
     }
   });
 
-const replayPoseSchema = z.strictObject({
+const replayEulerPoseSchema = z.strictObject({
   boneName: replayOwnedNameSchema,
   rotationEuler: replayVector3Schema(-2 * Math.PI, 2 * Math.PI),
   location: replayVector3Schema(-1000, 1000).optional(),
   scale: replayVector3Schema(0.0001, 1000).optional(),
 });
+const replayQuaternionPoseSchema = z.strictObject({
+  boneName: replayOwnedNameSchema,
+  rotationQuaternion: z
+    .array(z.number().finite().min(-1).max(1))
+    .length(4)
+    .refine((value) => Math.abs(Math.hypot(...value) - 1) <= 1e-6, {
+      message: 'Pose quaternion must have unit length',
+    }),
+  location: replayVector3Schema(-1000, 1000).optional(),
+  scale: replayVector3Schema(0.0001, 1000).optional(),
+});
+const replayAxisAnglePoseSchema = z.strictObject({
+  boneName: replayOwnedNameSchema,
+  rotationAxisAngle: z
+    .array(
+      z
+        .number()
+        .finite()
+        .min(-2 * Math.PI)
+        .max(2 * Math.PI),
+    )
+    .length(4)
+    .refine((value) => Math.abs(Math.hypot(value[1]!, value[2]!, value[3]!) - 1) <= 1e-6, {
+      message: 'Pose axis-angle axis must have unit length',
+    }),
+  location: replayVector3Schema(-1000, 1000).optional(),
+  scale: replayVector3Schema(0.0001, 1000).optional(),
+});
+const replayPoseSchema = z.union([
+  replayEulerPoseSchema,
+  replayQuaternionPoseSchema,
+  replayAxisAnglePoseSchema,
+]);
 const replayKeyframeSchema = z
   .strictObject({
     frame: z.number().int().min(1).max(100_000),
@@ -1319,6 +2156,28 @@ const replayPoseAnimationParametersSchema = z
         message: 'Pose replay IDs must differ and frames must strictly increase',
       });
     }
+    type RotationChannel = 'rotationEuler' | 'rotationQuaternion' | 'rotationAxisAngle';
+    const rotationChannelByBone = new Map<string, RotationChannel>();
+    for (const keyframe of parameters.keyframes) {
+      for (const pose of keyframe.poses) {
+        const channel: RotationChannel =
+          'rotationEuler' in pose
+            ? 'rotationEuler'
+            : 'rotationQuaternion' in pose
+              ? 'rotationQuaternion'
+              : 'rotationAxisAngle';
+        const previous = rotationChannelByBone.get(pose.boneName);
+        if (previous !== undefined && previous !== channel) {
+          context.addIssue({
+            code: 'custom',
+            path: ['keyframes'],
+            message: `Pose bone ${pose.boneName} cannot mix rotation channels`,
+          });
+          return;
+        }
+        rotationChannelByBone.set(pose.boneName, channel);
+      }
+    }
   });
 const replayPoseAnimationDetailsSchema = z
   .strictObject({
@@ -1332,8 +2191,8 @@ const replayPoseAnimationDetailsSchema = z
     assigned: z.literal(true),
     frameRange: z.array(z.number().min(1).max(100_000).finite()).length(2),
     expectedFrameRange: z.array(z.number().min(1).max(100_000).finite()).length(2),
-    curveCount: z.number().int().positive().max(288),
-    expectedCurveCount: z.number().int().positive().max(288),
+    curveCount: z.number().int().positive().max(320),
+    expectedCurveCount: z.number().int().positive().max(320),
     curvesMatch: z.literal(true),
     valuesMatch: z.literal(true),
     interpolationMatches: z.literal(true),
@@ -1346,16 +2205,25 @@ const replayPoseAnimationDetailsSchema = z
   })
   .superRefine((details, context) => {
     const frames = details.parameters.keyframes.map((keyframe) => keyframe.frame);
-    const curveKeys = new Set<string>();
+    const curveComponents = new Map<string, number>();
     for (const keyframe of details.parameters.keyframes) {
       for (const pose of keyframe.poses) {
-        curveKeys.add(`${pose.boneName}:rotationEuler`);
-        if (pose.location !== undefined) curveKeys.add(`${pose.boneName}:location`);
-        if (pose.scale !== undefined) curveKeys.add(`${pose.boneName}:scale`);
+        if ('rotationEuler' in pose) {
+          curveComponents.set(`${pose.boneName}:rotationEuler`, 3);
+        } else if ('rotationQuaternion' in pose) {
+          curveComponents.set(`${pose.boneName}:rotationQuaternion`, 4);
+        } else {
+          curveComponents.set(`${pose.boneName}:rotationAxisAngle`, 4);
+        }
+        if (pose.location !== undefined) curveComponents.set(`${pose.boneName}:location`, 3);
+        if (pose.scale !== undefined) curveComponents.set(`${pose.boneName}:scale`, 3);
       }
     }
     const expectedRange = [frames[0]!, frames.at(-1)!];
-    const expectedCurveCount = curveKeys.size * 3;
+    const expectedCurveCount = Array.from(curveComponents.values()).reduce(
+      (total, components) => total + components,
+      0,
+    );
     if (
       details.armatureId !== details.parameters.armatureId ||
       details.actionId !== details.parameters.actionId ||
@@ -1418,9 +2286,17 @@ const procedureLeafReplayModifierObservationSchema = companionObservationSchema.
   kind: z.literal('modifier_ready'),
   satisfied: z.literal(true),
   details: z.union([
+    procedureLeafReplaySubdivisionSurfaceDetailsSchema,
     procedureLeafReplaySolidifyDetailsSchema,
+    procedureLeafReplayBevelModifierDetailsSchema,
     procedureLeafReplayMirrorDetailsSchema,
   ]),
+});
+
+const procedureLeafReplaySingleMaterialObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('material_assigned'),
+  satisfied: z.literal(true),
+  details: procedureLeafReplaySingleMaterialDetailsSchema,
 });
 
 const procedureLeafReplaySubdivideObservationSchema = companionObservationSchema.safeExtend({
@@ -1468,6 +2344,58 @@ const procedureLeafReplayPoseAnimationObservationSchema = companionObservationSc
   satisfied: z.literal(true),
   details: replayPoseAnimationDetailsSchema,
 });
+const replayTransformGeometryNodeTypesSchema = z.tuple([
+  z.literal('GeometryNodeTransform'),
+  z.literal('NodeGroupInput'),
+  z.literal('NodeGroupOutput'),
+]);
+const replayTransformGeometryParametersSchema = z.strictObject({
+  targetId: guideStepIdSchema,
+  modifierId: guideStepIdSchema,
+  nodeGroupId: guideStepIdSchema,
+  nodeTypes: replayTransformGeometryNodeTypesSchema,
+});
+const replayTransformGeometrySuccessDetailsSchema = z
+  .strictObject({
+    parameters: replayTransformGeometryParametersSchema,
+    supported: z.literal(true),
+    targetId: guideStepIdSchema,
+    modifierId: guideStepIdSchema,
+    nodeGroupId: guideStepIdSchema,
+    nodeTypes: replayTransformGeometryNodeTypesSchema,
+  })
+  .superRefine((details, context) => {
+    if (
+      details.targetId !== details.parameters.targetId ||
+      details.modifierId !== details.parameters.modifierId ||
+      details.nodeGroupId !== details.parameters.nodeGroupId ||
+      !equalStepIds(details.nodeTypes, details.parameters.nodeTypes)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message:
+          'Transform Geometry replay details must match the exact observed resources and nodes',
+      });
+    }
+  });
+const procedureLeafReplayTransformGeometryObservationSchema = companionObservationSchema.safeExtend(
+  {
+    kind: z.literal('geometry_nodes_ready'),
+    satisfied: z.literal(true),
+    details: replayTransformGeometrySuccessDetailsSchema,
+  },
+);
+const procedureLeafReplayLightTrailsObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('light_trails_ready'),
+  satisfied: z.literal(true),
+  details: replayLightTrailsSuccessDetailsSchema,
+});
+const procedureLeafReplayLightTrailsSceneObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('light_trails_scene_ready'),
+  satisfied: z.literal(true),
+  details: replayLightTrailsSceneSuccessDetailsSchema,
+});
 
 export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind', [
   procedureLeafReplayUvSphereObservationSchema,
@@ -1484,9 +2412,13 @@ export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind',
   procedureLeafReplayInsetObservationSchema,
   procedureLeafReplayPokeObservationSchema,
   procedureLeafReplayModifierObservationSchema,
+  procedureLeafReplaySingleMaterialObservationSchema,
   procedureLeafReplayArmatureObservationSchema,
   procedureLeafReplaySkinWeightsObservationSchema,
   procedureLeafReplayPoseAnimationObservationSchema,
+  procedureLeafReplayTransformGeometryObservationSchema,
+  procedureLeafReplayLightTrailsObservationSchema,
+  procedureLeafReplayLightTrailsSceneObservationSchema,
 ]);
 export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 
@@ -1509,7 +2441,7 @@ const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
   completedStepIds: procedureLeafReplayStepIdPrefixSchema.min(1),
   transition: z.literal('step_succeeded'),
   stepId: guideStepIdSchema,
-  observations: z.array(procedureLeafReplayObservationSchema).length(1),
+  observations: z.array(procedureLeafReplayObservationSchema).min(1).max(8),
   observationGate: z.null(),
   artifactAttestation: z.null(),
   nativeUndoCheckpoint: companionNativeUndoCheckpointSchema.optional(),
@@ -1570,7 +2502,7 @@ const procedureLeafReplayAuthorizationSchema = z
 
 const procedureLeafReplaySuccessGateSchema = z
   .strictObject({
-    observations: z.array(procedureLeafReplayObservationSchema).length(1),
+    observations: z.array(procedureLeafReplayObservationSchema).min(1).max(8),
     allSatisfied: z.literal(true),
   })
   .superRefine((gate, context) => {
@@ -1615,10 +2547,9 @@ export const procedureLeafReplayAttestationSchema = procedureLeafReplayAttestati
   .safeExtend({ integrity: replayIntegritySchema })
   .superRefine((attestation, context) => {
     const { authorization, decision, report, execution } = attestation;
-    const observation = report.observations[0];
     const expectedObservationKind =
       procedureLeafReplayObservationKindByAction[execution.action.name];
-    if (observation?.kind !== expectedObservationKind) {
+    if (report.observations.some((observation) => observation.kind !== expectedObservationKind)) {
       context.addIssue({
         code: 'custom',
         path: ['report', 'observations'],
@@ -1733,9 +2664,26 @@ export function computeProcedureLeafReplayAttestationContentSha256(
   return computeContentSha256(withoutIntegrity(attestation));
 }
 
-const procedureLeafReplayFailedObservationSchema = companionObservationSchema.safeExtend({
-  satisfied: z.literal(false),
-});
+const procedureLeafReplayLightTrailsFailedObservationSchema = companionObservationSchema.safeExtend(
+  {
+    kind: z.literal('light_trails_ready'),
+    satisfied: z.literal(false),
+    details: z.union([
+      replayLightTrailsFailureEvidenceDetailsSchema,
+      replayLightTrailsEvaluationErrorDetailsSchema,
+    ]),
+  },
+);
+const procedureLeafReplayOtherFailedObservationSchema = companionObservationSchema
+  .safeExtend({ satisfied: z.literal(false) })
+  .refine((observation) => observation.kind !== 'light_trails_ready', {
+    path: ['kind'],
+    message: 'Light-trails failures require the strong light-trails failure contract',
+  });
+export const procedureLeafReplayFailedObservationSchema = z.union([
+  procedureLeafReplayLightTrailsFailedObservationSchema,
+  procedureLeafReplayOtherFailedObservationSchema,
+]);
 
 const procedureLeafReplayFailedGateSchema = companionObservationGateSchema.safeExtend({
   status: z.enum(['failed_rolled_back', 'repair_required', 'rollback_failed']),
@@ -1758,7 +2706,7 @@ const procedureLeafReplayFailureReportSchema = companionStateReportSchema.safeEx
   completedStepIds: procedureLeafReplayStepIdPrefixSchema,
   transition: z.literal('step_observation_failed'),
   stepId: guideStepIdSchema,
-  observations: z.array(procedureLeafReplayFailedObservationSchema).length(1),
+  observations: z.array(procedureLeafReplayFailedObservationSchema).min(1).max(8),
   observationGate: procedureLeafReplayFailedGateSchema,
   artifactAttestation: z.null(),
   error: z.null(),
@@ -1778,7 +2726,7 @@ const procedureLeafReplayRecoveryReportSchema = companionStateReportSchema.safeE
   completedStepIds: procedureLeafReplayStepIdPrefixSchema.min(1),
   transition: z.literal('observation_recovered'),
   stepId: guideStepIdSchema,
-  observations: z.array(procedureLeafReplayObservationSchema).length(1),
+  observations: z.array(procedureLeafReplayObservationSchema).min(1).max(8),
   observationGate: procedureLeafReplayRecoveredGateSchema,
   artifactAttestation: z.null(),
   nativeUndoCheckpoint: companionNativeUndoCheckpointSchema,
@@ -1963,9 +2911,13 @@ export const procedureLeafReplayFailureRecoveryAttestationSchema =
       const expectedObservationKind =
         procedureLeafReplayObservationKindByAction[execution.action.name];
       if (
-        failureReport.observations[0]?.kind !== expectedObservationKind ||
-        recoveryReport?.observations[0]?.kind !==
-          (recoveryReport === null ? undefined : expectedObservationKind)
+        failureReport.observations.some(
+          (observation) => observation.kind !== expectedObservationKind,
+        ) ||
+        (recoveryReport !== null &&
+          recoveryReport.observations.some(
+            (observation) => observation.kind !== expectedObservationKind,
+          ))
       ) {
         context.addIssue({
           code: 'custom',
@@ -2219,11 +3171,16 @@ export const procedureLeafReplayCurrentStateVerificationSchema =
         checkpoint.session.activeStepId === request.stepId &&
         equalStepIds(checkpoint.session.completedStepIds, request.expectedCompletedStepIds) &&
         equalStepIds(checkpoint.session.receiptStepIds, request.expectedReceiptStepIds);
+      const observationContent =
+        report.observations.length === 1 ? report.observations[0] : report.observations;
       const observationMatches =
-        report.observations.length === 1 &&
-        report.observations[0]?.kind === request.expectedObservation.kind &&
-        report.observations[0]?.satisfied === true &&
-        computeContentSha256(report.observations[0]) === request.expectedObservation.contentSha256;
+        report.observations.length >= 1 &&
+        report.observations.length <= 8 &&
+        report.observations.every(
+          (observation) =>
+            observation.kind === request.expectedObservation.kind && observation.satisfied === true,
+        ) &&
+        computeContentSha256(observationContent) === request.expectedObservation.contentSha256;
       const sessionMatches =
         report.plan?.id === request.plan.id &&
         report.plan?.revision === request.plan.revision &&

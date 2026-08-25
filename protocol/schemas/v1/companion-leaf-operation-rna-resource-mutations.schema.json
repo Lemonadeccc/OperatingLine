@@ -1,0 +1,272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 3,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.new_geometry_modifier"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.new_geometry_modifier"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_node_group_create"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "node_group_create"
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeTreeType": {
+            "type": "string",
+            "const": "GeometryNodeTree"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Geometry Nodes"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "targetId",
+          "order",
+          "executionMethod",
+          "mutationKind",
+          "nodeGroupId",
+          "nodeGroupName",
+          "nodeTreeType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.new_geometry_modifier"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.new_geometry_modifier"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_modifier_create"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "modifier_create"
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierType": {
+            "type": "string",
+            "const": "NODES"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "required": [
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "targetId",
+          "order",
+          "executionMethod",
+          "mutationKind",
+          "modifierId",
+          "modifierName",
+          "modifierType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.new_geometry_modifier"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.new_geometry_modifier"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 3
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_modifier_node_group_bind"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "modifier_node_group_bind"
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedBinding": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Node Group"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "targetId",
+          "order",
+          "executionMethod",
+          "mutationKind",
+          "modifierId",
+          "modifierName",
+          "nodeGroupId",
+          "nodeGroupName",
+          "observedBinding",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Light Trails node-group create, modifier create, and node-group binding order plus cross-record resource identity require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-rna-resource-mutations.json"
+}

@@ -1,0 +1,2761 @@
+{
+  "protocolVersion": "1.1.0",
+  "catalogVersion": "1.25.0",
+  "adapterId": "blender",
+  "adapterVersionRange": ">=0.1.0 <0.2.0",
+  "hostVersionRange": ">=4.5.0 <5.2.0",
+  "title": "OperatingLine Blender action catalog",
+  "description": "Allowlisted deterministic Blender actions implemented by the OperatingLine 0.1 Companion.",
+  "planningNotes": [
+    "Use only actions present in this catalog; arbitrary Python, bpy expressions, screen coordinates, and unlisted Blender operators are unsupported.",
+    "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
+    "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
+    "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide, Triangulate, Bevel Edges, Individual Inset Faces, and Poke Faces edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel, Solidify, Subdivision Surface, and Mirror modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with per-bone Euler or unit-quaternion rotation channels and bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. A bone must use one rotation channel consistently across its authored frames. Triangulate, Extrude Region, Bevel Edges, Individual Inset Faces, and Poke Faces require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Bevel Edges processes every edge of one closed manifold mesh, with width 0.0001..100, segments 1..16, and profile 0..1. Individual Inset Faces processes every face of one closed, nondegenerate manifold mesh with thickness 0.0001..100 and depth -100..100; for source topology V/E/F its result must be exactly V+2E vertices, 5E edges, and F+2E polygons. Poke Faces processes every face of one closed, nondegenerate manifold mesh with offset -100..100 and fixed use_relative_offset=false and center_mode=MEAN_WEIGHTED; for source topology V/E/F with L face loops its result must be exactly V+F vertices, E+L edges, and L triangle polygons. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Subdivision Surface also requires a receipt-tracked stack, rejects an existing SUBSURF modifier, bounds projected evaluated topology, and fixes subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3. Mirror requires Object Mode, no shape keys, a receipt-tracked modifier stack with no existing MIRROR modifier, and bounded source, evaluated input, projected, and actual evaluated topology; it enables exactly one requested local axis and fixes use_bisect_axis and use_bisect_flip_axis false on every axis, use_clip=false, use_mirror_merge=true, merge_threshold=0.001, bisect_threshold=0.001, mirror_object=null, use_mirror_vertex_groups=true, use_mirror_udim=false, use_mirror_u=false, use_mirror_v=false, offset_u=0, offset_v=0, mirror_offset_u=0, mirror_offset_v=0, show_viewport=true, show_render=true, show_in_editmode=true, show_on_cage=false, and use_apply_on_spline=false where the host exposes it. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
+    "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
+  ],
+  "planningPhases": [
+    {
+      "id": "geometry",
+      "order": 1,
+      "title": "Geometry",
+      "description": "Create and refine the model with bounded primitives, mesh edits, modifiers, and Geometry Nodes.",
+      "selectionGuidance": "Select for every object-building goal; create owned geometry before any edit, modifier, or node action that targets it.",
+      "actionNames": [
+        "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_icosphere",
+        "blender.mesh.create_plane",
+        "blender.mesh.create_cube",
+        "blender.mesh.create_cone",
+        "blender.mesh.create_cylinder",
+        "blender.mesh.create_torus",
+        "blender.mesh.create_primitive_batch",
+        "blender.mesh.edit_subdivide",
+        "blender.mesh.edit_triangulate",
+        "blender.mesh.edit_extrude_region",
+        "blender.mesh.edit_bevel_edges",
+        "blender.mesh.edit_inset_faces",
+        "blender.mesh.edit_poke_faces",
+        "blender.modifier.add_bevel",
+        "blender.modifier.add_solidify",
+        "blender.modifier.add_subdivision_surface",
+        "blender.modifier.add_mirror",
+        "blender.geometry_nodes.create_transform",
+        "blender.geometry_nodes.create_light_trails"
+      ]
+    },
+    {
+      "id": "materials",
+      "order": 2,
+      "title": "Materials",
+      "description": "Create and assign visible Principled material properties to owned model parts.",
+      "selectionGuidance": "Select when the goal specifies appearance, color, roughness, or metallic response.",
+      "actionNames": [
+        "blender.material.create_and_assign",
+        "blender.material.create_palette_and_assign"
+      ]
+    },
+    {
+      "id": "animation",
+      "order": 3,
+      "title": "Rig and animation",
+      "description": "Create a bounded armature, optional explicit deform weights, and pose transform keyframes for owned parts.",
+      "selectionGuidance": "Select only when the goal requests motion or a reusable pose. Use explicit skin weights only for bounded meshes; automatic weights remain unsupported.",
+      "actionNames": [
+        "blender.rig.create_armature",
+        "blender.rig.bind_skin_weights",
+        "blender.animation.create_pose_keyframes"
+      ]
+    },
+    {
+      "id": "render_setup",
+      "order": 4,
+      "title": "Render setup",
+      "description": "Create an isolated scene, world, lighting, and camera for the owned collection.",
+      "selectionGuidance": "Select before output whenever the goal asks for a rendered preview or controlled presentation.",
+      "actionNames": [
+        "blender.render_scene.create",
+        "blender.render_rig.create",
+        "blender.lookdev.create_light_trails_scene"
+      ]
+    },
+    {
+      "id": "output",
+      "order": 5,
+      "title": "Output",
+      "description": "Render a managed PNG preview from the prepared scene.",
+      "selectionGuidance": "Select when the goal asks for an image result; render_setup must also be selected.",
+      "actionNames": ["blender.render.execute_preview"]
+    }
+  ],
+  "semanticCapabilities": [
+    {
+      "id": "geometry.ground_plane",
+      "title": "Ground plane",
+      "description": "Create an owned planar surface that grounds the visible assembly.",
+      "selectionGuidance": "Select when the goal needs a floor, stage, or other flat supporting surface.",
+      "actionNames": ["blender.mesh.create_plane"]
+    },
+    {
+      "id": "geometry.primitive_assembly",
+      "title": "Primitive assembly",
+      "description": "Construct an owned model from supported cube, UV-sphere, Icosphere, cone, cylinder, and torus primitives.",
+      "selectionGuidance": "Select when the requested form can be represented by individual supported primitives or an intentionally atomic bounded batch.",
+      "actionNames": [
+        "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_icosphere",
+        "blender.mesh.create_cube",
+        "blender.mesh.create_cone",
+        "blender.mesh.create_cylinder",
+        "blender.mesh.create_torus",
+        "blender.mesh.create_primitive_batch"
+      ]
+    },
+    {
+      "id": "geometry.edit_subdivide",
+      "title": "Bounded Edit Mode subdivision",
+      "description": "Replace an owned object's mesh data with one deterministic whole-mesh subdivision result.",
+      "selectionGuidance": "Select when the goal needs uniformly denser topology before later modifiers or deformation.",
+      "actionNames": ["blender.mesh.edit_subdivide"]
+    },
+    {
+      "id": "geometry.edit_triangulate",
+      "title": "Bounded Edit Mode triangulation",
+      "description": "Replace an owned object's mesh data with one deterministic whole-mesh triangulation result.",
+      "selectionGuidance": "Select when the goal requires explicit triangle topology before later export, deformation, or rendering work.",
+      "actionNames": ["blender.mesh.edit_triangulate"]
+    },
+    {
+      "id": "geometry.edit_extrude_region",
+      "title": "Bounded Edit Mode region extrusion",
+      "description": "Replace an owned object's mesh data with one deterministic extrusion of an explicit edge-connected face region.",
+      "selectionGuidance": "Select when the goal requires extending one known face region by an explicit local-space translation.",
+      "actionNames": ["blender.mesh.edit_extrude_region"]
+    },
+    {
+      "id": "geometry.edit_bevel_edges",
+      "title": "Bounded Edit Mode edge bevel",
+      "description": "Replace an owned object's mesh data with one deterministic whole-mesh bevel of every edge on a closed manifold surface.",
+      "selectionGuidance": "Select when the goal requires destructive rounded or chamfered edges across one complete closed manifold mesh.",
+      "actionNames": ["blender.mesh.edit_bevel_edges"]
+    },
+    {
+      "id": "geometry.edit_inset_faces",
+      "title": "Bounded Edit Mode individual face inset",
+      "description": "Replace an owned object's mesh data with one deterministic individual inset of every face on a closed, nondegenerate manifold surface.",
+      "selectionGuidance": "Select when the goal requires a separate inset region on every face of one complete closed manifold mesh.",
+      "actionNames": ["blender.mesh.edit_inset_faces"]
+    },
+    {
+      "id": "geometry.edit_poke_faces",
+      "title": "Bounded Edit Mode face poking",
+      "description": "Replace an owned object's mesh data with one deterministic whole-mesh Poke Faces result.",
+      "selectionGuidance": "Select when the goal requires every source face to be replaced by triangles around one weighted center vertex.",
+      "actionNames": ["blender.mesh.edit_poke_faces"]
+    },
+    {
+      "id": "geometry.bevel_modifier",
+      "title": "Bevel modifier",
+      "description": "Add one owned, parameterized Bevel modifier to an earlier mesh object.",
+      "selectionGuidance": "Select when the requested form needs nondestructive rounded edges.",
+      "actionNames": ["blender.modifier.add_bevel"]
+    },
+    {
+      "id": "geometry.solidify_modifier",
+      "title": "Solidify modifier",
+      "description": "Add one owned, parameterized Solidify modifier to an earlier mesh object within the bounded topology limit.",
+      "selectionGuidance": "Select when the requested form needs nondestructive wall thickness from an existing surface.",
+      "actionNames": ["blender.modifier.add_solidify"]
+    },
+    {
+      "id": "geometry.subdivision_surface_modifier",
+      "title": "Subdivision Surface modifier",
+      "description": "Add one owned, bounded Subdivision Surface modifier to an earlier mesh object.",
+      "selectionGuidance": "Select when the requested form needs nondestructive Catmull-Clark smoothing with an explicit viewport level and fixed render level 2.",
+      "actionNames": ["blender.modifier.add_subdivision_surface"]
+    },
+    {
+      "id": "geometry.mirror_modifier",
+      "title": "Mirror modifier",
+      "description": "Add one owned, bounded Mirror modifier to an earlier mesh object.",
+      "selectionGuidance": "Select when the requested form needs nondestructive symmetry across exactly one local object axis.",
+      "actionNames": ["blender.modifier.add_mirror"]
+    },
+    {
+      "id": "geometry_nodes.transform",
+      "title": "Geometry Nodes transform",
+      "description": "Create one owned Transform Geometry node group and attach it through a Geometry Nodes modifier.",
+      "selectionGuidance": "Select when the goal benefits from an inspectable procedural translation, rotation, or scale stage.",
+      "actionNames": ["blender.geometry_nodes.create_transform"]
+    },
+    {
+      "id": "geometry_nodes.light_trails",
+      "title": "Geometry Nodes light trails",
+      "description": "Create one bounded procedural graph of displaced curve rows, a mirrored seamless tile, repeated tiles, and Curve to Mesh output without simulation or bake nodes.",
+      "selectionGuidance": "Select when the goal needs inspectable topographic or light-trail curves that repeat over a fixed tile length without any disk bake.",
+      "actionNames": ["blender.geometry_nodes.create_light_trails"]
+    },
+    {
+      "id": "lookdev.light_trails_scene",
+      "title": "Light-trails look development scene",
+      "description": "Configure an owned scene, world, animated camera rig, emissive curve-gradient material, procedural floor material, and Fog Glow compositor for an existing light-trails object without baking, rendering, or exporting.",
+      "selectionGuidance": "Select after light-trails geometry and a floor target exist when the goal needs an editable cinematic look-development scene and camera animation but no rendered artifact.",
+      "actionNames": ["blender.lookdev.create_light_trails_scene"]
+    },
+    {
+      "id": "appearance.principled_palette",
+      "title": "Principled material palette",
+      "description": "Create and assign owned Principled materials with explicit visible surface properties.",
+      "selectionGuidance": "Select when the goal specifies color, roughness, metallic response, or a reusable material palette.",
+      "actionNames": [
+        "blender.material.create_and_assign",
+        "blender.material.create_palette_and_assign"
+      ]
+    },
+    {
+      "id": "animation.rigid_armature",
+      "title": "Rigid armature",
+      "description": "Create and bind an owned rigid armature for supported object parts.",
+      "selectionGuidance": "Select when owned parts need a reusable rigid hierarchy for posing or animation.",
+      "actionNames": ["blender.rig.create_armature"]
+    },
+    {
+      "id": "animation.deform_skin_weights",
+      "title": "Explicit deform skin weights",
+      "description": "Bind every vertex of an owned bounded mesh to an owned armature with normalized explicit weights and an Armature modifier.",
+      "selectionGuidance": "Select when the goal needs inspectable mesh deformation and the provider can declare complete per-vertex weights; never infer or auto-generate weights.",
+      "actionNames": ["blender.rig.bind_skin_weights"]
+    },
+    {
+      "id": "animation.rigid_pose_keyframes",
+      "title": "Pose transform keyframes",
+      "description": "Author explicit rotation plus optional location and scale keyframes for an owned armature with bounded interpolation.",
+      "selectionGuidance": "Select when the goal requests bounded rigid or deform motion at named frames.",
+      "actionNames": ["blender.animation.create_pose_keyframes"]
+    },
+    {
+      "id": "render.scene_setup",
+      "title": "Render scene setup",
+      "description": "Prepare an isolated owned render scene with world, lighting, camera, and collection linkage.",
+      "selectionGuidance": "Select before rendered output whenever the goal needs controlled presentation.",
+      "actionNames": ["blender.render_scene.create", "blender.render_rig.create"]
+    },
+    {
+      "id": "output.png_preview",
+      "title": "PNG preview output",
+      "description": "Render a managed PNG preview artifact from the prepared scene.",
+      "selectionGuidance": "Select when the goal asks for a rendered image or preview artifact.",
+      "actionNames": ["blender.render.execute_preview"]
+    }
+  ],
+  "actions": [
+    {
+      "name": "blender.mesh.create_uv_sphere",
+      "title": "Create one UV sphere",
+      "description": "Creates one owned UV sphere mesh object in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["resourceId", "objectName", "radius", "location"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "radius": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Sphere radius in Blender units."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "uv_sphere_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_icosphere",
+      "title": "Create one Icosphere",
+      "description": "Creates one owned subdivided Icosphere mesh object in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["resourceId", "objectName", "subdivisions", "radius", "location"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "subdivisions": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Subdivision level; capped below Blender's native limit to bound mesh size."
+          },
+          "radius": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Icosphere radius in Blender units."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "icosphere_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_plane",
+      "title": "Create one plane",
+      "description": "Creates one owned square plane mesh object in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["resourceId", "objectName", "size", "location"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "size": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Full edge length in Blender units."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "plane_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_cube",
+      "title": "Create one cube",
+      "description": "Creates one owned cube mesh object in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["resourceId", "objectName", "size", "location"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "size": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Full edge length in Blender units."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "cube_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_cone",
+      "title": "Create one cone",
+      "description": "Creates one owned cone mesh object between two world-space endpoints in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "distinctPropertyValues": ["start", "end"],
+        "atLeastOnePositiveProperty": ["radiusStart", "radiusEnd"],
+        "required": ["resourceId", "objectName", "radiusStart", "radiusEnd", "start", "end"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "radiusStart": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "Cone radius at start; the two radii cannot both be zero."
+          },
+          "radiusEnd": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "Cone radius at end; the two radii cannot both be zero."
+          },
+          "start": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] start point; start and end must differ."
+          },
+          "end": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] end point; start and end must differ."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "cone_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_cylinder",
+      "title": "Create one cylinder",
+      "description": "Creates one owned cylinder mesh object between two world-space endpoints in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "distinctPropertyValues": ["start", "end"],
+        "required": ["resourceId", "objectName", "radius", "start", "end"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "radius": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Cylinder radius in Blender units."
+          },
+          "start": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] start point; start and end must differ."
+          },
+          "end": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] end point; start and end must differ."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "cylinder_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_torus",
+      "title": "Create one torus",
+      "description": "Creates one owned torus mesh object around the local Z axis in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "resourceId",
+          "objectName",
+          "majorSegments",
+          "minorSegments",
+          "majorRadius",
+          "minorRadius",
+          "location"
+        ],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "majorSegments": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 128,
+            "description": "Segments around the major ring; capped below Blender's native limit to bound mesh size."
+          },
+          "minorSegments": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 64,
+            "description": "Segments around each circular cross-section; capped below Blender's native limit to bound mesh size."
+          },
+          "majorRadius": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Distance from the local Z axis to the center of each circular cross-section."
+          },
+          "minorRadius": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Radius of each circular cross-section."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "torus_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_primitive_batch",
+      "title": "Create a primitive batch",
+      "description": "Atomically creates 1 to 16 owned spheres, cones, or cylinders after validating all IDs and names.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueResourceIds": true,
+            "uniqueObjectNames": true,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["primitive", "resourceId", "objectName", "radius", "location"],
+                  "properties": {
+                    "primitive": { "enum": ["sphere", "uv_sphere"] },
+                    "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                    "objectName": {
+                      "type": "string",
+                      "pattern": "^OperatingLine\\.",
+                      "maxLength": 180
+                    },
+                    "radius": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
+                    "location": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "atLeastOnePositiveProperty": ["radiusStart", "radiusEnd"],
+                  "distinctPropertyValues": ["start", "end"],
+                  "required": [
+                    "primitive",
+                    "resourceId",
+                    "objectName",
+                    "radiusStart",
+                    "radiusEnd",
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "primitive": { "const": "cone" },
+                    "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                    "objectName": {
+                      "type": "string",
+                      "pattern": "^OperatingLine\\.",
+                      "maxLength": 180
+                    },
+                    "radiusStart": { "type": "number", "minimum": 0, "maximum": 1000 },
+                    "radiusEnd": { "type": "number", "minimum": 0, "maximum": 1000 },
+                    "start": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "end": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "distinctPropertyValues": ["start", "end"],
+                  "required": ["primitive", "resourceId", "objectName", "radius", "start", "end"],
+                  "properties": {
+                    "primitive": { "const": "cylinder" },
+                    "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                    "objectName": {
+                      "type": "string",
+                      "pattern": "^OperatingLine\\.",
+                      "maxLength": 180
+                    },
+                    "radius": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
+                    "start": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "end": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "description": "start and end must differ; cone radii cannot both be zero."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "items[].resourceId",
+          "derivedResourceTypes": ["MESH[]"],
+          "description": "Creates every object and its resourceId.mesh datablock atomically."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.edit_subdivide",
+      "title": "Subdivide one owned mesh",
+      "description": "Creates a bounded whole-mesh subdivision result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "resultMeshId", "resultMeshName", "cuts", "smooth"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Logical ID of an owned mesh object created by an earlier action."
+          },
+          "resultMeshId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical ID for the replacement mesh datablock."
+          },
+          "resultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "cuts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "Uniform cuts applied to every edge; bounded to control topology growth."
+          },
+          "smooth": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Subdivision smoothing factor."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Swaps the owned object's mesh link to the generated result."
+        },
+        {
+          "access": "create",
+          "resourceType": "MESH",
+          "argumentPath": "resultMeshId",
+          "derivedResourceTypes": [],
+          "description": "Creates the bounded subdivided mesh while retaining the source for compensation."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "mesh_topology_matches"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.edit_triangulate",
+      "title": "Triangulate one owned mesh",
+      "description": "Creates a bounded whole-mesh triangulation result with fixed FIXED/EAR_CLIP methods and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode, have no modifiers or shape keys, contain at least one non-triangle polygon, and remain within 8192 vertices, 16384 edges, and 8192 polygons.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "resultMeshId", "resultMeshName"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Logical ID of an owned mesh object created by an earlier action."
+          },
+          "resultMeshId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical ID for the replacement triangulated mesh datablock."
+          },
+          "resultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Swaps the owned object's mesh link to the generated triangulation result."
+        },
+        {
+          "access": "create",
+          "resourceType": "MESH",
+          "argumentPath": "resultMeshId",
+          "derivedResourceTypes": [],
+          "description": "Creates the bounded triangulated mesh while retaining the source for compensation."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "mesh_triangulated"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.edit_extrude_region",
+      "title": "Extrude one owned mesh face region",
+      "description": "Creates a bounded face-region extrusion result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode with no modifiers or shape keys. polygonIndices must name one edge-connected region with a boundary edge; translation is a nonzero local-space vector. Source and result topology stay within 8192 vertices, 16384 edges, and 8192 polygons.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "resultMeshId", "resultMeshName", "polygonIndices", "translation"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Logical ID of an owned mesh object created by an earlier action."
+          },
+          "resultMeshId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical ID for the replacement extruded mesh datablock."
+          },
+          "resultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "polygonIndices": {
+            "type": "array",
+            "items": { "type": "integer", "minimum": 0, "maximum": 8191 },
+            "minItems": 1,
+            "maxItems": 256,
+            "uniqueItems": true,
+            "description": "Unique source polygon indices forming one edge-connected region with at least one boundary edge."
+          },
+          "translation": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "vectorLengthMinimum": 0.0001,
+            "vectorLengthMaximum": 1000,
+            "description": "Local-space translation vector whose Euclidean length must be between 0.0001 and 1000 at execution."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Swaps the owned object's mesh link to the generated extrusion result."
+        },
+        {
+          "access": "create",
+          "resourceType": "MESH",
+          "argumentPath": "resultMeshId",
+          "derivedResourceTypes": [],
+          "description": "Creates the bounded extruded mesh while retaining the source for compensation."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "mesh_region_extruded"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.edit_bevel_edges",
+      "title": "Bevel every edge of one owned closed manifold mesh",
+      "description": "Creates a bounded whole-mesh edge bevel result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode, have no modifiers or shape keys, and be a closed manifold mesh whose every edge belongs to exactly two faces. Source and result topology stay within 8192 vertices, 16384 edges, and 8192 polygons.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "resultMeshId", "resultMeshName", "width", "segments", "profile"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Logical ID of an owned mesh object created by an earlier action."
+          },
+          "resultMeshId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical ID for the replacement beveled mesh datablock."
+          },
+          "resultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "width": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 100
+          },
+          "segments": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16
+          },
+          "profile": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Swaps the owned object's mesh link to the generated bevel result after Object Mode, modifier, shape-key, closed-manifold, and topology validation."
+        },
+        {
+          "access": "create",
+          "resourceType": "MESH",
+          "argumentPath": "resultMeshId",
+          "derivedResourceTypes": [],
+          "description": "Creates the bounded beveled mesh while retaining the source for compensation."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "mesh_edges_beveled"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.edit_inset_faces",
+      "title": "Inset every face of one owned closed manifold mesh individually",
+      "description": "Creates a bounded individual-face inset result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode, have no modifiers or shape keys, and be a closed, nondegenerate manifold mesh. For source topology V/E/F, the result is required to contain exactly V+2E vertices, 5E edges, and F+2E polygons, within the global 8192 vertex, 16384 edge, and 8192 polygon bounds.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "resultMeshId", "resultMeshName", "thickness", "depth"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Logical ID of an owned mesh object created by an earlier action."
+          },
+          "resultMeshId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical ID for the replacement inset mesh datablock."
+          },
+          "resultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "thickness": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 100
+          },
+          "depth": {
+            "type": "number",
+            "minimum": -100,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Swaps the owned object's mesh link to the generated inset result after Object Mode, modifier, shape-key, closed-manifold, nondegeneracy, exact-topology, and bounds validation."
+        },
+        {
+          "access": "create",
+          "resourceType": "MESH",
+          "argumentPath": "resultMeshId",
+          "derivedResourceTypes": [],
+          "description": "Creates the bounded individually inset mesh while retaining the source for compensation."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "mesh_faces_inset"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.edit_poke_faces",
+      "title": "Poke every face of one owned closed manifold mesh",
+      "description": "Creates a bounded whole-mesh Poke Faces result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode, have no modifiers or shape keys, and be a closed, nondegenerate manifold mesh whose every vertex forms one manifold face fan. For source topology V/E/F with L face loops, the result is required to contain exactly V+F vertices, E+L edges, and L triangle polygons within the global 8192 vertex, 16384 edge, and 8192 polygon bounds.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "resultMeshId", "resultMeshName", "offset"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Logical ID of an owned mesh object created by an earlier action."
+          },
+          "resultMeshId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical ID for the replacement poked mesh datablock."
+          },
+          "resultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "offset": {
+            "type": "number",
+            "minimum": -100,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Swaps the owned object's mesh link to the generated Poke Faces result after Object Mode, modifier, shape-key, closed-manifold, nondegeneracy, exact-topology, and bounds validation."
+        },
+        {
+          "access": "create",
+          "resourceType": "MESH",
+          "argumentPath": "resultMeshId",
+          "derivedResourceTypes": [],
+          "description": "Creates the bounded poked mesh while retaining the source for compensation."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "mesh_faces_poked"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.modifier.add_bevel",
+      "title": "Add one Bevel modifier",
+      "description": "Adds one owned, bounded Bevel modifier to an earlier owned mesh object without applying it.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "modifierId", "modifierName", "width", "segments", "angleLimit"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "width": { "type": "number", "minimum": 0.0001, "maximum": 100 },
+          "segments": { "type": "integer", "minimum": 1, "maximum": 16 },
+          "angleLimit": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3.141592653589793
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Adds a non-applied modifier to the owned target's stack."
+        },
+        {
+          "access": "create",
+          "resourceType": "MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned Bevel modifier."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["modifier_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.modifier.add_solidify",
+      "title": "Add one Solidify modifier",
+      "description": "Adds one owned, bounded Solidify modifier to an earlier owned mesh object without applying it. Every existing modifier must be receipt-tracked, and both source and evaluated input must have at most 8192 vertices, 16384 edges, and 8192 polygons. solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "modifierId", "modifierName", "thickness", "offset"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "thickness": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Adds a non-applied Solidify modifier after receipt-tracked modifiers only; both source and evaluated input are limited to 8192 vertices, 16384 edges, and 8192 polygons, with solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false fixed by the implementation."
+        },
+        {
+          "access": "create",
+          "resourceType": "MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned Solidify modifier."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["modifier_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.modifier.add_subdivision_surface",
+      "title": "Add one Subdivision Surface modifier",
+      "description": "Adds one owned, bounded Subdivision Surface modifier to an earlier owned mesh object without applying it. Every existing modifier must be receipt-tracked, the stack must not already contain a SUBSURF modifier, and projected evaluated topology must remain within 8192 vertices, 16384 edges, and 8192 polygons. subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3 are fixed implementation behavior.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "modifierId", "modifierName", "viewportLevel"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "viewportLevel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3,
+            "description": "Viewport subdivision level; render level is fixed to 2."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Adds a non-applied Subdivision Surface modifier after receipt-tracked modifiers only, rejects an existing SUBSURF modifier, and bounds projected evaluated topology to 8192 vertices, 16384 edges, and 8192 polygons."
+        },
+        {
+          "access": "create",
+          "resourceType": "MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned Subdivision Surface modifier with CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["modifier_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.modifier.add_mirror",
+      "title": "Add one Mirror modifier",
+      "description": "Adds one owned, bounded Mirror modifier to an earlier owned mesh object without applying it. The target must be in Object Mode with no shape keys; every existing modifier must be receipt-tracked, the stack must not already contain a MIRROR modifier, and source, evaluated input, projected, and actual evaluated topology must remain within 8192 vertices, 16384 edges, and 8192 polygons. Exactly the requested local axis is enabled. Fixed implementation behavior is use_bisect_axis and use_bisect_flip_axis false on every axis, use_clip=false, use_mirror_merge=true, merge_threshold=0.001, bisect_threshold=0.001, mirror_object=null, use_mirror_vertex_groups=true, use_mirror_udim=false, use_mirror_u=false, use_mirror_v=false, offset_u=0, offset_v=0, mirror_offset_u=0, mirror_offset_v=0, show_viewport=true, show_render=true, show_in_editmode=true, show_on_cage=false, and use_apply_on_spline=false where exposed.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "modifierId", "modifierName", "axis"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "axis": {
+            "type": "string",
+            "enum": ["X", "Y", "Z"],
+            "description": "The single local object axis mirrored by the fixed modifier contract."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Adds a non-applied Mirror modifier after receipt-tracked modifiers only; requires Object Mode and no shape keys, rejects an existing MIRROR modifier, and bounds source, evaluated input, projected, and actual evaluated topology."
+        },
+        {
+          "access": "create",
+          "resourceType": "MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned Mirror modifier with exactly one requested local axis; use_bisect_axis and use_bisect_flip_axis false on every axis; use_clip=false; use_mirror_merge=true; merge_threshold=0.001; bisect_threshold=0.001; mirror_object=null; use_mirror_vertex_groups=true; use_mirror_udim=false; use_mirror_u=false; use_mirror_v=false; offset_u=0; offset_v=0; mirror_offset_u=0; mirror_offset_v=0; show_viewport=true; show_render=true; show_in_editmode=true; show_on_cage=false; and use_apply_on_spline=false where exposed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["modifier_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.geometry_nodes.create_transform",
+      "title": "Create one Transform Geometry node group",
+      "description": "Creates an owned Geometry Nodes group containing one Transform Geometry node and attaches it through one owned modifier.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "targetId",
+          "modifierId",
+          "modifierName",
+          "nodeGroupId",
+          "nodeGroupName",
+          "translation",
+          "rotation",
+          "scale"
+        ],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "translation": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": -6.283185307179586,
+              "maximum": 6.283185307179586
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "scale": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Adds the Geometry Nodes modifier to the owned target."
+        },
+        {
+          "access": "create",
+          "resourceType": "MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned Geometry Nodes modifier."
+        },
+        {
+          "access": "create",
+          "resourceType": "NODE_GROUP",
+          "argumentPath": "nodeGroupId",
+          "derivedResourceTypes": [],
+          "description": "Creates one owned Transform Geometry node tree."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["modifier_ready", "geometry_nodes_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.geometry_nodes.create_light_trails",
+      "title": "Create mirrored procedural light trails",
+      "description": "Creates an owned fixed-topology Geometry Nodes graph that builds displaced curve rows, mirrors one half tile, converts the curves to mesh, and repeats the seamless tile without Simulation or Bake nodes.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "targetId",
+          "modifierId",
+          "modifierName",
+          "nodeGroupId",
+          "nodeGroupName",
+          "trailCount",
+          "pointsPerTrail",
+          "tileLength",
+          "trailSpacing",
+          "noiseScale",
+          "noiseDetail",
+          "noiseRoughness",
+          "noiseSeed",
+          "height",
+          "profileSides",
+          "profileRadius",
+          "tileRepeatCount"
+        ],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "trailCount": { "type": "integer", "minimum": 1, "maximum": 128 },
+          "pointsPerTrail": { "type": "integer", "minimum": 8, "maximum": 512 },
+          "tileLength": { "type": "number", "minimum": 0.1, "maximum": 1000 },
+          "trailSpacing": { "type": "number", "minimum": 0.0001, "maximum": 100 },
+          "noiseScale": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
+          "noiseDetail": { "type": "number", "minimum": 0, "maximum": 15 },
+          "noiseRoughness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "noiseSeed": { "type": "number", "minimum": -10000, "maximum": 10000 },
+          "height": { "type": "number", "minimum": 0, "maximum": 100 },
+          "profileSides": { "type": "integer", "minimum": 3, "maximum": 8 },
+          "profileRadius": { "type": "number", "minimum": 0.0001, "maximum": 10 },
+          "tileRepeatCount": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Adds one non-applied Geometry Nodes modifier to the owned mesh target."
+        },
+        {
+          "access": "create",
+          "resourceType": "MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned Geometry Nodes modifier with no bake entries or cache directory."
+        },
+        {
+          "access": "create",
+          "resourceType": "NODE_GROUP",
+          "argumentPath": "nodeGroupId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned fixed light-trails node graph with no Bake or Simulation nodes."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["light_trails_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.lookdev.create_light_trails_scene",
+      "title": "Create an animated light-trails look-development scene",
+      "description": "Configures an owned scene, world, animated camera rig, emissive curve-gradient material, procedural floor material, and Fog Glow compositor for existing owned light-trails and floor targets. The action only performs look development, animation, and compositor setup; it never bakes, renders, or exports.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "collectionId",
+          "trailTargetId",
+          "floorTargetId",
+          "sceneId",
+          "sceneName",
+          "worldId",
+          "worldName",
+          "cameraId",
+          "cameraObjectName",
+          "cameraDataName",
+          "controllerId",
+          "controllerObjectName",
+          "trailMaterialId",
+          "trailMaterialName",
+          "floorMaterialId",
+          "floorMaterialName",
+          "cameraActionId",
+          "cameraActionName",
+          "frameStart",
+          "frameEnd",
+          "cameraStart",
+          "cameraEnd",
+          "cameraTarget",
+          "lens",
+          "fStop",
+          "focusDistance",
+          "trailBaseColor",
+          "trailGlowColor",
+          "trailEmissionStrength",
+          "gradientRotationDegrees",
+          "gradientStart",
+          "glowBandStart",
+          "glowBandEnd",
+          "gradientEnd",
+          "waveScale",
+          "floorBaseColor",
+          "floorEmissionColor",
+          "floorEmissionStrength",
+          "floorMetallic",
+          "floorVoronoiScale",
+          "floorRoughnessMinimum",
+          "floorRoughnessMaximum",
+          "floorBumpStrength",
+          "floorBumpDistance"
+        ],
+        "properties": {
+          "collectionId": { "const": "snowman.collection" },
+          "trailTargetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "floorTargetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "sceneId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "sceneName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "worldId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "worldName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "cameraId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "cameraObjectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "cameraDataName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "controllerId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "controllerObjectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "trailMaterialId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "trailMaterialName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "floorMaterialId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "floorMaterialName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "cameraActionId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180
+          },
+          "cameraActionName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "frameStart": { "type": "integer", "minimum": 0, "maximum": 100000 },
+          "frameEnd": { "type": "integer", "minimum": 0, "maximum": 100000 },
+          "cameraStart": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "cameraEnd": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "cameraTarget": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "lens": { "type": "number", "minimum": 1, "maximum": 1000 },
+          "fStop": { "type": "number", "minimum": 0.1, "maximum": 64 },
+          "focusDistance": { "type": "number", "minimum": 0.001, "maximum": 1000 },
+          "trailBaseColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "trailGlowColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "trailEmissionStrength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "gradientRotationDegrees": {
+            "type": "number",
+            "minimum": -360,
+            "maximum": 360
+          },
+          "gradientStart": { "type": "number", "minimum": 0, "maximum": 1 },
+          "glowBandStart": { "type": "number", "minimum": 0, "maximum": 1 },
+          "glowBandEnd": { "type": "number", "minimum": 0, "maximum": 1 },
+          "gradientEnd": { "type": "number", "minimum": 0, "maximum": 1 },
+          "waveScale": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
+          "floorBaseColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "floorEmissionColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "floorEmissionStrength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "floorMetallic": { "type": "number", "minimum": 0, "maximum": 1 },
+          "floorVoronoiScale": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000
+          },
+          "floorRoughnessMinimum": { "type": "number", "minimum": 0, "maximum": 1 },
+          "floorRoughnessMaximum": { "type": "number", "minimum": 0, "maximum": 1 },
+          "floorBumpStrength": { "type": "number", "minimum": 0, "maximum": 100 },
+          "floorBumpDistance": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "COLLECTION",
+          "argumentPath": "collectionId",
+          "derivedResourceTypes": [],
+          "description": "Requires the managed collection that owns the existing tutorial objects."
+        },
+        {
+          "access": "read",
+          "resourceType": "OBJECT",
+          "argumentPath": "trailTargetId",
+          "derivedResourceTypes": [],
+          "description": "Requires the existing owned light-trails target."
+        },
+        {
+          "access": "read",
+          "resourceType": "OBJECT",
+          "argumentPath": "floorTargetId",
+          "derivedResourceTypes": [],
+          "description": "Requires the existing owned floor target."
+        },
+        {
+          "access": "create",
+          "resourceType": "SCENE",
+          "argumentPath": "sceneId",
+          "derivedResourceTypes": ["NODE_GROUP"],
+          "description": "Creates an isolated owned look-development scene with compositor setup. Blender 5.1 also creates the derived sceneId.compositor node group; Blender 4.5 keeps the compositor tree embedded in the scene."
+        },
+        {
+          "access": "create",
+          "resourceType": "WORLD",
+          "argumentPath": "worldId",
+          "derivedResourceTypes": [],
+          "description": "Creates and assigns an owned world to the look-development scene."
+        },
+        {
+          "access": "create",
+          "resourceType": "CAMERA",
+          "argumentPath": "cameraId",
+          "derivedResourceTypes": ["CAMERA_DATA"],
+          "description": "Creates and activates an owned camera and its named camera datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "EMPTY_OBJECT",
+          "argumentPath": "controllerId",
+          "derivedResourceTypes": [],
+          "description": "Creates an owned Empty controller parented to the camera."
+        },
+        {
+          "access": "create",
+          "resourceType": "MATERIAL",
+          "argumentPath": "trailMaterialId",
+          "derivedResourceTypes": [],
+          "description": "Creates the owned curve-gradient emission material."
+        },
+        {
+          "access": "create",
+          "resourceType": "MATERIAL",
+          "argumentPath": "floorMaterialId",
+          "derivedResourceTypes": [],
+          "description": "Creates the owned procedural Voronoi floor material."
+        },
+        {
+          "access": "create",
+          "resourceType": "ACTION",
+          "argumentPath": "cameraActionId",
+          "derivedResourceTypes": [],
+          "description": "Creates the owned linear camera-controller animation action."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "trailTargetId",
+          "derivedResourceTypes": [],
+          "description": "Replaces the light-trails target material slots under compensating rollback."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "floorTargetId",
+          "derivedResourceTypes": [],
+          "description": "Replaces the floor target material slots under compensating rollback."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["light_trails_scene_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.material.create_and_assign",
+      "title": "Create and assign one material",
+      "description": "Creates one owned Principled material and replaces material slots on 1 to 64 previously created owned mesh objects.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["materialId", "materialName", "targets", "baseColor", "roughness", "metallic"],
+        "properties": {
+          "materialId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "materialName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "targets": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "description": "Logical IDs of owned mesh objects created by earlier actions."
+          },
+          "baseColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "Linear RGBA channels in [0, 1]."
+          },
+          "roughness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "metallic": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "MATERIAL",
+          "argumentPath": "materialId",
+          "derivedResourceTypes": [],
+          "description": "Creates one owned material."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "targets[]",
+          "derivedResourceTypes": [],
+          "description": "Replaces the material slots of existing owned mesh targets with compare-and-restore rollback."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["material_assigned"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.material.create_palette_and_assign",
+      "title": "Create and assign a material palette",
+      "description": "Atomically creates 1 to 8 owned Principled materials and assigns each target at most once.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["materials"],
+        "properties": {
+          "materials": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "required": [
+                "materialId",
+                "materialName",
+                "targets",
+                "baseColor",
+                "roughness",
+                "metallic"
+              ],
+              "properties": {
+                "materialId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                "materialName": {
+                  "type": "string",
+                  "pattern": "^OperatingLine\\.",
+                  "maxLength": 180
+                },
+                "targets": {
+                  "type": "array",
+                  "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true
+                },
+                "baseColor": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "minItems": 4,
+                  "maxItems": 4
+                },
+                "roughness": { "type": "number", "minimum": 0, "maximum": 1 },
+                "metallic": { "type": "number", "minimum": 0, "maximum": 1 }
+              },
+              "additionalProperties": false
+            },
+            "description": "materialId, materialName, and all targets must be unique across the palette."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "MATERIAL[]",
+          "argumentPath": "materials[].materialId",
+          "derivedResourceTypes": [],
+          "description": "Creates every palette material atomically."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "materials[].targets[]",
+          "derivedResourceTypes": [],
+          "description": "Assigns the palette to previously created owned mesh objects."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["material_assigned"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.rig.create_armature",
+      "title": "Create and bind a rigid armature",
+      "description": "Creates one owned armature with 1 to 32 bones and bone-parents previously created unparented owned objects while preserving their world transforms.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["armatureId", "objectName", "dataName", "collectionId", "bones", "bindings"],
+        "properties": {
+          "armatureId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "objectName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "dataName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "collectionId": { "const": "snowman.collection" },
+          "bones": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueBoneNames": true,
+            "acyclicParents": true,
+            "items": {
+              "type": "object",
+              "required": ["boneName", "head", "tail", "parentName"],
+              "properties": {
+                "boneName": {
+                  "type": "string",
+                  "pattern": "^OperatingLine\\.",
+                  "maxLength": 180
+                },
+                "head": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "tail": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "parentName": {
+                  "anyOf": [
+                    { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+                    { "type": "null" }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Bone head and tail must differ; every non-null parentName must reference another bone without forming a cycle."
+          },
+          "bindings": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueTargetIds": true,
+            "items": {
+              "type": "object",
+              "required": ["targetId", "boneName"],
+              "properties": {
+                "targetId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "boneName": {
+                  "type": "string",
+                  "pattern": "^OperatingLine\\.",
+                  "maxLength": 180
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Each target must be an owned unparented object and each boneName must exist in bones."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "COLLECTION",
+          "argumentPath": "collectionId",
+          "derivedResourceTypes": [],
+          "description": "Requires the tracked adapter-managed collection."
+        },
+        {
+          "access": "read",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "bindings[].targetId",
+          "derivedResourceTypes": [],
+          "description": "Requires previously created owned, unparented objects."
+        },
+        {
+          "access": "create",
+          "resourceType": "ARMATURE_OBJECT",
+          "argumentPath": "armatureId",
+          "derivedResourceTypes": ["ARMATURE_DATA"],
+          "description": "Creates the armature object and armatureId.data datablock."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "bindings[].targetId",
+          "derivedResourceTypes": [],
+          "description": "Bone-parents the targets with compare-and-restore rollback."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["armature_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.rig.bind_skin_weights",
+      "title": "Bind explicit armature skin weights",
+      "description": "Creates normalized vertex groups for every vertex of one owned bounded mesh and attaches an owned Armature modifier to a previously created owned armature.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "targetId",
+          "armatureId",
+          "modifierId",
+          "modifierName",
+          "preserveVolume",
+          "weights"
+        ],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "armatureId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "preserveVolume": {
+            "type": "boolean",
+            "description": "Enables Blender's preserve-volume deformation on the owned Armature modifier."
+          },
+          "weights": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8192,
+            "uniqueItems": true,
+            "uniqueVertexIndices": true,
+            "items": {
+              "type": "object",
+              "required": ["vertexIndex", "influences"],
+              "properties": {
+                "vertexIndex": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8191
+                },
+                "influences": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "uniqueBoneNames": true,
+                  "weightsSumToOne": true,
+                  "items": {
+                    "type": "object",
+                    "required": ["boneName", "weight"],
+                    "properties": {
+                      "boneName": {
+                        "type": "string",
+                        "pattern": "^OperatingLine\\.",
+                        "maxLength": 180
+                      },
+                      "weight": {
+                        "type": "number",
+                        "minimum": 0.000001,
+                        "maximum": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "description": "Bone names must be unique and weights must sum to 1 for this vertex."
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Must contain every mesh vertex index exactly once. Automatic, partial, negative, or non-normalized weights are rejected at execution."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Requires one previously created owned, unparented mesh with at most 8192 vertices."
+        },
+        {
+          "access": "read",
+          "resourceType": "ARMATURE_OBJECT",
+          "argumentPath": "armatureId",
+          "derivedResourceTypes": [],
+          "description": "Requires one previously created owned armature containing every referenced bone."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT_VERTEX_GROUPS",
+          "argumentPath": "weights",
+          "derivedResourceTypes": [],
+          "description": "Creates exact per-bone vertex groups and records their complete bounded assignment state."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "ARMATURE_MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Adds one owned Armature modifier and enables deformation only on the referenced bones."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["skin_weights_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.animation.create_pose_keyframes",
+      "title": "Create armature pose transform keyframes",
+      "description": "Creates one owned Action and inserts bounded per-bone Euler or unit-quaternion rotation plus optional location and scale keyframes on a previously created owned armature.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "actionId",
+          "actionName",
+          "armatureId",
+          "interpolation",
+          "extrapolation",
+          "keyframes"
+        ],
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "actionName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "armatureId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "interpolation": {
+            "enum": ["BEZIER", "LINEAR", "CONSTANT"],
+            "description": "Explicit interpolation applied to every authored keyframe."
+          },
+          "extrapolation": {
+            "enum": ["CONSTANT", "LINEAR"],
+            "description": "Explicit FCurve extrapolation applied to every authored channel."
+          },
+          "keyframes": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 64,
+            "strictlyIncreasingFrames": true,
+            "consistentBoneRotationChannels": true,
+            "items": {
+              "type": "object",
+              "required": ["frame", "poses"],
+              "properties": {
+                "frame": { "type": "integer", "minimum": 1, "maximum": 100000 },
+                "poses": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "uniqueBoneNames": true,
+                  "items": {
+                    "type": "object",
+                    "required": ["boneName"],
+                    "exactlyOneOfProperties": ["rotationEuler", "rotationQuaternion"],
+                    "properties": {
+                      "boneName": {
+                        "type": "string",
+                        "pattern": "^OperatingLine\\.",
+                        "maxLength": 180
+                      },
+                      "rotationEuler": {
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": -6.283185307179586,
+                          "maximum": 6.283185307179586
+                        },
+                        "minItems": 3,
+                        "maxItems": 3
+                      },
+                      "rotationQuaternion": {
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": -1,
+                          "maximum": 1
+                        },
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "vectorLengthMinimum": 0.999999,
+                        "vectorLengthMaximum": 1.000001,
+                        "description": "Optional unit quaternion in Blender W, X, Y, Z order; exactly one rotation representation is required per pose."
+                      },
+                      "location": {
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": -1000,
+                          "maximum": 1000
+                        },
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional pose-bone local translation keyed at this frame."
+                      },
+                      "scale": {
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": 0.0001,
+                          "maximum": 1000
+                        },
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional positive pose-bone local scale keyed at this frame."
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "ARMATURE_OBJECT",
+          "argumentPath": "armatureId",
+          "derivedResourceTypes": [],
+          "description": "Requires an owned armature created by an earlier catalog action."
+        },
+        {
+          "access": "create",
+          "resourceType": "ACTION",
+          "argumentPath": "actionId",
+          "derivedResourceTypes": [],
+          "description": "Creates one owned Blender Action datablock."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "POSE_BONE[]",
+          "argumentPath": "keyframes[].poses[]",
+          "derivedResourceTypes": [],
+          "description": "Assigns the owned action and inserts bounded pose transforms with one consistent Euler or quaternion channel per bone, explicit interpolation, and compensating rollback."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["pose_animation_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.render_scene.create",
+      "title": "Create an isolated render scene",
+      "description": "Creates an owned Scene and World, configures the world background, and links only the managed collection into the new scene.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "sceneId",
+          "sceneName",
+          "worldId",
+          "worldName",
+          "collectionId",
+          "backgroundColor",
+          "strength"
+        ],
+        "properties": {
+          "sceneId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "sceneName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "worldId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "worldName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "collectionId": {
+            "const": "snowman.collection",
+            "description": "Current adapter-managed geometry collection."
+          },
+          "backgroundColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "strength": { "type": "number", "minimum": 0, "maximum": 1000 }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "COLLECTION",
+          "argumentPath": "collectionId",
+          "derivedResourceTypes": [],
+          "description": "Requires the managed collection created by an earlier geometry action and rejects untracked contents."
+        },
+        {
+          "access": "create",
+          "resourceType": "SCENE",
+          "argumentPath": "sceneId",
+          "derivedResourceTypes": [],
+          "description": "Creates an isolated render scene."
+        },
+        {
+          "access": "create",
+          "resourceType": "WORLD",
+          "argumentPath": "worldId",
+          "derivedResourceTypes": [],
+          "description": "Creates and assigns a world to the new scene."
+        }
+      ],
+      "supportedAnchorKinds": ["operator", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["render_scene_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.render_rig.create",
+      "title": "Create Area lights and a camera",
+      "description": "Creates 1 to 4 owned Area lights and one owned camera in an existing isolated render scene.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["sceneId", "collectionId", "lights", "camera"],
+        "properties": {
+          "sceneId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "collectionId": { "const": "snowman.collection" },
+          "lights": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "required": [
+                "resourceId",
+                "objectName",
+                "dataName",
+                "location",
+                "target",
+                "color",
+                "energy",
+                "size"
+              ],
+              "properties": {
+                "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                "objectName": {
+                  "type": "string",
+                  "pattern": "^OperatingLine\\.",
+                  "maxLength": 180
+                },
+                "dataName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+                "location": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "target": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "color": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "energy": { "type": "number", "minimum": 0, "maximum": 10000000 },
+                "size": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+              },
+              "additionalProperties": false
+            },
+            "description": "Resource IDs, object names, and data names must be unique; location must differ from target."
+          },
+          "camera": {
+            "type": "object",
+            "required": ["resourceId", "objectName", "dataName", "location", "target", "lens"],
+            "properties": {
+              "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+              "objectName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+              "dataName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+              "location": {
+                "type": "array",
+                "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "target": {
+                "type": "array",
+                "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "lens": { "type": "number", "minimum": 1, "maximum": 1000 }
+            },
+            "additionalProperties": false,
+            "description": "location must differ from target."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "SCENE",
+          "argumentPath": "sceneId",
+          "derivedResourceTypes": [],
+          "description": "Requires an isolated scene created by an earlier catalog action."
+        },
+        {
+          "access": "read",
+          "resourceType": "COLLECTION",
+          "argumentPath": "collectionId",
+          "derivedResourceTypes": [],
+          "description": "Requires the managed collection linked into the scene."
+        },
+        {
+          "access": "create",
+          "resourceType": "LIGHT[]",
+          "argumentPath": "lights[].resourceId",
+          "derivedResourceTypes": ["LIGHT_DATA[]"],
+          "description": "Creates Area light objects and resourceId.data datablocks."
+        },
+        {
+          "access": "create",
+          "resourceType": "CAMERA",
+          "argumentPath": "camera.resourceId",
+          "derivedResourceTypes": ["CAMERA_DATA"],
+          "description": "Creates and activates the camera and its resourceId.data datablock."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["render_rig_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.render.execute_preview",
+      "title": "Render a managed PNG preview",
+      "description": "Renders an existing owned scene to a PNG under the extension-managed temporary directory.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "renderId",
+          "sceneId",
+          "engine",
+          "resolutionX",
+          "resolutionY",
+          "resolutionPercentage",
+          "frame",
+          "format",
+          "destination",
+          "samples"
+        ],
+        "properties": {
+          "renderId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "sceneId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "engine": { "const": "auto_eevee" },
+          "resolutionX": { "type": "integer", "minimum": 1, "maximum": 1024 },
+          "resolutionY": { "type": "integer", "minimum": 1, "maximum": 1024 },
+          "resolutionPercentage": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "frame": { "type": "integer", "minimum": 1, "maximum": 100000 },
+          "format": { "const": "PNG" },
+          "destination": { "const": "extension_temp" },
+          "samples": { "type": "integer", "minimum": 1, "maximum": 128 }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "SCENE",
+          "argumentPath": "sceneId",
+          "derivedResourceTypes": [],
+          "description": "Requires an owned scene with an active camera."
+        },
+        {
+          "access": "artifact",
+          "resourceType": "PNG",
+          "argumentPath": "renderId",
+          "derivedResourceTypes": [],
+          "description": "Creates a digest-tracked PNG only inside the managed temporary output root."
+        }
+      ],
+      "supportedAnchorKinds": ["operator", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["render_artifact_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "managed_file_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "managed_temp"
+      }
+    }
+  ]
+}

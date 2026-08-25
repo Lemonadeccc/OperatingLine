@@ -10,8 +10,9 @@ export const supportedGuideProtocolVersions = [
   '1.4.0',
   '1.5.0',
   '1.6.0',
+  '1.7.0',
 ] as const;
-export const guideProtocolVersion = '1.6.0' as const;
+export const guideProtocolVersion = '1.7.0' as const;
 export const guideProtocolVersionSchema = z.enum(supportedGuideProtocolVersions);
 
 export const guideStepIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -130,6 +131,146 @@ export const guideExecutionTrackOverrideSchema = z.strictObject({
 });
 export type GuideExecutionTrackOverride = z.infer<typeof guideExecutionTrackOverrideSchema>;
 
+const guideCandidateMenuOperationSchema = z.strictObject({
+  id: guideStepIdSchema,
+  order: z.number().int().positive(),
+  semanticRefs: z.array(guideStepIdSchema).min(1),
+  description: z.string().min(1),
+  evidenceRefs: z.array(guideStepIdSchema),
+  intent: z.enum(['navigate', 'configure', 'execute', 'verify']),
+  target: z
+    .strictObject({
+      kind: z.enum([
+        'workspace',
+        'editor',
+        'mode',
+        'menu',
+        'menu_item',
+        'operator',
+        'control',
+        'panel',
+        'node',
+        'socket',
+        'canvas',
+        'semantic',
+      ]),
+      hostId: z.string().min(1),
+      connection: z
+        .strictObject({
+          fromNode: z.string().min(1),
+          fromSocket: z.string().min(1),
+          toNode: z.string().min(1),
+          toSocket: z.string().min(1),
+        })
+        .optional(),
+    })
+    .superRefine((target, context) => {
+      if (target.connection !== undefined && target.kind !== 'semantic') {
+        context.addIssue({
+          code: 'custom',
+          path: ['connection'],
+          message: 'Machine-readable node connections require a semantic target',
+        });
+      }
+    }),
+  path: z.array(z.string().min(1)).min(1),
+  parameters: z.record(z.string().min(1), z.json()),
+});
+
+const guideNativeMenuCandidateEvidenceSchema = z.strictObject({
+  kind: z.literal('bounded_blender_ui_probe'),
+  executorId: z.string().min(1),
+  hostVersions: z.array(z.string().min(1)).min(1),
+  managedActionExecuted: z.literal(false),
+  managedReceiptCreated: z.literal(false),
+  managedReplacementMeshCreated: z.literal(false),
+  nativeMutationKind: z.string().min(1),
+  operationIds: z.array(guideStepIdSchema).min(1),
+  nativeUndoCheckpointRequired: z.literal(true),
+  nativeUndoDepth: z.number().int().positive(),
+  nativeRedoDepth: z.number().int().positive(),
+});
+
+export const guideCandidateMenuProjectionSchema = z
+  .strictObject({
+    projection: z.literal('candidate_only'),
+    interactionCatalogVersion: catalogVersionSchema,
+    id: guideStepIdSchema,
+    modality: z.literal('menu'),
+    equivalence: z.literal('not_equivalent_to_managed_action'),
+    executionAuthority: z.literal('none'),
+    title: z.string().min(1),
+    reason: z.string().min(1),
+    preconditions: z
+      .array(
+        z.strictObject({
+          kind: z.enum([
+            'workspace',
+            'editor',
+            'mode',
+            'selection',
+            'keymap',
+            'modal_state',
+            'scene_state',
+          ]),
+          label: z.string().min(1),
+          value: z.string().min(1),
+        }),
+      )
+      .min(1),
+    operations: z.array(guideCandidateMenuOperationSchema).min(1),
+    omittedActionArguments: z.array(
+      z.strictObject({ argumentName: z.string().min(1), reason: z.string().min(1) }),
+    ),
+    nativeEvidence: guideNativeMenuCandidateEvidenceSchema.optional(),
+  })
+  .superRefine((projection, context) => {
+    const ids = new Set<string>();
+    for (const [index, operation] of projection.operations.entries()) {
+      if (operation.order !== index + 1) {
+        context.addIssue({
+          code: 'custom',
+          path: ['operations', index, 'order'],
+          message: 'Candidate menu projection operations must be contiguous and ordered',
+        });
+      }
+      if (ids.has(operation.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['operations', index, 'id'],
+          message: 'Candidate menu projection operation ids must be unique',
+        });
+      }
+      ids.add(operation.id);
+    }
+    if (projection.nativeEvidence !== undefined) {
+      const operationIds = projection.operations.map((operation) => operation.id);
+      if (
+        operationIds.length !== projection.nativeEvidence.operationIds.length ||
+        operationIds.some(
+          (operationId, index) => operationId !== projection.nativeEvidence?.operationIds[index],
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nativeEvidence', 'operationIds'],
+          message: 'Native candidate evidence must bind the exact ordered operation ids',
+        });
+      }
+      if (
+        new Set(projection.nativeEvidence.hostVersions).size !==
+        projection.nativeEvidence.hostVersions.length
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nativeEvidence', 'hostVersions'],
+          message: 'Native candidate evidence host versions must be unique',
+        });
+      }
+    }
+  });
+export type GuideCandidateMenuProjection = z.infer<typeof guideCandidateMenuProjectionSchema>;
+
 export const guideStepSchema = z
   .strictObject({
     id: guideStepIdSchema,
@@ -145,6 +286,7 @@ export const guideStepSchema = z
     expectedObservations: z.array(observationExpectationSchema),
     observationPolicy: observationPolicySchema.optional(),
     executionTrackOverride: guideExecutionTrackOverrideSchema.optional(),
+    candidateMenuProjection: guideCandidateMenuProjectionSchema.optional(),
     rollback: z.strictObject({
       mode: z.enum(['native_undo', 'checkpoint_restore', 'compensating_action', 'unsupported']),
       checkpointRequired: z.boolean(),
@@ -165,6 +307,13 @@ export const guideStepSchema = z
         message: 'Only executable steps can declare an execution track override',
       });
     }
+    if (step.candidateMenuProjection !== undefined && step.action === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['candidateMenuProjection'],
+        message: 'Only executable steps can carry a candidate menu projection',
+      });
+    }
     if (step.observationPolicy?.mode === 'success_gate' && step.expectedObservations.length === 0) {
       context.addIssue({
         code: 'custom',
@@ -181,6 +330,10 @@ export const guideStepSchema = z
       },
       {
         if: { required: ['executionTrackOverride'] },
+        then: { properties: { action: { type: 'object' } } },
+      },
+      {
+        if: { required: ['candidateMenuProjection'] },
         then: { properties: { action: { type: 'object' } } },
       },
       {
@@ -214,12 +367,17 @@ export const guidePlanSchema = z
       plan.protocolVersion === '1.3.0' ||
       plan.protocolVersion === '1.4.0' ||
       plan.protocolVersion === '1.5.0' ||
-      plan.protocolVersion === '1.6.0';
+      plan.protocolVersion === '1.6.0' ||
+      plan.protocolVersion === '1.7.0';
     const parentIds = new Set(
       plan.steps.flatMap((step) => (step.parentId === null ? [] : [step.parentId])),
     );
     for (const [index, step] of plan.steps.entries()) {
-      if (step.executionTrackOverride !== undefined && plan.protocolVersion !== '1.6.0') {
+      if (
+        step.executionTrackOverride !== undefined &&
+        plan.protocolVersion !== '1.6.0' &&
+        plan.protocolVersion !== '1.7.0'
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['steps', index, 'executionTrackOverride'],
@@ -231,6 +389,20 @@ export const guidePlanSchema = z
           code: 'custom',
           path: ['steps', index, 'executionTrackOverride'],
           message: 'Only leaf steps can declare an execution track override',
+        });
+      }
+      if (step.candidateMenuProjection !== undefined && plan.protocolVersion !== '1.7.0') {
+        context.addIssue({
+          code: 'custom',
+          path: ['steps', index, 'candidateMenuProjection'],
+          message: 'Candidate menu projections require guide protocol 1.7',
+        });
+      }
+      if (step.candidateMenuProjection !== undefined && parentIds.has(step.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['steps', index, 'candidateMenuProjection'],
+          message: 'Only leaf steps can carry a candidate menu projection',
         });
       }
       if (step.observationPolicy !== undefined && !supportsObservationPolicies) {
@@ -245,7 +417,8 @@ export const guidePlanSchema = z
         step.observationPolicy.mode === 'success_gate' &&
         step.observationPolicy.retryPolicy !== undefined &&
         plan.protocolVersion !== '1.5.0' &&
-        plan.protocolVersion !== '1.6.0'
+        plan.protocolVersion !== '1.6.0' &&
+        plan.protocolVersion !== '1.7.0'
       ) {
         context.addIssue({
           code: 'custom',
@@ -260,7 +433,9 @@ export const guidePlanSchema = z
       {
         if: {
           properties: {
-            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
+            protocolVersion: {
+              enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0'],
+            },
           },
           required: ['protocolVersion'],
         },
@@ -272,12 +447,23 @@ export const guidePlanSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { const: '1.6.0' } },
+          properties: { protocolVersion: { enum: ['1.6.0', '1.7.0'] } },
           required: ['protocolVersion'],
         },
         else: {
           properties: {
             steps: { items: { not: { required: ['executionTrackOverride'] } } },
+          },
+        },
+      },
+      {
+        if: {
+          properties: { protocolVersion: { const: '1.7.0' } },
+          required: ['protocolVersion'],
+        },
+        else: {
+          properties: {
+            steps: { items: { not: { required: ['candidateMenuProjection'] } } },
           },
         },
       },

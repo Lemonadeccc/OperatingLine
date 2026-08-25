@@ -5,6 +5,8 @@ export * from './catalog.js';
 export * from './canonical-json-value.js';
 export * from './companion.js';
 export * from './companion-action.js';
+export * from './companion-leaf-operation.js';
+export * from './companion-poke-compound.js';
 export * from './companion-execution-track.js';
 export * from './companion-execution-track-execution.js';
 export * from './companion-dialogue-run.js';

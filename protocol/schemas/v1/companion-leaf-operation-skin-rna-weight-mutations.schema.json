@@ -1,0 +1,372 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 65600,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65600
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.skin-weights.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.weights"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.weights"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "weights"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_bone_deform_write"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_bone_deform_enable"
+          },
+          "acceptedValue": {
+            "type": "boolean",
+            "const": true
+          },
+          "observedValue": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Object Data Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Bones"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Deform"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "order",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "targetId",
+          "armatureId",
+          "boneName",
+          "boneOrder",
+          "executionMethod",
+          "mutationKind",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65600
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.skin-weights.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.weights"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.weights"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "weights"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "groupOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_vertex_group_create"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "vertex_group_create"
+          },
+          "groupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "VertexGroup"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Object Data Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Vertex Groups"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "order",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "targetId",
+          "armatureId",
+          "boneName",
+          "groupOrder",
+          "executionMethod",
+          "mutationKind",
+          "groupName",
+          "resourceType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65600
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.skin-weights.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.weights"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.weights"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "weights"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "vertexOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8192
+          },
+          "influenceOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_vertex_group_weight_replace"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "vertex_group_weight_replace"
+          },
+          "vertexIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8191
+          },
+          "groupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "assignmentMode": {
+            "type": "string",
+            "const": "REPLACE"
+          },
+          "acceptedWeight": {
+            "type": "number",
+            "minimum": 0.000001,
+            "maximum": 1
+          },
+          "observedWeight": {
+            "type": "number",
+            "minimum": 0.000001,
+            "maximum": 1
+          },
+          "observedMembership": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Weight Paint"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Vertex"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9]\\d*)$"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Weight"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 6,
+            "maxItems": 6
+          }
+        },
+        "required": [
+          "order",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "targetId",
+          "armatureId",
+          "boneName",
+          "vertexOrder",
+          "influenceOrder",
+          "executionMethod",
+          "mutationKind",
+          "vertexIndex",
+          "groupName",
+          "assignmentMode",
+          "acceptedWeight",
+          "observedWeight",
+          "observedMembership",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Skin bone-deform, Vertex Group create, and per-vertex influence order plus accepted-to-observed weights and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-skin-rna-weight-mutations.json"
+}

@@ -1,6 +1,24 @@
 import { z } from 'zod';
 
 import { canonicalizeProtocolJsonValue } from './canonical-json-value.js';
+import {
+  armatureLeafOperationIds,
+  bevelModifierLeafOperationIds,
+  editBevelLeafOperationIds,
+  editInsetLeafOperationIds,
+  editTriangulateLeafOperationIds,
+  editExtrudeRegionLeafOperationIds,
+  editPokeLeafOperationIds,
+  lightTrailsLeafOperationIds,
+  materialPaletteLeafOperationIds,
+  singleMaterialLeafOperationIds,
+  mirrorLeafOperationIds,
+  poseAnimationLeafOperationIds,
+  skinWeightsLeafOperationIds,
+  solidifyLeafOperationIds,
+  subdivisionSurfaceLeafOperationIds,
+  transformGeometryLeafOperationIds,
+} from './companion-leaf-operation.js';
 
 import { guideStepIdSchema } from './guide.js';
 import { shortcutProofExecutionSchema } from './interaction-catalog.js';
@@ -19,6 +37,7 @@ import {
   procedureTreeExtendedShortcutFormatVersion,
   procedureTreeFormatVersion,
   procedureTreeFormatVersionSchema,
+  procedureTreeMenuCandidateFormatVersion,
   procedureTreeSchema,
   extendedShortcutProcedureOperationSchema,
   shortcutProcedureOperationSchema,
@@ -30,12 +49,16 @@ export const procedureAuthoringMaterializationOrderedMenuFormatVersion = '1.1.0'
 export const procedureAuthoringMaterializationFormatVersion = '1.2.0' as const;
 export const procedureAuthoringMaterializationExtendedShortcutFormatVersion = '1.3.0' as const;
 export const procedureAuthoringMaterializationMcpFormatVersion = '1.4.0' as const;
+export const procedureAuthoringMaterializationOperationMcpFormatVersion = '1.5.0' as const;
+export const procedureAuthoringMaterializationMenuCandidateFormatVersion = '1.6.0' as const;
 export const procedureAuthoringMaterializationFormatVersionSchema = z.enum([
   procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationExtendedShortcutFormatVersion,
   procedureAuthoringMaterializationMcpFormatVersion,
+  procedureAuthoringMaterializationOperationMcpFormatVersion,
+  procedureAuthoringMaterializationMenuCandidateFormatVersion,
 ]);
 
 const procedureAuthoringMaterializationContentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -56,19 +79,21 @@ const procedureAuthoringUnavailableMcpTrackSchema = z.strictObject({
   modality: z.literal('mcp'),
 });
 
-const procedureAuthoringMaterializedMcpCallSchema = mcpProcedureCallSchema.safeExtend({
-  serverName: z.literal('operating-line'),
-  toolName: z.literal('operatingline.blender.action.execute'),
-  arguments: z.strictObject({
-    formatVersion: z.literal('1.0.0'),
-    requestId: z.literal('$runtime.requestId'),
-    replayId: z.literal('$runtime.replayId'),
-    expectedState: z.literal('$runtime.expectedState'),
-  }),
-  argumentSource: z.literal('accepted_leaf_action'),
-  actionArguments: z.record(z.string().min(1), z.json()),
-  resultBinding: guideStepIdSchema,
-});
+const procedureAuthoringMaterializedMcpCallSchema = mcpProcedureCallSchema
+  .omit({ sourceOperationId: true, operationParameters: true })
+  .safeExtend({
+    serverName: z.literal('operating-line'),
+    toolName: z.literal('operatingline.blender.action.execute'),
+    arguments: z.strictObject({
+      formatVersion: z.literal('1.0.0'),
+      requestId: z.literal('$runtime.requestId'),
+      replayId: z.literal('$runtime.replayId'),
+      expectedState: z.literal('$runtime.expectedState'),
+    }),
+    argumentSource: z.literal('accepted_leaf_action'),
+    actionArguments: z.record(z.string().min(1), z.json()),
+    resultBinding: guideStepIdSchema,
+  });
 
 const procedureAuthoringMaterializedMcpTrackSchema = z.strictObject({
   id: guideStepIdSchema,
@@ -78,6 +103,96 @@ const procedureAuthoringMaterializedMcpTrackSchema = z.strictObject({
   modality: z.literal('mcp'),
   operations: z.array(procedureAuthoringMaterializedMcpCallSchema).length(1),
 });
+
+const operationMcpOperationIdsByTool = {
+  'operatingline.blender.geometry-nodes.transform.execute-next': transformGeometryLeafOperationIds,
+  'operatingline.blender.geometry-nodes.light-trails.execute-next': lightTrailsLeafOperationIds,
+  'operatingline.blender.animation.pose-keyframes.execute-next': poseAnimationLeafOperationIds,
+  'operatingline.blender.rig.armature.execute-next': armatureLeafOperationIds,
+  'operatingline.blender.rig.skin-weights.execute-next': skinWeightsLeafOperationIds,
+  'operatingline.blender.modifier.solidify.execute-next': solidifyLeafOperationIds,
+  'operatingline.blender.modifier.bevel.execute-next': bevelModifierLeafOperationIds,
+  'operatingline.blender.material.single.execute-next': singleMaterialLeafOperationIds,
+  'operatingline.blender.material.palette.execute-next': materialPaletteLeafOperationIds,
+  'operatingline.blender.modifier.mirror.execute-next': mirrorLeafOperationIds,
+  'operatingline.blender.modifier.subdivision-surface.execute-next':
+    subdivisionSurfaceLeafOperationIds,
+  'operatingline.blender.mesh.edit-bevel-edges.execute-next': editBevelLeafOperationIds,
+  'operatingline.blender.mesh.edit-inset-faces.execute-next': editInsetLeafOperationIds,
+  'operatingline.blender.mesh.edit-triangulate.execute-next': editTriangulateLeafOperationIds,
+  'operatingline.blender.mesh.edit-extrude-region.execute-next': editExtrudeRegionLeafOperationIds,
+  'operatingline.blender.mesh.edit-poke-faces.execute-next': editPokeLeafOperationIds,
+} as const;
+
+const procedureAuthoringMaterializedOperationMcpCallSchema = mcpProcedureCallSchema
+  .omit({ argumentSource: true, actionArguments: true })
+  .safeExtend({
+    serverName: z.literal('operating-line'),
+    toolName: z.enum([
+      'operatingline.blender.geometry-nodes.transform.execute-next',
+      'operatingline.blender.geometry-nodes.light-trails.execute-next',
+      'operatingline.blender.animation.pose-keyframes.execute-next',
+      'operatingline.blender.rig.armature.execute-next',
+      'operatingline.blender.rig.skin-weights.execute-next',
+      'operatingline.blender.modifier.solidify.execute-next',
+      'operatingline.blender.modifier.bevel.execute-next',
+      'operatingline.blender.material.single.execute-next',
+      'operatingline.blender.material.palette.execute-next',
+      'operatingline.blender.modifier.mirror.execute-next',
+      'operatingline.blender.modifier.subdivision-surface.execute-next',
+      'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+      'operatingline.blender.mesh.edit-inset-faces.execute-next',
+      'operatingline.blender.mesh.edit-triangulate.execute-next',
+      'operatingline.blender.mesh.edit-extrude-region.execute-next',
+      'operatingline.blender.mesh.edit-poke-faces.execute-next',
+    ]),
+    arguments: z.strictObject({
+      formatVersion: z.literal('1.0.0'),
+      requestId: z.literal('$runtime.requestId'),
+      replayId: z.literal('$runtime.replayId'),
+      expectedState: z.literal('$runtime.expectedState'),
+    }),
+    sourceOperationId: guideStepIdSchema,
+    operationParameters: z.record(z.string().min(1), z.json()),
+    resultBinding: guideStepIdSchema,
+  });
+
+const procedureAuthoringMaterializedOperationMcpTrackSchema = z
+  .strictObject({
+    id: guideStepIdSchema,
+    availability: z.literal('available'),
+    title: z.string().min(1),
+    preconditions: z.array(procedurePreconditionSchema),
+    modality: z.literal('mcp'),
+    operations: z
+      .array(procedureAuthoringMaterializedOperationMcpCallSchema)
+      .min(1)
+      .max(lightTrailsLeafOperationIds.length),
+  })
+  .superRefine((track, context) => {
+    const expectedOperationIds = operationMcpOperationIdsByTool[track.operations[0]!.toolName];
+    if (
+      track.operations.length !== expectedOperationIds.length ||
+      track.operations.some((operation) => operation.toolName !== track.operations[0]!.toolName)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['operations'],
+        message: 'Operation-level MCP grounding must bind one complete fixed tool profile',
+      });
+      return;
+    }
+    for (const [index, expectedId] of expectedOperationIds.entries()) {
+      const operation = track.operations[index];
+      if (operation?.order !== index + 1 || operation.sourceOperationId !== expectedId) {
+        context.addIssue({
+          code: 'custom',
+          path: ['operations', index],
+          message: 'Operation-level MCP grounding must preserve exact source operation order',
+        });
+      }
+    }
+  });
 
 function sameCanonicalJsonValue(left: unknown, right: unknown): boolean {
   const leftBytes = canonicalizeProtocolJsonValue(left);
@@ -228,6 +343,74 @@ export const procedureAuthoringMcpMaterializedTreeSchema = procedureTreeSchema.s
 });
 export type ProcedureAuthoringMcpMaterializedTree = z.infer<
   typeof procedureAuthoringMcpMaterializedTreeSchema
+>;
+
+export const procedureAuthoringOperationMcpMaterializedTreeSchema = procedureTreeSchema.safeExtend({
+  formatVersion: procedureTreeFormatVersionSchema,
+  nodes: z
+    .array(procedureNodeSchema)
+    .min(1)
+    .superRefine((nodes, context) => {
+      const availableMcpTracks = nodes.flatMap((node) =>
+        node.kind === 'leaf'
+          ? node.mcpTracks.filter((track) => track.availability === 'available')
+          : [],
+      );
+      const hasOperationTrack = availableMcpTracks.some(
+        (track) => procedureAuthoringMaterializedOperationMcpTrackSchema.safeParse(track).success,
+      );
+      if (
+        !hasOperationTrack ||
+        availableMcpTracks.some(
+          (track) =>
+            !procedureAuthoringMaterializedMcpTrackSchema.safeParse(track).success &&
+            !procedureAuthoringMaterializedOperationMcpTrackSchema.safeParse(track).success,
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message:
+            'Materialization result 1.5.0 requires strict operation-level MCP tracks and preserves strict action-level MCP tracks',
+        });
+      }
+    }),
+});
+export type ProcedureAuthoringOperationMcpMaterializedTree = z.infer<
+  typeof procedureAuthoringOperationMcpMaterializedTreeSchema
+>;
+
+export const procedureAuthoringMenuCandidateMaterializedTreeSchema = procedureTreeSchema
+  .safeExtend({ formatVersion: z.literal(procedureTreeMenuCandidateFormatVersion) })
+  .superRefine((tree, context) => {
+    const candidates = tree.nodes.flatMap((node) =>
+      node.kind === 'leaf' ? (node.menuCandidates ?? []) : [],
+    );
+    if (candidates.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['nodes'],
+        message: 'Materialization result 1.6.0 requires at least one menu candidate',
+      });
+    }
+    for (const node of tree.nodes) {
+      if (node.kind !== 'leaf') continue;
+      for (const track of node.mcpTracks) {
+        if (track.availability !== 'available') continue;
+        if (
+          !procedureAuthoringMaterializedMcpTrackSchema.safeParse(track).success &&
+          !procedureAuthoringMaterializedOperationMcpTrackSchema.safeParse(track).success
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['nodes'],
+            message: 'Menu candidate materialization preserves strict MCP tracks',
+          });
+        }
+      }
+    }
+  });
+export type ProcedureAuthoringMenuCandidateMaterializedTree = z.infer<
+  typeof procedureAuthoringMenuCandidateMaterializedTreeSchema
 >;
 
 const procedureAuthoringExtendedShortcutMaterializedNodeSchema = z.discriminatedUnion('kind', [
@@ -423,6 +606,15 @@ const procedureAuthoringMcpMaterializationCoverageArraySchema = z
     }
   });
 
+const procedureAuthoringMenuCandidateMaterializationCoverageArraySchema = z
+  .array(
+    z.union([
+      procedureAuthoringMcpMaterializationCoverageSchema,
+      procedureAuthoringShortcutMaterializationCoverageSchema,
+    ]),
+  )
+  .min(1);
+
 export const procedureAuthoringMaterializationRequestSchema = z.strictObject({
   packet: procedureAuthoringPromptPacketSchema,
   tree: procedureAuthoringCandidateTreeSchema,
@@ -484,6 +676,18 @@ const procedureAuthoringMcpMaterializationResultShape = {
   tree: procedureAuthoringMcpMaterializedTreeSchema,
 } as const;
 
+const procedureAuthoringOperationMcpMaterializationResultShape = {
+  ...procedureAuthoringMaterializationResultBaseShape,
+  coverage: procedureAuthoringMcpMaterializationCoverageArraySchema,
+  tree: procedureAuthoringOperationMcpMaterializedTreeSchema,
+} as const;
+
+const procedureAuthoringMenuCandidateMaterializationResultShape = {
+  ...procedureAuthoringMaterializationResultBaseShape,
+  coverage: procedureAuthoringMenuCandidateMaterializationCoverageArraySchema,
+  tree: procedureAuthoringMenuCandidateMaterializedTreeSchema,
+} as const;
+
 export const procedureAuthoringMaterializationResultSchema = z.discriminatedUnion('formatVersion', [
   z.strictObject({
     formatVersion: z.literal(procedureAuthoringMaterializationLegacyFormatVersion),
@@ -504,6 +708,14 @@ export const procedureAuthoringMaterializationResultSchema = z.discriminatedUnio
   z.strictObject({
     formatVersion: z.literal(procedureAuthoringMaterializationMcpFormatVersion),
     ...procedureAuthoringMcpMaterializationResultShape,
+  }),
+  z.strictObject({
+    formatVersion: z.literal(procedureAuthoringMaterializationOperationMcpFormatVersion),
+    ...procedureAuthoringOperationMcpMaterializationResultShape,
+  }),
+  z.strictObject({
+    formatVersion: z.literal(procedureAuthoringMaterializationMenuCandidateFormatVersion),
+    ...procedureAuthoringMenuCandidateMaterializationResultShape,
   }),
 ]);
 export type ProcedureAuthoringMaterializationResult = z.infer<

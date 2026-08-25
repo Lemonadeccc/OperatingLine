@@ -23,7 +23,7 @@ const expectedStateSchema = z.strictObject({
   sequence: z.number().int().positive(),
 });
 const planSchema = z.strictObject({
-  protocolVersion: z.literal('1.6.0'),
+  protocolVersion: z.enum(['1.6.0', '1.7.0']),
   id: z.string().min(1),
   revision: z.number().int().positive(),
   contentSha256: sha256Schema,
@@ -51,7 +51,7 @@ const catalogAuthoritySchema = z.strictObject({
   }),
 });
 const acceptedDecisionSchema = guideProposalDecisionSchema.safeExtend({
-  protocolVersion: z.literal('1.6.0'),
+  protocolVersion: z.enum(['1.6.0', '1.7.0']),
   adapterId: z.literal('blender'),
   decision: z.literal('accepted'),
 });
@@ -151,6 +151,7 @@ function bindingSemanticsMatch(value: z.infer<typeof bindingContentSchema>): boo
   const sourceTrack = sourceTracks.find((candidate) => candidate.id === value.override.trackId);
   return (
     value.replay.id === value.replayId &&
+    value.acceptance.decision.protocolVersion === value.plan.protocolVersion &&
     value.acceptance.decisionContentSha256 ===
       computeProtocolCanonicalJsonSha256(value.acceptance.decision) &&
     value.acceptance.decision.proposalId === value.proposal.id &&

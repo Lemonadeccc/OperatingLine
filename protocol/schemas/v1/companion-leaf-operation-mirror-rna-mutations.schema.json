@@ -1,0 +1,478 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 28,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.mirror.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_mirror_modifier_create"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "modifier.mirror"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "modifier.mirror"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "mirror_modifier_create"
+          },
+          "pendingModifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingMirrorModifier\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "MirrorModifier"
+          },
+          "modifierType": {
+            "type": "string",
+            "const": "MIRROR"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "const": "Add Modifier"
+              },
+              {
+                "type": "string",
+                "const": "Generate"
+              },
+              {
+                "type": "string",
+                "const": "Mirror"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingMirrorModifier\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 7,
+            "maxItems": 7
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingModifierName",
+          "resourceType",
+          "modifierType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.mirror.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_modifier_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.mirror_contract"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.mirror_contract"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "modifierName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "mirror_modifier_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingMirrorModifier\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.mirror.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 28
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_mirror_modifier_property_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.mirror_contract"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.mirror_contract"
+          },
+          "valueSource": {
+            "type": "string",
+            "enum": [
+              "catalog_constant",
+              "accepted_action_argument"
+            ]
+          },
+          "actionArgument": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "const": "axis"
+              }
+            ]
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "mirror_modifier_property_write"
+          },
+          "modifierName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyName": {
+            "type": "string",
+            "enum": [
+              "use_axis",
+              "use_bisect_axis",
+              "use_bisect_flip_axis",
+              "use_clip",
+              "use_mirror_merge",
+              "merge_threshold",
+              "bisect_threshold",
+              "mirror_object",
+              "use_mirror_vertex_groups",
+              "use_mirror_u",
+              "use_mirror_v",
+              "use_mirror_udim",
+              "offset_u",
+              "offset_v",
+              "mirror_offset_u",
+              "mirror_offset_v",
+              "show_viewport",
+              "show_render",
+              "show_in_editmode",
+              "show_on_cage",
+              "use_apply_on_spline"
+            ]
+          },
+          "componentIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "componentLabel": {
+            "type": "string",
+            "enum": [
+              "X",
+              "Y",
+              "Z"
+            ]
+          },
+          "acceptedValue": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observedValue": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "uiPath": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "string",
+                    "const": "Properties"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "const": "Modifiers"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "use_axis",
+                      "use_bisect_axis",
+                      "use_bisect_flip_axis",
+                      "use_clip",
+                      "use_mirror_merge",
+                      "merge_threshold",
+                      "bisect_threshold",
+                      "mirror_object",
+                      "use_mirror_vertex_groups",
+                      "use_mirror_u",
+                      "use_mirror_v",
+                      "use_mirror_udim",
+                      "offset_u",
+                      "offset_v",
+                      "mirror_offset_u",
+                      "mirror_offset_v",
+                      "show_viewport",
+                      "show_render",
+                      "show_in_editmode",
+                      "show_on_cage",
+                      "use_apply_on_spline"
+                    ]
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 5,
+                "maxItems": 5
+              },
+              {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "string",
+                    "const": "Properties"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "const": "Modifiers"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "use_axis",
+                      "use_bisect_axis",
+                      "use_bisect_flip_axis",
+                      "use_clip",
+                      "use_mirror_merge",
+                      "merge_threshold",
+                      "bisect_threshold",
+                      "mirror_object",
+                      "use_mirror_vertex_groups",
+                      "use_mirror_u",
+                      "use_mirror_v",
+                      "use_mirror_udim",
+                      "offset_u",
+                      "offset_v",
+                      "mirror_offset_u",
+                      "mirror_offset_v",
+                      "show_viewport",
+                      "show_render",
+                      "show_in_editmode",
+                      "show_on_cage",
+                      "use_apply_on_spline"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "X",
+                      "Y",
+                      "Z"
+                    ]
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 6,
+                "maxItems": 6
+              }
+            ]
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "modifierName",
+          "propertyName",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Mirror Modifier create, accepted name and axis, and ordered fixed RNA component/property writes plus observed values and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-mirror-rna-mutations.json"
+}

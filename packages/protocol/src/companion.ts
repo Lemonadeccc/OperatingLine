@@ -152,7 +152,7 @@ export const companionGuideDeliverySchema = z
           properties: { procedureReplayCurrentStateRequest: { type: 'object' } },
           required: ['procedureReplayCurrentStateRequest'],
         },
-        then: { properties: { protocolVersion: { enum: ['1.5.0', '1.6.0'] } } },
+        then: { properties: { protocolVersion: { enum: ['1.5.0', '1.6.0', '1.7.0'] } } },
       },
     ],
   })
@@ -174,7 +174,8 @@ export const companionGuideDeliverySchema = z
     if (
       delivery.procedureReplayCurrentStateRequest != null &&
       delivery.protocolVersion !== '1.5.0' &&
-      delivery.protocolVersion !== '1.6.0'
+      delivery.protocolVersion !== '1.6.0' &&
+      delivery.protocolVersion !== '1.7.0'
     ) {
       context.addIssue({
         code: 'custom',
@@ -392,6 +393,14 @@ export const companionNativeUndoCheckpointSchema = z
       entryPresent: z.literal(true),
       snapshotMatchesSession: z.literal(true),
       artifactsBackedUp: z.literal(true),
+      lineageCheckpointIds: z
+        .array(z.uuid())
+        .min(2)
+        .max(512)
+        .refine((checkpointIds) => new Set(checkpointIds).size === checkpointIds.length, {
+          message: 'Native Undo checkpoint lineage must contain unique checkpoint ids',
+        })
+        .optional(),
     }),
     session: z.strictObject({
       plan: companionPlanReferenceSchema,
@@ -422,6 +431,18 @@ export const companionNativeUndoCheckpointSchema = z
         code: 'custom',
         path: ['session', 'receiptStepIds'],
         message: 'Native Undo receipts must belong to completed or active steps',
+      });
+    }
+    const lineage = checkpoint.journal.lineageCheckpointIds;
+    if (
+      lineage !== undefined &&
+      (lineage.at(-1) !== checkpoint.checkpointId ||
+        lineage.at(-2) !== checkpoint.previousCheckpointId)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['journal', 'lineageCheckpointIds'],
+        message: 'Native Undo checkpoint lineage must end at the current checkpoint edge',
       });
     }
   });
@@ -473,7 +494,7 @@ export const companionStateReportSchema = z
         if: { required: ['observationRetry'] },
         then: {
           properties: {
-            protocolVersion: { enum: ['1.5.0', '1.6.0'] },
+            protocolVersion: { enum: ['1.5.0', '1.6.0', '1.7.0'] },
             transition: { const: 'step_succeeded' },
             observationGate: { type: 'null' },
             observations: {
@@ -570,7 +591,9 @@ export const companionStateReportSchema = z
       {
         if: {
           properties: {
-            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
+            protocolVersion: {
+              enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0'],
+            },
           },
           required: ['protocolVersion'],
         },
@@ -579,7 +602,7 @@ export const companionStateReportSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.5.0', '1.6.0'] } },
+          properties: { protocolVersion: { enum: ['1.5.0', '1.6.0', '1.7.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['artifactAttestation'] },
@@ -758,7 +781,8 @@ export const companionStateReportSchema = z
         report.protocolVersion === '1.3.0' ||
         report.protocolVersion === '1.4.0' ||
         report.protocolVersion === '1.5.0' ||
-        report.protocolVersion === '1.6.0') &&
+        report.protocolVersion === '1.6.0' ||
+        report.protocolVersion === '1.7.0') &&
       report.observationGate === undefined
     ) {
       context.addIssue({
@@ -773,6 +797,7 @@ export const companionStateReportSchema = z
       report.protocolVersion !== '1.4.0' &&
       report.protocolVersion !== '1.5.0' &&
       report.protocolVersion !== '1.6.0' &&
+      report.protocolVersion !== '1.7.0' &&
       report.observationGate !== undefined
     ) {
       context.addIssue({
@@ -782,7 +807,9 @@ export const companionStateReportSchema = z
       });
     }
     if (
-      (report.protocolVersion === '1.5.0' || report.protocolVersion === '1.6.0') &&
+      (report.protocolVersion === '1.5.0' ||
+        report.protocolVersion === '1.6.0' ||
+        report.protocolVersion === '1.7.0') &&
       report.artifactAttestation === undefined
     ) {
       context.addIssue({
@@ -794,6 +821,7 @@ export const companionStateReportSchema = z
     if (
       report.protocolVersion !== '1.5.0' &&
       report.protocolVersion !== '1.6.0' &&
+      report.protocolVersion !== '1.7.0' &&
       report.artifactAttestation !== undefined
     ) {
       context.addIssue({
@@ -806,7 +834,9 @@ export const companionStateReportSchema = z
     if (
       report.transition === 'current_state_rechecked' &&
       (currentStateRequest === undefined ||
-        (report.protocolVersion !== '1.5.0' && report.protocolVersion !== '1.6.0'))
+        (report.protocolVersion !== '1.5.0' &&
+          report.protocolVersion !== '1.6.0' &&
+          report.protocolVersion !== '1.7.0'))
     ) {
       context.addIssue({
         code: 'custom',
@@ -839,7 +869,9 @@ export const companionStateReportSchema = z
     const gate = report.observationGate;
     if (report.observationRetry !== undefined) {
       if (
-        (report.protocolVersion !== '1.5.0' && report.protocolVersion !== '1.6.0') ||
+        (report.protocolVersion !== '1.5.0' &&
+          report.protocolVersion !== '1.6.0' &&
+          report.protocolVersion !== '1.7.0') ||
         report.transition !== 'step_succeeded' ||
         gate !== null ||
         report.observations.length === 0 ||
@@ -855,7 +887,8 @@ export const companionStateReportSchema = z
     if (
       gate?.retry !== undefined &&
       report.protocolVersion !== '1.5.0' &&
-      report.protocolVersion !== '1.6.0'
+      report.protocolVersion !== '1.6.0' &&
+      report.protocolVersion !== '1.7.0'
     ) {
       context.addIssue({
         code: 'custom',

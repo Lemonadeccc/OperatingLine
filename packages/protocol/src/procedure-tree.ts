@@ -14,7 +14,14 @@ import {
   semanticAnchorSchema,
   type GuidePlan,
 } from './guide.js';
-import { menuProofExecutionSchema, shortcutProofExecutionSchema } from './interaction-catalog.js';
+import {
+  candidateInteractionPreconditionSchema,
+  interactionTargetSchema,
+  menuProofExecutionSchema,
+  nativeMenuCandidateEvidenceSchema,
+  omittedActionArgumentSchema,
+  shortcutProofExecutionSchema,
+} from './interaction-catalog.js';
 import {
   procedureParameterProjectionSchema,
   projectProcedureParameter,
@@ -26,9 +33,11 @@ import { catalogVersionSchema, stableVersionRangeSchema } from './version.js';
 
 export const procedureTreeFormatVersion = '1.0.0' as const;
 export const procedureTreeExtendedShortcutFormatVersion = '1.1.0' as const;
+export const procedureTreeMenuCandidateFormatVersion = '1.2.0' as const;
 export const procedureTreeFormatVersionSchema = z.enum([
   procedureTreeFormatVersion,
   procedureTreeExtendedShortcutFormatVersion,
+  procedureTreeMenuCandidateFormatVersion,
 ]);
 
 export const procedureSourceSchema = z.discriminatedUnion('kind', [
@@ -196,6 +205,8 @@ export const mcpProcedureCallSchema = z.strictObject({
   arguments: z.record(z.string().min(1), z.json()),
   argumentSource: z.literal('accepted_leaf_action').optional(),
   actionArguments: z.record(z.string().min(1), z.json()).optional(),
+  sourceOperationId: guideStepIdSchema.optional(),
+  operationParameters: z.record(z.string().min(1), z.json()).optional(),
   resultBinding: guideStepIdSchema.optional(),
 });
 export type McpProcedureCall = z.infer<typeof mcpProcedureCallSchema>;
@@ -321,6 +332,57 @@ export const menuProcedureTrackSchema = z.discriminatedUnion('availability', [
 ]);
 export type MenuProcedureTrack = z.infer<typeof menuProcedureTrackSchema>;
 
+export const menuProcedureCandidateOperationSchema = z.strictObject({
+  ...procedureOperationBaseShape,
+  intent: z.enum(['navigate', 'configure', 'execute', 'verify']),
+  target: interactionTargetSchema,
+  path: z.array(z.string().min(1)).min(1),
+  parameters: z.record(z.string().min(1), z.json()),
+});
+export type MenuProcedureCandidateOperation = z.infer<typeof menuProcedureCandidateOperationSchema>;
+
+export const menuProcedureCandidateSchema = z
+  .strictObject({
+    id: guideStepIdSchema,
+    modality: z.literal('menu'),
+    projection: z.literal('candidate_only'),
+    equivalence: z.literal('not_equivalent_to_managed_action'),
+    executionAuthority: z.literal('none'),
+    title: z.string().min(1),
+    reason: z.string().min(1),
+    preconditions: z.array(candidateInteractionPreconditionSchema).min(1),
+    operations: z.array(menuProcedureCandidateOperationSchema).min(1),
+    omittedActionArguments: z.array(omittedActionArgumentSchema),
+    nativeEvidence: nativeMenuCandidateEvidenceSchema.optional(),
+  })
+  .superRefine((candidate, context) => {
+    if (candidate.nativeEvidence === undefined) return;
+    const operationIds = candidate.operations.map((operation) => operation.id);
+    if (
+      operationIds.length !== candidate.nativeEvidence.operationIds.length ||
+      operationIds.some(
+        (operationId, index) => operationId !== candidate.nativeEvidence?.operationIds[index],
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['nativeEvidence', 'operationIds'],
+        message: 'Native candidate evidence must bind the exact ordered operation ids',
+      });
+    }
+    if (
+      new Set(candidate.nativeEvidence.hostVersions).size !==
+      candidate.nativeEvidence.hostVersions.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['nativeEvidence', 'hostVersions'],
+        message: 'Native candidate evidence host versions must be unique',
+      });
+    }
+  });
+export type MenuProcedureCandidate = z.infer<typeof menuProcedureCandidateSchema>;
+
 export const shortcutProcedureTrackSchema = z.discriminatedUnion('availability', [
   z.strictObject({
     ...availableTrackShape,
@@ -376,6 +438,7 @@ export const procedureLeafNodeSchema = z
       })
       .nullable(),
     semanticOperations: z.array(semanticProcedureOperationSchema).min(1),
+    menuCandidates: z.array(menuProcedureCandidateSchema).optional(),
     menuTracks: z.array(menuProcedureTrackSchema).min(1),
     shortcutTracks: z.array(shortcutProcedureTrackSchema).min(1),
     mcpTracks: z.array(mcpProcedureTrackSchema).min(1),
@@ -390,6 +453,13 @@ export const procedureLeafNodeSchema = z
     parameterProjection: procedureParameterProjectionSchema.optional(),
   })
   .superRefine((leaf, context) => {
+    if (leaf.action === null && leaf.menuCandidates !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['menuCandidates'],
+        message: 'Only executable procedure leaves can carry menu candidates',
+      });
+    }
     for (const [trackIndex, track] of leaf.menuTracks.entries()) {
       if (track.availability !== 'available' || track.proofExecution === undefined) continue;
       const proof = track.proofExecution;
@@ -529,6 +599,15 @@ const extendedPropertyNodeJsonSchema = {
   required: ['kind', 'shortcutTracks'],
 } as const;
 
+const menuCandidateNodeJsonSchema = {
+  type: 'object',
+  properties: {
+    kind: { const: 'leaf' },
+    menuCandidates: { type: 'array', minItems: 1 },
+  },
+  required: ['kind', 'menuCandidates'],
+} as const;
+
 export const procedureTreeSchema = z
   .strictObject({
     formatVersion: procedureTreeFormatVersionSchema,
@@ -546,8 +625,20 @@ export const procedureTreeSchema = z
   })
   .superRefine((tree, context) => {
     let propertyUpdateCount = 0;
+    let menuCandidateCount = 0;
     for (const [nodeIndex, node] of tree.nodes.entries()) {
       if (node.kind !== 'leaf') continue;
+      menuCandidateCount += node.menuCandidates?.length ?? 0;
+      if (
+        tree.formatVersion !== procedureTreeMenuCandidateFormatVersion &&
+        node.menuCandidates !== undefined
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nodes', nodeIndex, 'menuCandidates'],
+          message: 'Procedure menu candidates require tree format 1.2.0',
+        });
+      }
       for (const [trackIndex, track] of node.shortcutTracks.entries()) {
         if (track.availability !== 'available') continue;
         for (const [operationIndex, operation] of track.operations.entries()) {
@@ -566,14 +657,11 @@ export const procedureTreeSchema = z
               message: 'Procedure tree 1.0.0 requires legacy untyped shortcut operations',
             });
           }
-          if (
-            tree.formatVersion === procedureTreeExtendedShortcutFormatVersion &&
-            !('kind' in operation)
-          ) {
+          if (tree.formatVersion !== procedureTreeFormatVersion && !('kind' in operation)) {
             context.addIssue({
               code: 'custom',
               path: operationPath,
-              message: 'Procedure tree 1.1.0 requires normalized typed shortcut operations',
+              message: `Procedure tree ${tree.formatVersion} requires normalized typed shortcut operations`,
             });
           }
           if ('kind' in operation && operation.kind === 'operator_property_update') {
@@ -592,6 +680,16 @@ export const procedureTreeSchema = z
         message: 'Procedure tree 1.1.0 requires an operator_property_update shortcut operation',
       });
     }
+    if (
+      tree.formatVersion === procedureTreeMenuCandidateFormatVersion &&
+      menuCandidateCount === 0
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['nodes'],
+        message: 'Procedure tree 1.2.0 requires at least one menu candidate',
+      });
+    }
   })
   .meta({
     allOf: [
@@ -603,6 +701,20 @@ export const procedureTreeSchema = z
         then: {
           properties: {
             nodes: procedureTreeVersionedNodesJsonSchema({ not: { required: ['kind'] } }),
+          },
+        },
+      },
+      {
+        if: {
+          properties: { formatVersion: { const: procedureTreeMenuCandidateFormatVersion } },
+          required: ['formatVersion'],
+        },
+        then: {
+          properties: {
+            nodes: {
+              ...procedureTreeVersionedNodesJsonSchema({ required: ['kind'] }),
+              contains: menuCandidateNodeJsonSchema,
+            },
           },
         },
       },
@@ -1000,6 +1112,16 @@ function projectionParameters(
     }
     return operation.parameters;
   }
+  if (target.modality === 'menu_candidate') {
+    const candidate = leaf.menuCandidates?.find((item) => item.id === target.trackId);
+    const operation = candidate?.operations.find((item) => item.id === target.operationId);
+    if (operation === undefined) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter projection references unknown menu candidate operation ${target.operationId}`,
+      );
+    }
+    return operation.parameters;
+  }
   if (target.modality === 'shortcut') {
     const track = leaf.shortcutTracks.find((candidate) => candidate.id === target.trackId);
     const operation =
@@ -1023,7 +1145,7 @@ function projectionParameters(
       `Procedure leaf ${leaf.id} parameter projection references unknown available MCP operation ${target.operationId}`,
     );
   }
-  return operation.arguments;
+  return operation.operationParameters ?? operation.arguments;
 }
 
 function validateParameterProjection(
@@ -1164,6 +1286,13 @@ function validateLeaf(
       validateAvailableTrack(leaf, track, semanticIds, evidenceIds);
     }
   }
+  for (const candidate of leaf.menuCandidates ?? []) {
+    if (trackIds.has(candidate.id)) {
+      throw new Error(`Procedure leaf ${leaf.id} contains duplicate track ${candidate.id}`);
+    }
+    trackIds.add(candidate.id);
+    validateAvailableTrack(leaf, candidate, semanticIds, evidenceIds);
+  }
   if (leaf.validation.status === 'verified' && leaf.validation.validatedHostVersions.length === 0) {
     throw new Error(`Verified procedure leaf ${leaf.id} requires a validated host version`);
   }
@@ -1182,9 +1311,9 @@ function validateShortcutSurfaceProtocol(tree: ProcedureTree): void {
       let openSurfacePropertyHostIds = new Set<string>();
       for (const [operationIndex, operation] of track.operations.entries()) {
         if (!('kind' in operation)) {
-          if (tree.formatVersion === procedureTreeExtendedShortcutFormatVersion) {
+          if (tree.formatVersion !== procedureTreeFormatVersion) {
             throw new Error(
-              `Procedure tree ${tree.id} format 1.1.0 requires normalized key_input shortcut operations`,
+              `Procedure tree ${tree.id} format ${tree.formatVersion} requires normalized key_input shortcut operations`,
             );
           }
           if (openSurfaceOperationId !== undefined) {
@@ -1507,6 +1636,28 @@ export function compileProcedureTreeToGuidePlan(tree: ProcedureTree): GuidePlan 
           rollback: { mode: 'checkpoint_restore' as const, checkpointRequired: true },
         };
       }
+      const candidateMenuTracks = node.menuCandidates ?? [];
+      const candidateMenuProjection =
+        candidateMenuTracks.length === 1
+          ? {
+              projection: 'candidate_only' as const,
+              interactionCatalogVersion: tree.interactionCatalogVersion,
+              id: candidateMenuTracks[0]!.id,
+              modality: 'menu' as const,
+              equivalence: candidateMenuTracks[0]!.equivalence,
+              executionAuthority: candidateMenuTracks[0]!.executionAuthority,
+              title: candidateMenuTracks[0]!.title,
+              reason: candidateMenuTracks[0]!.reason,
+              preconditions: structuredClone(candidateMenuTracks[0]!.preconditions),
+              operations: structuredClone(candidateMenuTracks[0]!.operations),
+              omittedActionArguments: structuredClone(
+                candidateMenuTracks[0]!.omittedActionArguments,
+              ),
+              ...(candidateMenuTracks[0]!.nativeEvidence === undefined
+                ? {}
+                : { nativeEvidence: structuredClone(candidateMenuTracks[0]!.nativeEvidence) }),
+            }
+          : undefined;
       return {
         ...common,
         explanation: node.semanticOperations.map((operation) => operation.description).join(' '),
@@ -1516,6 +1667,7 @@ export function compileProcedureTreeToGuidePlan(tree: ProcedureTree): GuidePlan 
         ...(node.observationPolicy === undefined
           ? {}
           : { observationPolicy: node.observationPolicy }),
+        ...(candidateMenuProjection === undefined ? {} : { candidateMenuProjection }),
         rollback: node.rollback,
       };
     }),

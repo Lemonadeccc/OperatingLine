@@ -22,6 +22,7 @@ import {
   computeCompanionMenuControlProofOperationReceiptContentSha256,
   computeProcedureMenuControlProofBindingContentSha256,
   computeProtocolCanonicalJsonSha256,
+  guideProtocolVersion,
   protocolJsonValueCanonicalization,
   type CompanionExecutionTrackExecutionProgress,
 } from '@operatingline/protocol';
@@ -2834,7 +2835,7 @@ describe('Companion execution-track v2 protocol', () => {
       observedAt: '2026-08-22T10:06:01Z',
     });
     const recoveredReport = {
-      protocolVersion: '1.6.0',
+      protocolVersion: guideProtocolVersion,
       reportId: recoveredReportId,
       sequence: recoveredReportSequence,
       adapterId: binding.target.adapterId,

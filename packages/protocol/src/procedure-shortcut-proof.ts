@@ -4,6 +4,7 @@ import {
   canonicalizeProtocolJsonValue,
   protocolJsonValueCanonicalization,
 } from './canonical-json-value.js';
+import { subdivisionSurfaceLeafOperationIds } from './companion-leaf-operation.js';
 import { guideStepIdSchema } from './guide.js';
 import { shortcutProofExecutionSchema } from './interaction-catalog.js';
 import {
@@ -28,6 +29,9 @@ const targetSchema = z.strictObject({ adapterId: z.literal('blender'), instanceI
 const shortcutTargetId = 'tutorial.cube' as const;
 const shortcutModifierId = 'tutorial.cube.subdivision_surface' as const;
 const shortcutModifierName = 'OperatingLine.Cube.SubdivisionSurface' as const;
+const subdivisionSurfaceRecipeTitle = 'Add a bounded Subdivision Surface modifier' as const;
+const meshEditSubdivideRecipeTitle =
+  'Subdivide an owned mesh through a bounded Edit Mode operation' as const;
 const integritySchema = z.strictObject({
   algorithm: z.literal('sha256'),
   canonicalization: z.literal(protocolJsonValueCanonicalization),
@@ -114,8 +118,121 @@ export const procedureShortcutProofProposalRecordSchema = proposalRecordContentS
       leaf?.kind === 'leaf' ? leaf.anchors.filter((anchor) => anchor.kind === 'operator') : [];
     const isSubdivisionSurface =
       record.recipeId === 'blender.modifier.add_subdivision_surface.semantic';
+    const expectedRecipeTitle = isSubdivisionSurface
+      ? subdivisionSurfaceRecipeTitle
+      : meshEditSubdivideRecipeTitle;
     const actionArguments =
       leaf?.kind === 'leaf' && leaf.action !== null ? leaf.action.arguments : undefined;
+    const orderedSemanticOperations =
+      leaf?.kind === 'leaf'
+        ? [...leaf.semanticOperations].sort((left, right) => left.order - right.order)
+        : [];
+    const semanticRefs = orderedSemanticOperations.map((operation) => operation.id);
+    const evidenceRefs = [
+      ...new Set(orderedSemanticOperations.flatMap((operation) => operation.evidenceRefs)),
+    ];
+    const expectedActionLevelMcpTrack =
+      leaf?.kind === 'leaf' && leaf.action !== null
+        ? {
+            id: `${record.recipeId}.mcp`,
+            availability: 'available',
+            title: `${expectedRecipeTitle} action-level MCP projection`,
+            preconditions: [],
+            modality: 'mcp',
+            operations: [
+              {
+                id: `${record.recipeId}.mcp.execute`,
+                order: 1,
+                semanticRefs,
+                description: `Execute ${leaf.action.name} as the accepted replay next step`,
+                evidenceRefs,
+                serverName: 'operating-line',
+                toolName: 'operatingline.blender.action.execute',
+                arguments: {
+                  formatVersion: '1.0.0',
+                  requestId: '$runtime.requestId',
+                  replayId: '$runtime.replayId',
+                  expectedState: '$runtime.expectedState',
+                },
+                argumentSource: 'accepted_leaf_action',
+                actionArguments: leaf.action.arguments,
+                resultBinding: `${leaf.id}.companion_state_report`,
+              },
+            ],
+          }
+        : undefined;
+    const subdivisionSurfaceOperationParameters =
+      actionArguments === undefined
+        ? undefined
+        : [
+            {
+              targetId: actionArguments['targetId'],
+              modifierId: actionArguments['modifierId'],
+            },
+            {},
+            {},
+            {
+              modifierName: actionArguments['modifierName'],
+              viewportLevel: actionArguments['viewportLevel'],
+            },
+          ];
+    const expectedSubdivisionSurfaceOperationMcpTrack =
+      isSubdivisionSurface &&
+      leaf?.kind === 'leaf' &&
+      subdivisionSurfaceOperationParameters !== undefined
+        ? {
+            id: `${record.recipeId}.mcp`,
+            availability: 'available',
+            title: `${expectedRecipeTitle} operation-level MCP projection`,
+            preconditions: [],
+            modality: 'mcp',
+            operations: subdivisionSurfaceLeafOperationIds.map((sourceOperationId, index) => ({
+              id: `${record.recipeId}.mcp.${String(index + 1).padStart(2, '0')}`,
+              order: index + 1,
+              semanticRefs,
+              description: `Execute ${sourceOperationId} as the accepted replay next operation`,
+              evidenceRefs,
+              serverName: 'operating-line',
+              toolName: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+              arguments: {
+                formatVersion: '1.0.0',
+                requestId: '$runtime.requestId',
+                replayId: '$runtime.replayId',
+                expectedState: '$runtime.expectedState',
+              },
+              sourceOperationId,
+              operationParameters: subdivisionSurfaceOperationParameters[index],
+              resultBinding: `${leaf.id}.${sourceOperationId}.companion_leaf_operation_progress`,
+            })),
+          }
+        : undefined;
+    const expectedUnavailableMcpTrack = {
+      id: `${record.recipeId}.mcp`,
+      availability: 'unavailable',
+      title: expectedRecipeTitle,
+      reason: 'No approved action-level MCP tool is available.',
+      modality: 'mcp',
+    };
+    const mcpTrack = leaf?.kind === 'leaf' ? leaf.mcpTracks[0] : undefined;
+    const exactActionLevelMcpTrack =
+      coverage?.mcp === 'materialized' &&
+      mcpTrack !== undefined &&
+      expectedActionLevelMcpTrack !== undefined &&
+      hashCanonical(mcpTrack) === hashCanonical(expectedActionLevelMcpTrack);
+    const exactSubdivisionSurfaceOperationMcpTrack =
+      coverage?.mcp === 'materialized' &&
+      mcpTrack !== undefined &&
+      expectedSubdivisionSurfaceOperationMcpTrack !== undefined &&
+      hashCanonical(mcpTrack) === hashCanonical(expectedSubdivisionSurfaceOperationMcpTrack);
+    const exactUnavailableMcpTrack =
+      isSubdivisionSurface &&
+      coverage?.mcp === 'unavailable' &&
+      mcpTrack !== undefined &&
+      hashCanonical(mcpTrack) === hashCanonical(expectedUnavailableMcpTrack);
+    const exactMcpTrack =
+      exactActionLevelMcpTrack ||
+      exactSubdivisionSurfaceOperationMcpTrack ||
+      exactUnavailableMcpTrack;
     const actionProfileMatches = isSubdivisionSurface
       ? actionArguments?.['targetId'] === shortcutTargetId &&
         actionArguments['modifierId'] === shortcutModifierId &&
@@ -147,6 +264,7 @@ export const procedureShortcutProofProposalRecordSchema = proposalRecordContentS
       leaf.action === null ||
       !actionProfileMatches ||
       coverage?.recipeId !== record.recipeId ||
+      coverage.menu !== 'unavailable' ||
       coverage.shortcut !== 'materialized' ||
       proposalStep?.action === null ||
       proposalStep?.action === undefined ||
@@ -157,7 +275,7 @@ export const procedureShortcutProofProposalRecordSchema = proposalRecordContentS
       leaf.menuTracks.length !== 1 ||
       leaf.menuTracks[0]?.availability !== 'unavailable' ||
       leaf.mcpTracks.length !== 1 ||
-      leaf.mcpTracks[0]?.availability !== (isSubdivisionSurface ? 'unavailable' : 'available')
+      !exactMcpTrack
     ) {
       context.addIssue({
         code: 'custom',

@@ -226,6 +226,91 @@ describe('action argument schemas', () => {
     ]);
   });
 
+  it('keeps each bone on one rotation channel across keyframes', () => {
+    const poseSchema = {
+      type: 'object',
+      required: ['boneName'],
+      exactlyOneOfProperties: ['rotationEuler', 'rotationQuaternion', 'rotationAxisAngle'],
+      properties: {
+        boneName: { type: 'string' },
+        rotationEuler: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 },
+        rotationQuaternion: {
+          type: 'array',
+          items: { type: 'number' },
+          minItems: 4,
+          maxItems: 4,
+        },
+        rotationAxisAngle: {
+          type: 'array',
+          items: { type: 'number' },
+          minItems: 4,
+          maxItems: 4,
+          axisAngleUnitAxis: true,
+        },
+      },
+      additionalProperties: false,
+    } as const;
+    const schema = {
+      type: 'array',
+      consistentBoneRotationChannels: true,
+      items: {
+        type: 'object',
+        required: ['frame', 'poses'],
+        properties: {
+          frame: { type: 'integer' },
+          poses: { type: 'array', items: poseSchema },
+        },
+        additionalProperties: false,
+      },
+    } as const;
+
+    validateActionArgumentsSchema(schema);
+    expect(
+      validateActionArguments(
+        [
+          {
+            frame: 1,
+            poses: [
+              { boneName: 'Euler', rotationEuler: [0, 0, 0] },
+              { boneName: 'Quaternion', rotationQuaternion: [1, 0, 0, 0] },
+              { boneName: 'AxisAngle', rotationAxisAngle: [0, 0, 0, 1] },
+            ],
+          },
+          {
+            frame: 2,
+            poses: [
+              { boneName: 'Euler', rotationEuler: [0, 0.1, 0] },
+              { boneName: 'Quaternion', rotationQuaternion: [0.99, 0, 0.1, 0] },
+              { boneName: 'AxisAngle', rotationAxisAngle: [0.2, 0, 0, 1] },
+            ],
+          },
+        ],
+        schema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        [
+          { frame: 1, poses: [{ boneName: 'Mixed', rotationEuler: [0, 0, 0] }] },
+          { frame: 2, poses: [{ boneName: 'Mixed', rotationQuaternion: [1, 0, 0, 0] }] },
+        ],
+        schema,
+      ),
+    ).toEqual(['[1].poses[0].boneName rotation channel must remain rotationEuler']);
+    expect(
+      validateActionArguments(
+        [
+          { frame: 1, poses: [{ boneName: 'AxisAngle', rotationAxisAngle: [0, 0, 0, 1] }] },
+          {
+            frame: 2,
+            poses: [{ boneName: 'AxisAngle', rotationAxisAngle: [0.2, 0, 0.5, 0] }],
+          },
+        ],
+        schema,
+      ),
+    ).toEqual(['[1].poses[0].rotationAxisAngle axis must have unit length']);
+  });
+
   it('enforces reusable cross-property geometry invariants', () => {
     const schema = {
       type: 'object',
@@ -258,6 +343,46 @@ describe('action argument schemas', () => {
     ]);
   });
 
+  it('requires exactly one declared alternative property', () => {
+    const schema = {
+      type: 'object',
+      required: ['name'],
+      exactlyOneOfProperties: ['rotationEuler', 'rotationQuaternion'],
+      properties: {
+        name: { type: 'string' },
+        rotationEuler: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 },
+        rotationQuaternion: {
+          type: 'array',
+          items: { type: 'number' },
+          minItems: 4,
+          maxItems: 4,
+        },
+      },
+      additionalProperties: false,
+    } as const;
+
+    validateActionArgumentsSchema(schema);
+    expect(validateActionArguments({ name: 'Euler', rotationEuler: [0, 0, 0] }, schema)).toEqual(
+      [],
+    );
+    expect(
+      validateActionArguments({ name: 'Quaternion', rotationQuaternion: [1, 0, 0, 0] }, schema),
+    ).toEqual([]);
+    expect(validateActionArguments({ name: 'Missing' }, schema)).toEqual([
+      'arguments requires exactly one property among rotationEuler, rotationQuaternion',
+    ]);
+    expect(
+      validateActionArguments(
+        {
+          name: 'Both',
+          rotationEuler: [0, 0, 0],
+          rotationQuaternion: [1, 0, 0, 0],
+        },
+        schema,
+      ),
+    ).toEqual(['arguments requires exactly one property among rotationEuler, rotationQuaternion']);
+  });
+
   it('fails closed on unknown and malformed schema keywords', () => {
     expect(() => validateActionArgumentsSchema({ type: 'string', format: 'uuid' })).toThrow(
       'unknown keyword format',
@@ -282,6 +407,20 @@ describe('action argument schemas', () => {
         items: { type: 'object', properties: {}, additionalProperties: false },
       }),
     ).toThrow('strictlyIncreasingFrames requires a required frame field with numeric schema');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'array',
+        consistentBoneRotationChannels: true,
+        items: {
+          type: 'object',
+          required: ['frame'],
+          properties: { frame: { type: 'integer' } },
+          additionalProperties: false,
+        },
+      }),
+    ).toThrow(
+      'consistentBoneRotationChannels requires poses with boneName and exactly one Euler/quaternion channel plus optional axis-angle support',
+    );
     expect(() =>
       validateActionArgumentsSchema({
         type: 'array',
@@ -339,6 +478,22 @@ describe('action argument schemas', () => {
         additionalProperties: false,
       }),
     ).toThrow('atLeastOnePositiveProperty requires numeric property name');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'object',
+        exactlyOneOfProperties: ['first', 'missing'],
+        properties: { first: { type: 'number' } },
+        additionalProperties: false,
+      }),
+    ).toThrow('exactlyOneOfProperties references unknown property missing');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'object',
+        exactlyOneOfProperties: ['first', 'first'],
+        properties: { first: { type: 'number' } },
+        additionalProperties: false,
+      }),
+    ).toThrow('exactlyOneOfProperties must not repeat property names');
     expect(() =>
       validateActionArgumentsSchema({
         type: 'array',

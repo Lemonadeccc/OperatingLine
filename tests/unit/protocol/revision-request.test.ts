@@ -252,6 +252,9 @@ describe('guide revision request protocol', () => {
     };
     expect(guideRevisionRequestSchema.safeParse(candidate).success).toBe(true);
     expect(
+      guideRevisionRequestSchema.safeParse({ ...candidate, protocolVersion: '1.7.0' }).success,
+    ).toBe(true);
+    expect(
       guideRevisionRequestSchema.safeParse({ ...candidate, protocolVersion: '1.5.0' }).success,
     ).toBe(false);
     expect(

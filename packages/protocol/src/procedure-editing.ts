@@ -2,11 +2,7 @@ import { z } from 'zod';
 
 import { protocolJsonValueCanonicalization } from './canonical-json-value.js';
 import { guideStepIdSchema } from './guide.js';
-import {
-  procedureOperationSearchModalitySchema,
-  procedureTreeIntegritySchema,
-  procedureTreeSchema,
-} from './procedure-tree.js';
+import { procedureTreeIntegritySchema, procedureTreeSchema } from './procedure-tree.js';
 
 export const procedureTreeEditorFormatVersion = '1.0.0' as const;
 export const procedureTreeEditorFormatVersionSchema = z.literal(procedureTreeEditorFormatVersion);
@@ -188,6 +184,7 @@ const stableCollectionSchema = z.enum([
   'evidence',
   'nodes',
   'semanticOperations',
+  'menuCandidates',
   'menuTracks',
   'shortcutTracks',
   'mcpTracks',
@@ -902,7 +899,7 @@ export const procedureTreeEditorCommentAnchorSchema = z.discriminatedUnion('kind
     kind: z.literal('operation'),
     treeId: guideStepIdSchema,
     nodeId: guideStepIdSchema,
-    modality: procedureOperationSearchModalitySchema,
+    modality: z.enum(['semantic', 'menu_candidate', 'menu', 'shortcut', 'mcp']),
     trackId: guideStepIdSchema.nullable(),
     operationId: guideStepIdSchema,
   }),
@@ -1020,6 +1017,12 @@ export const procedureTreeEditorParameterTargetSchema = z.discriminatedUnion('ki
   z.strictObject({
     kind: z.literal('semantic'),
     nodeId: guideStepIdSchema,
+    operationId: guideStepIdSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('menu_candidate'),
+    nodeId: guideStepIdSchema,
+    trackId: guideStepIdSchema,
     operationId: guideStepIdSchema,
   }),
   z.strictObject({

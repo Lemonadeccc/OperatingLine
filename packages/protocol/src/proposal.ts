@@ -94,7 +94,8 @@ export const guideProposalSchema = z
     if (
       (proposal.protocolVersion === '1.4.0' ||
         proposal.protocolVersion === '1.5.0' ||
-        proposal.protocolVersion === '1.6.0') &&
+        proposal.protocolVersion === '1.6.0' ||
+        proposal.protocolVersion === '1.7.0') &&
       proposal.revisionOperation === undefined
     ) {
       context.addIssue({
@@ -106,6 +107,7 @@ export const guideProposalSchema = z
       proposal.protocolVersion !== '1.4.0' &&
       proposal.protocolVersion !== '1.5.0' &&
       proposal.protocolVersion !== '1.6.0' &&
+      proposal.protocolVersion !== '1.7.0' &&
       proposal.revisionOperation !== undefined
     ) {
       context.addIssue({
@@ -141,7 +143,7 @@ export const guideProposalSchema = z
         if: {
           properties: {
             protocolVersion: {
-              enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'],
+              enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0'],
             },
           },
           required: ['protocolVersion'],
@@ -171,7 +173,7 @@ export const guideProposalSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0', '1.6.0'] } },
+          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0', '1.6.0', '1.7.0'] } },
           required: ['protocolVersion', 'revisionRequestId'],
         },
         then: { required: ['revisionOperation'] },

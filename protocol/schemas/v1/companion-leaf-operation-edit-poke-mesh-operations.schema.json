@@ -1,0 +1,583 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 3,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-poke-faces.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_mesh_copy"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "operator.poke_faces"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "operator.poke_faces"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_poke_mesh_create"
+          },
+          "pendingResultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingEditPokeMesh\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "Mesh"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Poke Faces"
+              },
+              {
+                "type": "string",
+                "const": "Result Mesh"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingEditPokeMesh\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingResultMeshName",
+          "resourceType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-poke-faces.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_bmesh_poke_argument_projection"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "operator.poke_faces"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "operator.poke_faces"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "offset"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_poke_parameter_projection"
+          },
+          "parameterName": {
+            "type": "string",
+            "const": "offset"
+          },
+          "acceptedValue": {
+            "type": "number",
+            "minimum": -100,
+            "maximum": 100
+          },
+          "projectedValue": {
+            "type": "number"
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Adjust Last Operation"
+              },
+              {
+                "type": "string",
+                "const": "Offset"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "parameterName",
+          "acceptedValue",
+          "projectedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-poke-faces.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 3
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_bmesh_ops_poke"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "operator.poke_faces"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "operator.poke_faces"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_and_catalog_constants"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_poke_mesh_content_write"
+          },
+          "fixedParameters": {
+            "type": "object",
+            "properties": {
+              "centerMode": {
+                "type": "string",
+                "const": "MEAN_WEIGHTED"
+              },
+              "useRelativeOffset": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "centerMode",
+              "useRelativeOffset"
+            ],
+            "additionalProperties": false
+          },
+          "sourceTopology": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "sourceLoopCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 32768
+          },
+          "expectedTopology": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "resultTopology": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "sourceContentPreserved": {
+            "type": "boolean",
+            "const": true
+          },
+          "resultContentObserved": {
+            "type": "boolean",
+            "const": true
+          },
+          "allTriangles": {
+            "type": "boolean",
+            "const": true
+          },
+          "resultNondegenerate": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Poke Faces"
+              },
+              {
+                "type": "string",
+                "const": "Apply BMesh Poke Faces"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "fixedParameters",
+          "sourceTopology",
+          "sourceLoopCount",
+          "expectedTopology",
+          "resultTopology",
+          "sourceContentPreserved",
+          "resultContentObserved",
+          "allTriangles",
+          "resultNondegenerate",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-poke-faces.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_mesh_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.managed_poke_faces_contract"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.managed_poke_faces_contract"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "resultMeshName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_poke_mesh_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingEditPokeMesh\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Poke Faces"
+              },
+              {
+                "type": "string",
+                "const": "Result Mesh Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-poke-faces.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_object_data_link_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.managed_poke_faces_contract"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.managed_poke_faces_contract"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_poke_object_data_link_write"
+          },
+          "sourceMeshLogicalId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshLogicalId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedLink": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Poke Faces"
+              },
+              {
+                "type": "string",
+                "const": "Object Data Link"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "sourceMeshLogicalId",
+          "resultMeshLogicalId",
+          "observedLink",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-edit-poke-mesh-operations.json"
+}

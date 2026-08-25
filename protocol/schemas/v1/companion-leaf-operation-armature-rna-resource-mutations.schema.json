@@ -1,0 +1,485 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 3,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_data_create"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "menu.add_armature"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "menu.add_armature"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_data_create"
+          },
+          "pendingDataName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingArmatureData\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "Armature"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Layout"
+              },
+              {
+                "type": "string",
+                "const": "Add"
+              },
+              {
+                "type": "string",
+                "const": "Armature"
+              },
+              {
+                "type": "string",
+                "const": "Data"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingArmatureData\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingDataName",
+          "resourceType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_object_create"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "menu.add_armature"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "menu.add_armature"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_object_create"
+          },
+          "pendingObjectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingArmatureObject\\.[0-9a-f]{8}$"
+          },
+          "pendingDataName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingArmatureData\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "Object"
+          },
+          "objectType": {
+            "type": "string",
+            "const": "ARMATURE"
+          },
+          "observedDataBinding": {
+            "type": "boolean",
+            "const": true
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Layout"
+              },
+              {
+                "type": "string",
+                "const": "Add"
+              },
+              {
+                "type": "string",
+                "const": "Armature"
+              },
+              {
+                "type": "string",
+                "const": "Object"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingArmatureObject\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingObjectName",
+          "pendingDataName",
+          "resourceType",
+          "objectType",
+          "observedDataBinding",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 3
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_collection_object_link"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "menu.add_armature"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "menu.add_armature"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "collectionId"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "collection_object_link"
+          },
+          "collectionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pendingObjectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingArmatureObject\\.[0-9a-f]{8}$"
+          },
+          "observedLink": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Outliner"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingArmatureObject\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "collectionId",
+          "pendingObjectName",
+          "observedLink",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_object_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.armature.object_name"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.armature.object_name"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "objectName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_object_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingArmatureObject\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Layout"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Object Properties"
+              },
+              {
+                "type": "string",
+                "const": "Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_data_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.armature.data_name"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.armature.data_name"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "dataName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_data_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingArmatureData\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Layout"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Object Data Properties"
+              },
+              {
+                "type": "string",
+                "const": "Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Armature data/Object create, collection link, and accepted-name write order plus managed pending identity require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-armature-rna-resource-mutations.json"
+}

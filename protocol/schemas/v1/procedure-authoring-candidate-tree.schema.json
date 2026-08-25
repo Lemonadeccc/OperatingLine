@@ -816,7 +816,10 @@
                 "properties": {
                   "formatVersion": {
                     "type": "string",
-                    "const": "1.0.0"
+                    "enum": [
+                      "1.0.0",
+                      "1.1.0"
+                    ]
                   },
                   "provenance": {
                     "type": "object",
@@ -932,6 +935,7 @@
                           "type": "string",
                           "enum": [
                             "identity",
+                            "json_identity",
                             "uniform_vector3",
                             "divide_by_two",
                             "vector3_x",
@@ -1013,6 +1017,77 @@
                                 "modality": {
                                   "type": "string",
                                   "const": "menu"
+                                },
+                                "trackId": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "operationId": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "path": {
+                                  "minItems": 1,
+                                  "maxItems": 32,
+                                  "type": "array",
+                                  "items": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "const": "field"
+                                          },
+                                          "name": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 180
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "name"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "const": "index"
+                                          },
+                                          "index": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 1000000
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "index"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "modality",
+                                "trackId",
+                                "operationId",
+                                "path"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "modality": {
+                                  "type": "string",
+                                  "const": "menu_candidate"
                                 },
                                 "trackId": {
                                   "type": "string",

@@ -11,7 +11,19 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.22.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.27.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.26.0' }).catalogVersion,
+    ).toBe('1.26.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.24.0' }).catalogVersion,
+    ).toBe('1.24.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.23.0' }).catalogVersion,
+    ).toBe('1.23.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.22.0' }).catalogVersion,
+    ).toBe('1.22.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.18.0' }).catalogVersion,
     ).toBe('1.18.0');
@@ -294,7 +306,9 @@ describe('action catalog registry', () => {
       'd235d89dc59f759da46bff12298ac87cbcccf04bd8bdc0430e28dd24d43716db',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.22.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     for (const [actionName, observationKind] of [
       ['blender.mesh.create_cone', 'cone_ready'],
@@ -306,6 +320,169 @@ describe('action catalog registry', () => {
         (kind) => kind !== observationKind,
       );
     }
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.22.0 and adds only bounded no-bake light trails in 1.23.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.22.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '3d1134d354c071bdfba271d36649edc3981c25e867ef623290f13e8e5f259838',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.23.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
+    const lightTrails = active.actions.find(
+      (action) => action.name === 'blender.geometry_nodes.create_light_trails',
+    );
+    if (lightTrails === undefined) throw new Error('Expected light trails action');
+
+    expect(lightTrails.supportedObservationKinds).toEqual(['light_trails_ready']);
+    expect(lightTrails.safety).toMatchObject({
+      sideEffect: 'scene_write',
+      networkAccess: false,
+      fileAccess: 'none',
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
+      (actionName) => actionName !== lightTrails.name,
+    );
+    active.semanticCapabilities = active.semanticCapabilities?.filter(
+      (capability) => capability.id !== 'geometry_nodes.light_trails',
+    );
+    active.actions = active.actions.filter((action) => action.name !== lightTrails.name);
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.23.0 and adds only bounded light-trails look development in 1.24.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.23.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '357d5395a5d0429ae87bed902228fef29e4fa3825f372a606d168bb9ca4174aa',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.24.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
+    const lookdev = active.actions.find(
+      (action) => action.name === 'blender.lookdev.create_light_trails_scene',
+    );
+    if (lookdev === undefined) throw new Error('Expected light-trails look-development action');
+
+    expect(lookdev.supportedObservationKinds).toEqual(['light_trails_scene_ready']);
+    expect(lookdev.safety).toMatchObject({
+      sideEffect: 'scene_write',
+      networkAccess: false,
+      fileAccess: 'none',
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningPhases![3]!.actionNames = active.planningPhases![3]!.actionNames.filter(
+      (actionName) => actionName !== lookdev.name,
+    );
+    active.semanticCapabilities = active.semanticCapabilities?.filter(
+      (capability) => capability.id !== 'lookdev.light_trails_scene',
+    );
+    active.actions = active.actions.filter((action) => action.name !== lookdev.name);
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.24.0 and changes only bounded pose rotation channels in 1.25.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.24.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '1db75e6cdff14f7f8c84bb57befebbb1a5633b7e6ec0d6f26b33ac77c0337d44',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.25.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '2888544c982ac7656e5d4089eb164779c5ba927feebf476f7d5f756ba1517340',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const actionIndex = active.actions.findIndex(
+      (action) => action.name === 'blender.animation.create_pose_keyframes',
+    );
+    const frozenActionIndex = frozen.actions.findIndex(
+      (action) => action.name === 'blender.animation.create_pose_keyframes',
+    );
+    if (actionIndex < 0 || frozenActionIndex < 0) throw new Error('Expected pose action');
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningNotes = frozen.planningNotes;
+    active.actions[actionIndex] = frozen.actions[frozenActionIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.25.0 and adds only bounded axis-angle pose channels in 1.26.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.25.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '2888544c982ac7656e5d4089eb164779c5ba927feebf476f7d5f756ba1517340',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.26.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      'cf30ee3f90c740bb2319fba89bf8708034999b5b2cc842821b1f39b9831c8060',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const actionIndex = active.actions.findIndex(
+      (action) => action.name === 'blender.animation.create_pose_keyframes',
+    );
+    const frozenActionIndex = frozen.actions.findIndex(
+      (action) => action.name === 'blender.animation.create_pose_keyframes',
+    );
+    if (actionIndex < 0 || frozenActionIndex < 0) throw new Error('Expected pose action');
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningNotes = frozen.planningNotes;
+    active.actions[actionIndex] = frozen.actions[frozenActionIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.26.0 and declares the Skin Weights modifier as a created resource in 1.27.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.26.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'cf30ee3f90c740bb2319fba89bf8708034999b5b2cc842821b1f39b9831c8060',
+    );
+    const activeBytes = readFileSync(resolve('adapters/blender/catalog/v1/action-catalog.json'));
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '3ecc3f8645ee09e0985fadb45b428e833c6ad4fd2f40d3338a8c0ad9e27937a7',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const frozenIndex = frozen.actions.findIndex(
+      (action) => action.name === 'blender.rig.bind_skin_weights',
+    );
+    const activeIndex = active.actions.findIndex(
+      (action) => action.name === 'blender.rig.bind_skin_weights',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Skin Weights action');
+
+    expect(
+      frozen.actions[frozenIndex]!.resourceEffects.find(
+        (effect) => effect.resourceType === 'ARMATURE_MODIFIER',
+      )?.access,
+    ).toBe('mutate');
+    expect(
+      active.actions[activeIndex]!.resourceEffects.find(
+        (effect) => effect.resourceType === 'ARMATURE_MODIFIER',
+      )?.access,
+    ).toBe('create');
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.actions[activeIndex] = frozen.actions[frozenIndex]!;
     expect(active).toEqual(frozen);
   });
 

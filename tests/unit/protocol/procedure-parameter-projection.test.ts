@@ -107,6 +107,14 @@ describe('procedure parameter projection protocol', () => {
     const identity = projectProcedureParameter(vector, 'identity');
     expect(identity).toEqual(vector);
     expect(identity).not.toBe(vector);
+    const structured = {
+      frames: [
+        { frame: 1, poses: [{ boneName: 'OperatingLine.Root', rotationQuaternion: [1, 0, 0, 0] }] },
+      ],
+    };
+    const structuredIdentity = projectProcedureParameter(structured, 'json_identity');
+    expect(structuredIdentity).toEqual(structured);
+    expect(structuredIdentity).not.toBe(structured);
     expect(projectProcedureParameter(0.25, 'uniform_vector3')).toEqual([0.25, 0.25, 0.25]);
     expect(projectProcedureParameter(2, 'divide_by_two')).toBe(1);
     expect(projectProcedureParameter([4, 5, 6], 'vector3_x')).toBe(4);
@@ -114,6 +122,9 @@ describe('procedure parameter projection protocol', () => {
     expect(projectProcedureParameter([4, 5, 6], 'vector3_z')).toBe(6);
 
     expect(() => projectProcedureParameter(Number.NaN, 'identity')).toThrow('only scalar');
+    expect(() => projectProcedureParameter(Number.NaN, 'json_identity')).toThrow(
+      'finite JSON value',
+    );
     expect(() => projectProcedureParameter({}, 'identity')).toThrow('only scalar');
     expect(() => projectProcedureParameter('2', 'divide_by_two')).toThrow('finite number');
     expect(() => projectProcedureParameter([1, 2], 'vector3_x')).toThrow('finite numeric vector3');

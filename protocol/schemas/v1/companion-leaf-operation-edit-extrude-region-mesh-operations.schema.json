@@ -1,0 +1,776 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 3,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-extrude-region.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_bmesh_region_validation"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.select_face_region"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.select_face_region"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "polygonIndices"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_extrude_region_selection_projection"
+          },
+          "acceptedPolygonIndices": {
+            "minItems": 1,
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8191
+            }
+          },
+          "observedPolygonIndices": {
+            "minItems": 1,
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8191
+            }
+          },
+          "sourceTopology": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "selectedFaceCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 256
+          },
+          "selectedEdgeCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 16384
+          },
+          "selectedVertexCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 8192
+          },
+          "boundaryEdgeCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 16384
+          },
+          "selectionObserved": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Extrude Region"
+              },
+              {
+                "type": "string",
+                "const": "Face Region"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "acceptedPolygonIndices",
+          "observedPolygonIndices",
+          "sourceTopology",
+          "selectedFaceCount",
+          "selectedEdgeCount",
+          "selectedVertexCount",
+          "boundaryEdgeCount",
+          "selectionObserved",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-extrude-region.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_mesh_copy"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "operator.extrude_region_move"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "operator.extrude_region_move"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_extrude_region_mesh_create"
+          },
+          "pendingResultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingEditExtrudeRegionMesh\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "Mesh"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Extrude Region"
+              },
+              {
+                "type": "string",
+                "const": "Result Mesh"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingEditExtrudeRegionMesh\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingResultMeshName",
+          "resourceType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-extrude-region.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_bmesh_ops_translate"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "operator.extrude_region_move"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "operator.extrude_region_move"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "translation"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_extrude_region_translation_projection"
+          },
+          "acceptedTranslation": {
+            "type": "array",
+            "items": [
+              {
+                "type": "number",
+                "minimum": -1000,
+                "maximum": 1000
+              },
+              {
+                "type": "number",
+                "minimum": -1000,
+                "maximum": 1000
+              },
+              {
+                "type": "number",
+                "minimum": -1000,
+                "maximum": 1000
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "observedTranslation": {
+            "type": "array",
+            "items": [
+              {
+                "type": "number",
+                "minimum": -1000,
+                "maximum": 1000
+              },
+              {
+                "type": "number",
+                "minimum": -1000,
+                "maximum": 1000
+              },
+              {
+                "type": "number",
+                "minimum": -1000,
+                "maximum": 1000
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "translationObserved": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Extrude Region"
+              },
+              {
+                "type": "string",
+                "const": "Translation"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "acceptedTranslation",
+          "observedTranslation",
+          "translationObserved",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-extrude-region.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 3
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_bmesh_ops_extrude_face_region"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "operator.extrude_region_move"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "operator.extrude_region_move"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_source_and_accepted_action_arguments"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_extrude_region_mesh_content_write"
+          },
+          "sourceTopology": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "selectedFaceCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 256
+          },
+          "selectedEdgeCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 16384
+          },
+          "selectedVertexCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 8192
+          },
+          "boundaryEdgeCount": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 16384
+          },
+          "expectedTopology": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "resultTopology": {
+            "type": "array",
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8192
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "sourceContentPreserved": {
+            "type": "boolean",
+            "const": true
+          },
+          "resultContentObserved": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Extrude Region"
+              },
+              {
+                "type": "string",
+                "const": "Apply BMesh Extrude Face Region"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "sourceTopology",
+          "selectedFaceCount",
+          "selectedEdgeCount",
+          "selectedVertexCount",
+          "boundaryEdgeCount",
+          "expectedTopology",
+          "resultTopology",
+          "sourceContentPreserved",
+          "resultContentObserved",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-extrude-region.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_mesh_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.managed_extrude_region_contract"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.managed_extrude_region_contract"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "resultMeshName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_extrude_region_mesh_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingEditExtrudeRegionMesh\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Extrude Region"
+              },
+              {
+                "type": "string",
+                "const": "Result Mesh Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.mesh.edit-extrude-region.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_object_data_link_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.managed_extrude_region_contract"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.managed_extrude_region_contract"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_extrude_region_object_data_link_write"
+          },
+          "sourceMeshLogicalId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resultMeshLogicalId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedLink": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "OperatingLine"
+              },
+              {
+                "type": "string",
+                "const": "Guided Control"
+              },
+              {
+                "type": "string",
+                "const": "Extrude Region"
+              },
+              {
+                "type": "string",
+                "const": "Object Data Link"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "resultMeshId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "sourceMeshLogicalId",
+          "resultMeshLogicalId",
+          "observedLink",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-edit-extrude-region-mesh-operations.json"
+}

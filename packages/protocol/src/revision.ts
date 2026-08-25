@@ -130,6 +130,7 @@ export const guideRevisionRequestSchema = z
       request.protocolVersion !== '1.4.0' &&
       request.protocolVersion !== '1.5.0' &&
       request.protocolVersion !== '1.6.0' &&
+      request.protocolVersion !== '1.7.0' &&
       request.parameterEdits !== undefined
     ) {
       context.addIssue({
@@ -141,7 +142,8 @@ export const guideRevisionRequestSchema = z
     if (
       (request.protocolVersion === '1.4.0' ||
         request.protocolVersion === '1.5.0' ||
-        request.protocolVersion === '1.6.0') &&
+        request.protocolVersion === '1.6.0' ||
+        request.protocolVersion === '1.7.0') &&
       request.revisionOperation === undefined
     ) {
       context.addIssue({
@@ -154,6 +156,7 @@ export const guideRevisionRequestSchema = z
       request.protocolVersion !== '1.4.0' &&
       request.protocolVersion !== '1.5.0' &&
       request.protocolVersion !== '1.6.0' &&
+      request.protocolVersion !== '1.7.0' &&
       request.revisionOperation !== undefined
     ) {
       context.addIssue({
@@ -202,11 +205,15 @@ export const guideRevisionRequestSchema = z
         });
       }
     }
-    if (request.protocolVersion !== '1.6.0' && request.executionTrackEdits !== undefined) {
+    if (
+      request.protocolVersion !== '1.6.0' &&
+      request.protocolVersion !== '1.7.0' &&
+      request.executionTrackEdits !== undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['executionTrackEdits'],
-        message: 'Structured execution track edits require guide protocol 1.6',
+        message: 'Structured execution track edits require guide protocol 1.6+',
       });
     }
     if (
@@ -295,7 +302,7 @@ export const guideRevisionRequestSchema = z
         if: {
           properties: {
             protocolVersion: {
-              enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'],
+              enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0'],
             },
           },
           required: ['protocolVersion'],
@@ -305,7 +312,7 @@ export const guideRevisionRequestSchema = z
       {
         if: {
           properties: {
-            protocolVersion: { enum: ['1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
+            protocolVersion: { enum: ['1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0'] },
           },
           required: ['protocolVersion'],
         },
@@ -323,7 +330,7 @@ export const guideRevisionRequestSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0', '1.6.0'] } },
+          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0', '1.6.0', '1.7.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['revisionOperation'] },
@@ -331,7 +338,7 @@ export const guideRevisionRequestSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { const: '1.6.0' } },
+          properties: { protocolVersion: { enum: ['1.6.0', '1.7.0'] } },
           required: ['protocolVersion'],
         },
         else: { not: { required: ['executionTrackEdits'] } },

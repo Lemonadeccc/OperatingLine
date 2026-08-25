@@ -1,0 +1,422 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 95,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 95
+          },
+          "boneOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.armature.bones"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.armature.bones"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_edit_bone_create"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "bones"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_bone_create"
+          },
+          "dataName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptedHead": {
+            "type": "array",
+            "items": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "observedHead": {
+            "type": "array",
+            "items": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "acceptedTail": {
+            "type": "array",
+            "items": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "observedTail": {
+            "type": "array",
+            "items": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "acceptedUseDeform": {
+            "type": "boolean",
+            "const": false
+          },
+          "observedUseDeform": {
+            "type": "boolean",
+            "const": false
+          },
+          "observedBone": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Layout"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Edit Mode"
+              },
+              {
+                "type": "string",
+                "const": "Bones"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "order",
+          "boneOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "armatureId",
+          "boneName",
+          "executionMethod",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "dataName",
+          "acceptedHead",
+          "observedHead",
+          "acceptedTail",
+          "observedTail",
+          "acceptedUseDeform",
+          "observedUseDeform",
+          "observedBone",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 95
+          },
+          "boneOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.armature.bones"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.armature.bones"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_edit_bone_parent_bind"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "bones"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "edit_bone_parent_bind"
+          },
+          "dataName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptedParentName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedParentName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedBinding": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Layout"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Edit Mode"
+              },
+              {
+                "type": "string",
+                "const": "Bones"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Parent"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 7,
+            "maxItems": 7
+          }
+        },
+        "required": [
+          "order",
+          "boneOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "armatureId",
+          "boneName",
+          "executionMethod",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "dataName",
+          "acceptedParentName",
+          "observedParentName",
+          "observedBinding",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 95
+          },
+          "boneOrder": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.armature.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.armature.bones"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.armature.bones"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_pose_bone_rotation_mode_write"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "catalog_constant"
+          },
+          "actionArgument": {
+            "type": "null"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "pose_bone_rotation_mode_write"
+          },
+          "acceptedRotationMode": {
+            "type": "string",
+            "const": "XYZ"
+          },
+          "observedRotationMode": {
+            "type": "string",
+            "const": "XYZ"
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Pose Mode"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Bone"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Rotation Mode"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "order",
+          "boneOrder",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "armatureId",
+          "boneName",
+          "executionMethod",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "acceptedRotationMode",
+          "observedRotationMode",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Armature EditBone create/parent and PoseBone rotation-mode order, accepted-to-observed values, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-armature-rna-bone-mutations.json"
+}

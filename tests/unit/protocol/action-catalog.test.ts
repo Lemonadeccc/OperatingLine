@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.22.0');
+    expect(catalog.catalogVersion).toBe('1.27.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -41,6 +41,8 @@ describe('action catalog protocol', () => {
       'blender.modifier.add_subdivision_surface',
       'blender.modifier.add_mirror',
       'blender.geometry_nodes.create_transform',
+      'blender.geometry_nodes.create_light_trails',
+      'blender.lookdev.create_light_trails_scene',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
       'blender.rig.create_armature',
@@ -98,6 +100,8 @@ describe('action catalog protocol', () => {
       'geometry.subdivision_surface_modifier',
       'geometry.mirror_modifier',
       'geometry_nodes.transform',
+      'geometry_nodes.light_trails',
+      'lookdev.light_trails_scene',
       'appearance.principled_palette',
       'animation.rigid_armature',
       'animation.deform_skin_weights',
@@ -131,6 +135,11 @@ describe('action catalog protocol', () => {
       '1.20.0',
       '1.21.0',
       '1.22.0',
+      '1.23.0',
+      '1.24.0',
+      '1.25.0',
+      '1.26.0',
+      '1.27.0',
     ]);
   });
 
@@ -914,6 +923,102 @@ describe('action catalog protocol', () => {
         skinAction!.argumentsSchema,
       ),
     ).toContain('weights[0].influences weights must sum to 1');
+  });
+
+  it('accepts bounded Euler, unit-quaternion, and unit-axis angle pose channels', () => {
+    const poseAction = blenderActionCatalog.actions.find(
+      (candidate) => candidate.name === 'blender.animation.create_pose_keyframes',
+    );
+    expect(poseAction).toBeDefined();
+
+    const argumentsValue = {
+      actionId: 'model.wave',
+      actionName: 'OperatingLine.Wave',
+      armatureId: 'model.rig',
+      interpolation: 'LINEAR',
+      extrapolation: 'CONSTANT',
+      keyframes: [
+        {
+          frame: 1,
+          poses: [
+            { boneName: 'OperatingLine.Root', rotationEuler: [0, 0, 0] },
+            { boneName: 'OperatingLine.Tip', rotationQuaternion: [1, 0, 0, 0] },
+            { boneName: 'OperatingLine.Axis', rotationAxisAngle: [0, 0, 0, 1] },
+          ],
+        },
+        {
+          frame: 20,
+          poses: [
+            { boneName: 'OperatingLine.Root', rotationEuler: [0, 0.25, 0] },
+            {
+              boneName: 'OperatingLine.Tip',
+              rotationQuaternion: [0.955336489125606, 0, 0.29552020666134, 0],
+            },
+            { boneName: 'OperatingLine.Axis', rotationAxisAngle: [0.5, 1, 0, 0] },
+          ],
+        },
+      ],
+    };
+
+    expect(validateActionArguments(argumentsValue, poseAction!.argumentsSchema)).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          ...argumentsValue,
+          keyframes: [
+            argumentsValue.keyframes[0],
+            {
+              frame: 20,
+              poses: [
+                {
+                  boneName: 'OperatingLine.Root',
+                  rotationEuler: [0, 0.25, 0],
+                  rotationQuaternion: [1, 0, 0, 0],
+                },
+              ],
+            },
+          ],
+        },
+        poseAction!.argumentsSchema,
+      ),
+    ).toContain(
+      'keyframes[1].poses[0] requires exactly one property among rotationEuler, rotationQuaternion, rotationAxisAngle',
+    );
+    expect(
+      validateActionArguments(
+        {
+          ...argumentsValue,
+          keyframes: [
+            argumentsValue.keyframes[0],
+            {
+              frame: 20,
+              poses: [{ boneName: 'OperatingLine.Root', rotationQuaternion: [1, 0, 0, 0] }],
+            },
+          ],
+        },
+        poseAction!.argumentsSchema,
+      ),
+    ).toContain('keyframes[1].poses[0].boneName rotation channel must remain rotationEuler');
+    expect(
+      validateActionArguments(
+        {
+          ...argumentsValue,
+          keyframes: [
+            {
+              frame: 1,
+              poses: [{ boneName: 'OperatingLine.Tip', rotationQuaternion: [0.5, 0, 0, 0] }],
+            },
+            argumentsValue.keyframes[1],
+          ],
+        },
+        poseAction!.argumentsSchema,
+      ),
+    ).toContain('keyframes[0].poses[0].rotationQuaternion vector length must be at least 0.999999');
+    const invalidAxis = structuredClone(argumentsValue);
+    invalidAxis.keyframes[0]!.poses[2]!.rotationAxisAngle = [0, 0, 0.5, 0];
+    expect(validateActionArguments(invalidAxis, poseAction!.argumentsSchema)).toContain(
+      'keyframes[0].poses[2].rotationAxisAngle axis must have unit length',
+    );
   });
 
   it('accepts strict catalog capability coverage with unique structural ids', () => {

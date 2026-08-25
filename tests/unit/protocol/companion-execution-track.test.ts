@@ -99,6 +99,12 @@ describe('Companion execution-track preflight protocol', () => {
     expect(
       companionExecutionTrackPreflightCreateRequestSchema.safeParse({
         ...request,
+        plan: { ...request.plan, protocolVersion: '1.7.0' },
+      }).success,
+    ).toBe(true);
+    expect(
+      companionExecutionTrackPreflightCreateRequestSchema.safeParse({
+        ...request,
         replayId: preflightIds.replay,
       }).success,
     ).toBe(false);
@@ -113,6 +119,19 @@ describe('Companion execution-track preflight protocol', () => {
   it('rejects semantic binding drift after the attacker recomputes the outer hash', () => {
     const { binding } = executionTrackPreflightFixture();
     expect(companionExecutionTrackPreflightBindingSchema.parse(binding)).toEqual(binding);
+    const decision17 = { ...binding.acceptance.decision, protocolVersion: '1.7.0' as const };
+    expect(
+      companionExecutionTrackPreflightBindingSchema.safeParse(
+        rehashBinding(binding, {
+          plan: { ...binding.plan, protocolVersion: '1.7.0' },
+          acceptance: {
+            ...binding.acceptance,
+            decision: decision17,
+            decisionContentSha256: computeProtocolCanonicalJsonSha256(decision17),
+          },
+        }),
+      ).success,
+    ).toBe(true);
     for (const forged of [
       { ...binding, bindingContentSha256: 'f'.repeat(64) },
       rehashBinding(binding, {

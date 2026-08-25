@@ -16,6 +16,58 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  companionLeafOperationCreateRequestSchema,
+  companionLeafOperationDeliverySchema,
+  companionLeafOperationObservationSchema,
+  companionLeafOperationPollDeliverySchema,
+  companionLeafOperationPollRequestSchema,
+  companionLeafOperationProgressSchema,
+  companionLeafOperationRecoveryAckResponseSchema,
+  companionLeafOperationRecoveryAckSchema,
+  companionLeafOperationRecoveryChallengeSchema,
+  companionLeafOperationRecoveryPollDeliverySchema,
+  companionLeafOperationRecoveryPollRequestSchema,
+  companionLeafOperationRnaControlWritesSchema,
+  companionLeafOperationRnaInitializationWritesSchema,
+  companionLeafOperationPoseRnaKeyframeInsertionsSchema,
+  companionLeafOperationPoseRnaAnimationPropertyWritesSchema,
+  companionLeafOperationPoseRnaActionResourceMutationsSchema,
+  companionLeafOperationArmatureRnaBindingMutationsSchema,
+  companionLeafOperationArmatureRnaBoneMutationsSchema,
+  companionLeafOperationArmatureRnaResourceMutationsSchema,
+  companionLeafOperationSkinRnaModifierMutationsSchema,
+  companionLeafOperationSkinRnaWeightMutationsSchema,
+  companionLeafOperationSolidifyRnaMutationsSchema,
+  companionLeafOperationBevelModifierRnaMutationsSchema,
+  companionLeafOperationMaterialRnaMutationsSchema,
+  companionLeafOperationMaterialPaletteRnaMutationsSchema,
+  companionLeafOperationMirrorRnaMutationsSchema,
+  companionLeafOperationSubdivisionSurfaceRnaMutationsSchema,
+  companionLeafOperationEditBevelMeshOperationsSchema,
+  companionLeafOperationEditInsetMeshOperationsSchema,
+  companionLeafOperationEditTriangulateMeshOperationsSchema,
+  companionLeafOperationEditExtrudeRegionMeshOperationsSchema,
+  companionLeafOperationEditPokeMeshOperationsSchema,
+  companionLeafOperationRnaLinkCreationsSchema,
+  companionLeafOperationRnaResourceMutationsSchema,
+  companionLeafOperationRnaStructureCreationsSchema,
+  companionLeafOperationResultAckSchema,
+  companionLeafOperationResultSchema,
+  companionLeafOperationStatusRequestSchema,
+  companionLeafOperationStatusSchema,
+  companionPokeCompoundCreateRequestSchema,
+  companionPokeCompoundDeliverySchema,
+  companionPokeCompoundPollDeliverySchema,
+  companionPokeCompoundPollRequestSchema,
+  companionPokeCompoundRecoveryAckResponseSchema,
+  companionPokeCompoundRecoveryAckSchema,
+  companionPokeCompoundRecoveryChallengeSchema,
+  companionPokeCompoundRecoveryPollDeliverySchema,
+  companionPokeCompoundRecoveryPollRequestSchema,
+  companionPokeCompoundResultAckSchema,
+  companionPokeCompoundResultSchema,
+  companionPokeCompoundStatusRequestSchema,
+  companionPokeCompoundStatusSchema,
   companionExecutionTrackPreflightBindingSchema,
   companionExecutionTrackPreflightCreateRequestSchema,
   companionExecutionTrackPreflightDeliverySchema,
@@ -592,6 +644,266 @@ const schemas = [
     'companion-action-result-ack.schema.json',
     'https://operatingline.dev/schema/v1/companion-action-result-ack.json',
     companionActionResultAckSchema,
+  ],
+  [
+    'companion-leaf-operation-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-create-request.json',
+    companionLeafOperationCreateRequestSchema,
+  ],
+  [
+    'companion-leaf-operation-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-delivery.json',
+    companionLeafOperationDeliverySchema,
+  ],
+  [
+    'companion-leaf-operation-observation.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-observation.json',
+    companionLeafOperationObservationSchema,
+  ],
+  [
+    'companion-leaf-operation-rna-control-writes.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-rna-control-writes.json',
+    companionLeafOperationRnaControlWritesSchema,
+  ],
+  [
+    'companion-leaf-operation-rna-initialization-writes.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-rna-initialization-writes.json',
+    companionLeafOperationRnaInitializationWritesSchema,
+  ],
+  [
+    'companion-leaf-operation-rna-link-creations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-rna-link-creations.json',
+    companionLeafOperationRnaLinkCreationsSchema,
+  ],
+  [
+    'companion-leaf-operation-rna-structure-creations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-rna-structure-creations.json',
+    companionLeafOperationRnaStructureCreationsSchema,
+  ],
+  [
+    'companion-leaf-operation-rna-resource-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-rna-resource-mutations.json',
+    companionLeafOperationRnaResourceMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-pose-rna-keyframe-insertions.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-pose-rna-keyframe-insertions.json',
+    companionLeafOperationPoseRnaKeyframeInsertionsSchema,
+  ],
+  [
+    'companion-leaf-operation-pose-rna-animation-property-writes.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-pose-rna-animation-property-writes.json',
+    companionLeafOperationPoseRnaAnimationPropertyWritesSchema,
+  ],
+  [
+    'companion-leaf-operation-pose-rna-action-resource-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-pose-rna-action-resource-mutations.json',
+    companionLeafOperationPoseRnaActionResourceMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-armature-rna-resource-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-armature-rna-resource-mutations.json',
+    companionLeafOperationArmatureRnaResourceMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-armature-rna-bone-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-armature-rna-bone-mutations.json',
+    companionLeafOperationArmatureRnaBoneMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-armature-rna-binding-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-armature-rna-binding-mutations.json',
+    companionLeafOperationArmatureRnaBindingMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-skin-rna-weight-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-skin-rna-weight-mutations.json',
+    companionLeafOperationSkinRnaWeightMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-skin-rna-modifier-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-skin-rna-modifier-mutations.json',
+    companionLeafOperationSkinRnaModifierMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-solidify-rna-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-solidify-rna-mutations.json',
+    companionLeafOperationSolidifyRnaMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-bevel-modifier-rna-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-bevel-modifier-rna-mutations.json',
+    companionLeafOperationBevelModifierRnaMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-material-rna-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-material-rna-mutations.json',
+    companionLeafOperationMaterialRnaMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-material-palette-rna-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-material-palette-rna-mutations.json',
+    companionLeafOperationMaterialPaletteRnaMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-mirror-rna-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-mirror-rna-mutations.json',
+    companionLeafOperationMirrorRnaMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-subdivision-surface-rna-mutations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-subdivision-surface-rna-mutations.json',
+    companionLeafOperationSubdivisionSurfaceRnaMutationsSchema,
+  ],
+  [
+    'companion-leaf-operation-edit-bevel-mesh-operations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-edit-bevel-mesh-operations.json',
+    companionLeafOperationEditBevelMeshOperationsSchema,
+  ],
+  [
+    'companion-leaf-operation-edit-inset-mesh-operations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-edit-inset-mesh-operations.json',
+    companionLeafOperationEditInsetMeshOperationsSchema,
+  ],
+  [
+    'companion-leaf-operation-edit-triangulate-mesh-operations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-edit-triangulate-mesh-operations.json',
+    companionLeafOperationEditTriangulateMeshOperationsSchema,
+  ],
+  [
+    'companion-leaf-operation-edit-extrude-region-mesh-operations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-edit-extrude-region-mesh-operations.json',
+    companionLeafOperationEditExtrudeRegionMeshOperationsSchema,
+  ],
+  [
+    'companion-leaf-operation-edit-poke-mesh-operations.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-edit-poke-mesh-operations.json',
+    companionLeafOperationEditPokeMeshOperationsSchema,
+  ],
+  [
+    'companion-leaf-operation-progress.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-progress.json',
+    companionLeafOperationProgressSchema,
+  ],
+  [
+    'companion-leaf-operation-result.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-result.json',
+    companionLeafOperationResultSchema,
+  ],
+  [
+    'companion-leaf-operation-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-status-request.json',
+    companionLeafOperationStatusRequestSchema,
+  ],
+  [
+    'companion-leaf-operation-status.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-status.json',
+    companionLeafOperationStatusSchema,
+  ],
+  [
+    'companion-leaf-operation-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-poll-request.json',
+    companionLeafOperationPollRequestSchema,
+  ],
+  [
+    'companion-leaf-operation-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-poll-delivery.json',
+    companionLeafOperationPollDeliverySchema,
+  ],
+  [
+    'companion-leaf-operation-result-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-result-ack.json',
+    companionLeafOperationResultAckSchema,
+  ],
+  [
+    'companion-leaf-operation-recovery-challenge.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-recovery-challenge.json',
+    companionLeafOperationRecoveryChallengeSchema,
+  ],
+  [
+    'companion-leaf-operation-recovery-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-recovery-ack.json',
+    companionLeafOperationRecoveryAckSchema,
+  ],
+  [
+    'companion-leaf-operation-recovery-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-recovery-poll-request.json',
+    companionLeafOperationRecoveryPollRequestSchema,
+  ],
+  [
+    'companion-leaf-operation-recovery-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-recovery-poll-delivery.json',
+    companionLeafOperationRecoveryPollDeliverySchema,
+  ],
+  [
+    'companion-leaf-operation-recovery-ack-response.schema.json',
+    'https://operatingline.dev/schema/v1/companion-leaf-operation-recovery-ack-response.json',
+    companionLeafOperationRecoveryAckResponseSchema,
+  ],
+  [
+    'companion-poke-compound-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-create-request.json',
+    companionPokeCompoundCreateRequestSchema,
+  ],
+  [
+    'companion-poke-compound-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-delivery.json',
+    companionPokeCompoundDeliverySchema,
+  ],
+  [
+    'companion-poke-compound-result.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-result.json',
+    companionPokeCompoundResultSchema,
+  ],
+  [
+    'companion-poke-compound-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-status-request.json',
+    companionPokeCompoundStatusRequestSchema,
+  ],
+  [
+    'companion-poke-compound-status.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-status.json',
+    companionPokeCompoundStatusSchema,
+  ],
+  [
+    'companion-poke-compound-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-poll-request.json',
+    companionPokeCompoundPollRequestSchema,
+  ],
+  [
+    'companion-poke-compound-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-poll-delivery.json',
+    companionPokeCompoundPollDeliverySchema,
+  ],
+  [
+    'companion-poke-compound-result-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-result-ack.json',
+    companionPokeCompoundResultAckSchema,
+  ],
+  [
+    'companion-poke-compound-recovery-challenge.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-recovery-challenge.json',
+    companionPokeCompoundRecoveryChallengeSchema,
+  ],
+  [
+    'companion-poke-compound-recovery-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-recovery-ack.json',
+    companionPokeCompoundRecoveryAckSchema,
+  ],
+  [
+    'companion-poke-compound-recovery-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-recovery-poll-request.json',
+    companionPokeCompoundRecoveryPollRequestSchema,
+  ],
+  [
+    'companion-poke-compound-recovery-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-recovery-poll-delivery.json',
+    companionPokeCompoundRecoveryPollDeliverySchema,
+  ],
+  [
+    'companion-poke-compound-recovery-ack-response.schema.json',
+    'https://operatingline.dev/schema/v1/companion-poke-compound-recovery-ack-response.json',
+    companionPokeCompoundRecoveryAckResponseSchema,
   ],
   [
     'companion-execution-track-preflight-create-request.schema.json',
@@ -1953,6 +2265,126 @@ function documentExecutionTrackExecutionSemanticGate(
   }
 }
 
+function documentLeafOperationSemanticGate(
+  filename: string,
+  schema: Record<string, unknown>,
+): void {
+  if (filename === 'companion-leaf-operation-rna-control-writes.schema.json') {
+    schema['$comment'] =
+      'Exact Transform X/Y/Z order and Light Trails write-set order, plus operation/node/socket/argument/projection/UI-path agreement, require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-rna-initialization-writes.schema.json') {
+    schema['$comment'] =
+      'Exact Light Trails node-initialization target sets, values, source operations, and UI paths require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-rna-link-creations.schema.json') {
+    schema['$comment'] =
+      'Exact Light Trails source/target node types, socket identifiers, source operations, and UI paths require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-rna-structure-creations.schema.json') {
+    schema['$comment'] =
+      'Exact Light Trails interface-before-node creation order, node names/types, source operations, and UI paths require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-rna-resource-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Light Trails node-group create, modifier create, and node-group binding order plus cross-record resource identity require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-pose-rna-keyframe-insertions.schema.json') {
+    schema['$comment'] =
+      'Exact Pose frame/pose/channel order, accepted-to-observed component values, resource identity, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-pose-rna-animation-property-writes.schema.json') {
+    schema['$comment'] =
+      'Exact Pose keyframe interpolation and FCurve extrapolation order, accepted-to-observed values, resource identity, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-pose-rna-action-resource-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Pose Action create/bind and accepted-name write order, managed pending identity, resource agreement, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-armature-rna-resource-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Armature data/Object create, collection link, and accepted-name write order plus managed pending identity require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-armature-rna-bone-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Armature EditBone create/parent and PoseBone rotation-mode order, accepted-to-observed values, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-armature-rna-binding-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Armature target/bone binding array order, accepted-to-observed parent state, transform preservation, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-skin-rna-weight-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Skin bone-deform, Vertex Group create, and per-vertex influence order plus accepted-to-observed weights and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-skin-rna-modifier-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Skin Armature Modifier create/bind/property/name mutation order, managed pending identity, accepted-to-observed values, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-solidify-rna-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Solidify Modifier create, accepted name, and ordered fixed/accepted RNA property writes plus observed values and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-bevel-modifier-rna-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Bevel Modifier create, accepted name, and ordered width/segments/limit/angle RNA property writes plus observed values and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-material-rna-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Material creation, Use Nodes activation, accepted surface controls, and ordered material-slot assignments plus observed values, source-content guards, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-material-palette-rna-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact ordered palette material groups, nested accepted surface controls, globally unique target assignments, source-content guards, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-mirror-rna-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Mirror Modifier create, accepted name and axis, and ordered fixed RNA component/property writes plus observed values and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-subdivision-surface-rna-mutations.schema.json') {
+    schema['$comment'] =
+      'Exact Subdivision Surface Modifier create, accepted name and viewport level, and ordered fixed RNA property writes plus observed values and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-edit-bevel-mesh-operations.schema.json') {
+    schema['$comment'] =
+      'Exact Edit Bevel replacement-Mesh creation, accepted parameter projection, bounded BMesh content write, accepted name, receipt-owned data link, topology growth, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (filename === 'companion-leaf-operation-edit-inset-mesh-operations.schema.json') {
+    schema['$comment'] =
+      'Exact Edit Inset replacement-Mesh creation, accepted parameter projection, loop-count topology formula, bounded BMesh content write, accepted name, receipt-owned data link, nondegeneracy, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.';
+    return;
+  }
+  if (
+    filename.startsWith('companion-leaf-operation-') &&
+    ['delivery', 'observation', 'progress', 'result', 'status', 'recovery-ack'].some((kind) =>
+      filename.includes(`-${kind}.schema.json`),
+    )
+  ) {
+    schema['$comment'] =
+      'Canonical operation-binding integrity, exact ordinal/source-operation agreement, completed-operation prefixes, run/receipt/fingerprint continuity, partial-versus-final report rules, chronology, recovery outcome/challenge agreement, document-incarnation retirement guards, and terminal identity agreement require the exported Zod/coordinator semantic gates; standard JSON Schema covers the strict structural contract.';
+  }
+}
+
 function hardenExecutionTrackExecutionLifecycle(
   filename: string,
   schema: Record<string, unknown>,
@@ -2477,6 +2909,8 @@ for (const [filename, id, schema] of schemas) {
     filename.startsWith('procedure-tutorial-media-') ||
     filename.startsWith('procedure-tutorial-authoring-') ||
     filename.startsWith('companion-execution-track-execution-') ||
+    filename.startsWith('companion-leaf-operation-') ||
+    filename.startsWith('procedure-leaf-replay-') ||
     filename === 'procedure-compound-replay.schema.json' ||
     filename.includes('shortcut-proof') ||
     filename.includes('menu-control-proof');
@@ -2495,6 +2929,7 @@ for (const [filename, id, schema] of schemas) {
   documentMenuControlProofSemanticGate(filename, jsonSchema);
   documentExecutionTrackPreflightSemanticGate(filename, jsonSchema);
   documentExecutionTrackExecutionSemanticGate(filename, jsonSchema);
+  documentLeafOperationSemanticGate(filename, jsonSchema);
   hardenExecutionTrackExecutionLifecycle(filename, jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;

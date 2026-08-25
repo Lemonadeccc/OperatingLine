@@ -154,6 +154,7 @@
                   "type": "string",
                   "enum": [
                     "semantic",
+                    "menu_candidate",
                     "menu",
                     "shortcut",
                     "mcp"

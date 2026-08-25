@@ -3,7 +3,15 @@ import { z } from 'zod';
 import { actionCatalogJsonSchemaMetadata, actionCatalogSchema } from './catalog.js';
 import { protocolJsonValueCanonicalization } from './canonical-json-value.js';
 import { guideStepIdSchema } from './guide.js';
-import { interactionCatalogSchema } from './interaction-catalog.js';
+import {
+  acceptedActionArgumentsMenuProcedureMaterializationSchema,
+  availableShortcutProcedureMaterializationSchema,
+  interactionCatalogSchema,
+  interactionRecipeSchema,
+  orderedMenuProcedureMaterializationSchema,
+  procedureMaterializationSchema,
+  unavailableProcedureMaterializationSchema,
+} from './interaction-catalog.js';
 import {
   procedureCompilationResultSchema,
   procedureGroupNodeSchema,
@@ -29,7 +37,12 @@ export const supportedProcedureAuthoringPromptFormatVersions = [
   procedureAuthoringPromptLegacyMediaAnalysisFormatVersion,
   procedureAuthoringPromptMediaAnalysisFormatVersion,
 ] as const;
-export const procedureAuthoringPromptPacketMaxCanonicalBytes = 262_144 as const;
+export const procedureAuthoringPromptPacketLegacyMaxCanonicalBytes = 262_144 as const;
+export const procedureAuthoringPromptPacketMaxCanonicalBytes = 524_288 as const;
+export const supportedProcedureAuthoringPromptPacketMaxCanonicalBytes = [
+  procedureAuthoringPromptPacketLegacyMaxCanonicalBytes,
+  procedureAuthoringPromptPacketMaxCanonicalBytes,
+] as const;
 export const procedureAuthoringTutorialSegmentMaxCount = 2_000 as const;
 export const procedureAuthoringTutorialTranscriptDocumentMaxBytes = 262_144 as const;
 export const procedureAuthoringPromptFormatVersionSchema = z.enum(
@@ -764,42 +777,55 @@ const procedureCandidateValidationSchema = procedureLeafNodeSchema.shape.validat
   validatedHostVersions: z.array(catalogVersionSchema).length(0),
 });
 
-const procedureCandidateLeafNodeSchema = procedureLeafNodeSchema.safeExtend({
-  menuTracks: z
-    .array(
-      z.strictObject({
-        id: guideStepIdSchema,
-        availability: z.literal('unavailable'),
-        title: z.string().min(1),
-        reason: z.string().min(1),
-        modality: z.literal('menu'),
-      }),
-    )
-    .min(1),
-  shortcutTracks: z
-    .array(
-      z.strictObject({
-        id: guideStepIdSchema,
-        availability: z.literal('unavailable'),
-        title: z.string().min(1),
-        reason: z.string().min(1),
-        modality: z.literal('shortcut'),
-      }),
-    )
-    .min(1),
-  mcpTracks: z
-    .array(
-      z.strictObject({
-        id: guideStepIdSchema,
-        availability: z.literal('unavailable'),
-        title: z.string().min(1),
-        reason: z.string().min(1),
-        modality: z.literal('mcp'),
-      }),
-    )
-    .min(1),
-  validation: procedureCandidateValidationSchema,
-});
+const { menuCandidates: _providerOmittedMenuCandidates, ...procedureCandidateLeafBaseShape } =
+  procedureLeafNodeSchema.shape;
+void _providerOmittedMenuCandidates;
+
+const procedureCandidateLeafNodeSchema = z
+  .strictObject({
+    ...procedureCandidateLeafBaseShape,
+    menuTracks: z
+      .array(
+        z.strictObject({
+          id: guideStepIdSchema,
+          availability: z.literal('unavailable'),
+          title: z.string().min(1),
+          reason: z.string().min(1),
+          modality: z.literal('menu'),
+        }),
+      )
+      .min(1),
+    shortcutTracks: z
+      .array(
+        z.strictObject({
+          id: guideStepIdSchema,
+          availability: z.literal('unavailable'),
+          title: z.string().min(1),
+          reason: z.string().min(1),
+          modality: z.literal('shortcut'),
+        }),
+      )
+      .min(1),
+    mcpTracks: z
+      .array(
+        z.strictObject({
+          id: guideStepIdSchema,
+          availability: z.literal('unavailable'),
+          title: z.string().min(1),
+          reason: z.string().min(1),
+          modality: z.literal('mcp'),
+        }),
+      )
+      .min(1),
+    validation: procedureCandidateValidationSchema,
+  })
+  .superRefine((leaf, context) => {
+    const result = procedureLeafNodeSchema.safeParse(leaf);
+    if (result.success) return;
+    for (const issue of result.error.issues) {
+      context.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+    }
+  });
 
 const procedureCandidateNodeSchema = z.discriminatedUnion('kind', [
   procedureGroupNodeSchema,
@@ -1235,9 +1261,49 @@ const procedureAuthoringTutorialProvenanceSchema = z
 const procedureAuthoringActionCatalogSchema = actionCatalogSchema
   .omit({ adapterId: true })
   .meta(actionCatalogJsonSchemaMetadata);
-const procedureAuthoringInteractionCatalogSchema = interactionCatalogSchema.omit({
-  adapterId: true,
-  actionCatalogVersion: true,
+const {
+  proofExecution: _providerOmittedMenuProofExecution,
+  ...procedureAuthoringOrderedMenuShape
+} = orderedMenuProcedureMaterializationSchema.shape;
+void _providerOmittedMenuProofExecution;
+const procedureAuthoringMenuMaterializationSchema = z.union([
+  unavailableProcedureMaterializationSchema,
+  z.discriminatedUnion('parameterBinding', [
+    acceptedActionArgumentsMenuProcedureMaterializationSchema,
+    z.strictObject(procedureAuthoringOrderedMenuShape),
+  ]),
+]);
+const {
+  proofExecution: _providerOmittedShortcutProofExecution,
+  ...procedureAuthoringAvailableShortcutShape
+} = availableShortcutProcedureMaterializationSchema.shape;
+void _providerOmittedShortcutProofExecution;
+const procedureAuthoringShortcutMaterializationSchema = z.union([
+  unavailableProcedureMaterializationSchema,
+  z.strictObject(procedureAuthoringAvailableShortcutShape),
+]);
+const { menuCandidate: _providerOmittedMenuCandidate, ...procedureAuthoringMaterializationShape } =
+  procedureMaterializationSchema.shape;
+void _providerOmittedMenuCandidate;
+const procedureAuthoringMaterializationSchema = z.strictObject({
+  ...procedureAuthoringMaterializationShape,
+  menu: procedureAuthoringMenuMaterializationSchema,
+  shortcut: procedureAuthoringShortcutMaterializationSchema,
+});
+const procedureAuthoringInteractionRecipeSchema = z.strictObject({
+  ...interactionRecipeSchema.shape,
+  procedureMaterialization: procedureAuthoringMaterializationSchema.optional(),
+});
+const {
+  adapterId: _providerOmittedInteractionAdapterId,
+  actionCatalogVersion: _providerOmittedInteractionActionCatalogVersion,
+  ...procedureAuthoringInteractionCatalogShape
+} = interactionCatalogSchema.shape;
+void _providerOmittedInteractionAdapterId;
+void _providerOmittedInteractionActionCatalogVersion;
+const procedureAuthoringInteractionCatalogSchema = z.strictObject({
+  ...procedureAuthoringInteractionCatalogShape,
+  recipes: z.array(procedureAuthoringInteractionRecipeSchema).min(1),
 });
 
 export const procedureAuthoringPromptContextSchema = z
@@ -1650,7 +1716,10 @@ export const procedureAuthoringPromptPacketContentSchema = z
       instructions: z.array(z.string().min(1)).min(1),
     }),
     limits: z.strictObject({
-      maxCanonicalBytes: z.literal(procedureAuthoringPromptPacketMaxCanonicalBytes),
+      maxCanonicalBytes: z.union([
+        z.literal(procedureAuthoringPromptPacketLegacyMaxCanonicalBytes),
+        z.literal(procedureAuthoringPromptPacketMaxCanonicalBytes),
+      ]),
     }),
     sideEffects: z.strictObject({
       modelCalled: z.literal(false),

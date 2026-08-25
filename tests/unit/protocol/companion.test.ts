@@ -207,6 +207,38 @@ describe('companion protocol', () => {
     expect(companionStateReportSchema.safeParse({ ...report, nativeUndoCheckpoint }).success).toBe(
       true,
     );
+    const lineageCheckpoint = {
+      ...nativeUndoCheckpoint,
+      journal: {
+        ...nativeUndoCheckpoint.journal,
+        lineageCheckpointIds: [
+          randomUUID(),
+          nativeUndoCheckpoint.previousCheckpointId,
+          nativeUndoCheckpoint.checkpointId,
+        ],
+      },
+    };
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        nativeUndoCheckpoint: lineageCheckpoint,
+      }).success,
+    ).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        nativeUndoCheckpoint: {
+          ...lineageCheckpoint,
+          journal: {
+            ...lineageCheckpoint.journal,
+            lineageCheckpointIds: [
+              nativeUndoCheckpoint.checkpointId,
+              nativeUndoCheckpoint.previousCheckpointId,
+            ],
+          },
+        },
+      }).success,
+    ).toBe(false);
     expect(
       companionStateReportSchema.safeParse({
         ...report,
@@ -512,6 +544,10 @@ describe('companion protocol', () => {
     const current = currentStateReport();
     delete (current as { artifactAttestation?: unknown }).artifactAttestation;
     expect(companionStateReportSchema.safeParse(current).success).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({ ...currentStateReport(), protocolVersion: '1.7.0' })
+        .success,
+    ).toBe(true);
   });
 
   it('accepts a standalone known proposal watermark', () => {

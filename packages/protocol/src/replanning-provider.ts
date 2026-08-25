@@ -4,7 +4,12 @@ import { actionCatalogSchema } from './catalog.js';
 import { companionStateReportSchema } from './companion.js';
 import { guidePlanDiffSchema } from './diff.js';
 import { guidePlanSchema, guideStepIdSchema } from './guide.js';
-import { planningIntentSchema, planningQualityReportSchema } from './planning.js';
+import {
+  planningIntentSchema,
+  planningQualityReportSchema,
+  projectGuidePlanForProvider,
+  providerGuidePlanSchema,
+} from './planning.js';
 import {
   plannerGenerationErrorCodeSchema,
   plannerGenerationFormatVersionSchema,
@@ -69,7 +74,7 @@ export const guideRevisionMergeContextSchema = z.strictObject({
 });
 export type GuideRevisionMergeContext = z.infer<typeof guideRevisionMergeContextSchema>;
 
-export const replanningPromptContextSchema = z
+export const replanningSourceContextSchema = z
   .strictObject({
     revisionRequest: guideRevisionRequestSchema,
     targetRevision: z.number().int().positive(),
@@ -153,11 +158,77 @@ export const replanningPromptContextSchema = z
       });
     }
   });
-export type ReplanningPromptContext = z.infer<typeof replanningPromptContextSchema>;
+export type ReplanningPromptContext = z.infer<typeof replanningSourceContextSchema>;
 
-export const plannerReplanDraftSchema = guideReplanSubmissionSchema
-  .omit({ generationRequestId: true })
-  .extend({ planning: planningIntentSchema });
+const providerGuideRevisionRequestSchema = z
+  .strictObject({
+    ...guideRevisionRequestSchema.shape,
+    basePlan: providerGuidePlanSchema,
+  })
+  .superRefine((request, context) => {
+    const result = guideRevisionRequestSchema.safeParse(request);
+    if (result.success) return;
+    for (const issue of result.error.issues) {
+      context.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+    }
+  });
+
+const providerGuideRevisionMergeContextSchema = z.strictObject({
+  ...guideRevisionMergeContextSchema.shape,
+  commonAncestorPlan: providerGuidePlanSchema,
+  sourcePlan: providerGuidePlanSchema,
+  expectedMergedPlan: providerGuidePlanSchema,
+});
+
+export const replanningPromptContextSchema = z
+  .strictObject({
+    revisionRequest: providerGuideRevisionRequestSchema,
+    targetRevision: z.number().int().positive(),
+    catalog: actionCatalogSchema,
+    companionState: companionStateReportSchema.nullable(),
+    scope: localReplanScopeSchema,
+    merge: providerGuideRevisionMergeContextSchema.optional(),
+  })
+  .superRefine((context, refinement) => {
+    const result = replanningSourceContextSchema.safeParse(context);
+    if (result.success) return;
+    for (const issue of result.error.issues) {
+      refinement.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+    }
+  });
+export type ProviderReplanningPromptContext = z.infer<typeof replanningPromptContextSchema>;
+
+export function projectReplanningPromptContextForProvider(
+  contextInput: ReplanningPromptContext,
+): ProviderReplanningPromptContext {
+  const context = replanningSourceContextSchema.parse(contextInput);
+  return replanningPromptContextSchema.parse({
+    ...context,
+    revisionRequest: {
+      ...context.revisionRequest,
+      basePlan: projectGuidePlanForProvider(context.revisionRequest.basePlan),
+    },
+    ...(context.merge === undefined
+      ? {}
+      : {
+          merge: {
+            ...context.merge,
+            commonAncestorPlan: projectGuidePlanForProvider(context.merge.commonAncestorPlan),
+            sourcePlan: projectGuidePlanForProvider(context.merge.sourcePlan),
+            expectedMergedPlan: projectGuidePlanForProvider(context.merge.expectedMergedPlan),
+          },
+        }),
+  });
+}
+
+const { generationRequestId: _providerOmittedGenerationRequestId, ...plannerReplanDraftShape } =
+  guideReplanSubmissionSchema.shape;
+void _providerOmittedGenerationRequestId;
+export const plannerReplanDraftSchema = z.strictObject({
+  ...plannerReplanDraftShape,
+  planning: planningIntentSchema,
+  plan: providerGuidePlanSchema,
+});
 export type PlannerReplanDraft = z.infer<typeof plannerReplanDraftSchema>;
 
 export const supportedReplanningPromptFormatVersions = ['1.0.0', '1.1.0'] as const;

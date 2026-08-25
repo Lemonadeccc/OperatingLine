@@ -11,7 +11,18 @@ import {
 import {
   actionLevelMcpActionNames,
   actionLevelMcpRecipeIdByAction,
+  armatureLeafOperationIds,
+  editBevelLeafOperationIds,
+  editExtrudeRegionLeafOperationIds,
+  editTriangulateLeafOperationIds,
+  editPokeLeafOperationIds,
   interactionCatalogSchema,
+  materialPaletteLeafOperationIds,
+  mirrorLeafOperationIds,
+  poseAnimationLeafOperationIds,
+  singleMaterialLeafOperationIds,
+  solidifyLeafOperationIds,
+  subdivisionSurfaceLeafOperationIds,
   validateInteractionCatalog,
   type InteractionCatalog,
 } from '@operatingline/protocol';
@@ -232,6 +243,12 @@ describe('interaction catalog protocol', () => {
     for (const actionName of actionLevelMcpActionNames) {
       const catalog = structuredClone(blenderInteractionCatalog);
       catalog.recipes = [structuredClone(recipeFor(blenderInteractionCatalog, actionName))];
+      if (
+        catalog.recipes[0]!.procedureMaterialization?.mcp.availability !== 'available' ||
+        catalog.recipes[0]!.procedureMaterialization.mcp.source !== 'catalog.action_level_mcp'
+      ) {
+        continue;
+      }
       const menu = catalog.recipes[0]!.procedureMaterialization?.menu;
       if (menu?.availability === 'available') delete menu.proofExecution;
       const shortcut = catalog.recipes[0]!.procedureMaterialization?.shortcut;
@@ -261,7 +278,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.44.0');
+    expect(catalog.catalogVersion).toBe('1.69.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -282,7 +299,184 @@ describe('interaction catalog protocol', () => {
     ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
-    ).toHaveLength(20);
+    ).toHaveLength(22);
+
+    const transform = recipeFor(catalog, 'blender.geometry_nodes.create_transform');
+    expect(transform.guidance.steps.slice(5, 7).map((step) => step.target.connection)).toEqual([
+      {
+        fromNode: 'NodeGroupInput',
+        fromSocket: 'Geometry',
+        toNode: 'GeometryNodeTransform',
+        toSocket: 'Geometry',
+      },
+      {
+        fromNode: 'GeometryNodeTransform',
+        fromSocket: 'Geometry',
+        toNode: 'NodeGroupOutput',
+        toSocket: 'Geometry',
+      },
+    ]);
+    const lightTrails = recipeFor(catalog, 'blender.geometry_nodes.create_light_trails');
+    const lightTrailConnections = lightTrails.guidance.steps.flatMap((step) =>
+      step.target.connection === undefined ? [] : [step.target.connection],
+    );
+    expect(lightTrails.guidance.steps).toHaveLength(42);
+    expect(lightTrailConnections).toHaveLength(19);
+    expect(lightTrailConnections[0]).toEqual({
+      fromNode: 'node-name:OperatingLine Half Tile Line',
+      fromSocket: 'Curve',
+      toNode: 'node-name:OperatingLine Trail Resolution',
+      toSocket: 'Curve',
+    });
+    expect(lightTrailConnections.at(-1)).toEqual({
+      fromNode: 'node-name:OperatingLine Realize Tiles',
+      fromSocket: 'Geometry',
+      toNode: 'node-name:OperatingLine Output',
+      toSocket: 'Geometry',
+    });
+    const poseAnimation = recipeFor(catalog, 'blender.animation.create_pose_keyframes');
+    expect(poseAnimation.guidance.steps).toHaveLength(8);
+    expect(poseAnimation.procedureMaterialization?.semantic?.projections).toMatchObject([
+      { actionArgument: 'actionName', transform: 'identity' },
+      { actionArgument: 'keyframes', transform: 'json_identity' },
+      { actionArgument: 'interpolation', transform: 'identity' },
+      { actionArgument: 'extrapolation', transform: 'identity' },
+    ]);
+    expect(poseAnimation.procedureMaterialization?.semantic?.omittedActionArguments).toEqual([
+      expect.objectContaining({ argumentName: 'actionId' }),
+      expect.objectContaining({ argumentName: 'armatureId' }),
+    ]);
+    expect(poseAnimation.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.operation_level_mcp',
+      toolName: 'operatingline.blender.animation.pose-keyframes.execute-next',
+    });
+    const poseMcp = poseAnimation.procedureMaterialization?.mcp;
+    if (poseMcp?.availability !== 'available' || poseMcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Pose Animation operation-level MCP');
+    }
+    expect(poseMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      poseAnimationLeafOperationIds,
+    );
+    const armature = recipeFor(catalog, 'blender.rig.create_armature');
+    expect(armature.guidance.steps.map((step) => step.id)).toEqual([
+      'workspace.layout',
+      'menu.add_armature',
+      'mode.edit_bones',
+      'semantic.rigid_parent',
+      'semantic.verify_armature',
+    ]);
+    expect(armature.procedureMaterialization?.semantic?.projections).toMatchObject([
+      { actionArgument: 'objectName', transform: 'identity' },
+      { actionArgument: 'dataName', transform: 'identity' },
+      { actionArgument: 'bones', transform: 'json_identity' },
+      { actionArgument: 'bindings', transform: 'json_identity' },
+    ]);
+    expect(armature.procedureMaterialization?.semantic?.omittedActionArguments).toEqual([
+      expect.objectContaining({ argumentName: 'armatureId' }),
+      expect.objectContaining({ argumentName: 'collectionId' }),
+    ]);
+    const armatureMcp = armature.procedureMaterialization?.mcp;
+    if (
+      armatureMcp?.availability !== 'available' ||
+      armatureMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Armature operation-level MCP');
+    }
+    expect(armatureMcp.toolName).toBe('operatingline.blender.rig.armature.execute-next');
+    expect(armatureMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      armatureLeafOperationIds,
+    );
+    expect(
+      armatureMcp.operations.map((operation) => operation.parameters.map(({ name }) => name)),
+    ).toEqual([
+      ['armatureId', 'collectionId'],
+      [],
+      ['objectName'],
+      ['dataName'],
+      [],
+      ['bones'],
+      [],
+      ['bindings'],
+      [],
+    ]);
+    const solidify = recipeFor(catalog, 'blender.modifier.add_solidify');
+    const solidifyMcp = solidify.procedureMaterialization?.mcp;
+    if (
+      solidifyMcp?.availability !== 'available' ||
+      solidifyMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Solidify operation-level MCP');
+    }
+    expect(solidifyMcp.toolName).toBe('operatingline.blender.modifier.solidify.execute-next');
+    expect(solidifyMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      solidifyLeafOperationIds,
+    );
+    expect(
+      solidifyMcp.operations.map((operation) => operation.parameters.map(({ name }) => name)),
+    ).toEqual([['targetId', 'modifierId'], [], [], ['modifierName', 'thickness', 'offset']]);
+    const singleMaterial = recipeFor(catalog, 'blender.material.create_and_assign');
+    const singleMaterialMcp = singleMaterial.procedureMaterialization?.mcp;
+    if (
+      singleMaterialMcp?.availability !== 'available' ||
+      singleMaterialMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Single Material operation-level MCP');
+    }
+    expect(singleMaterialMcp.toolName).toBe('operatingline.blender.material.single.execute-next');
+    expect(singleMaterialMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      singleMaterialLeafOperationIds,
+    );
+    expect(
+      singleMaterialMcp.operations.map((operation) => operation.parameters.map(({ name }) => name)),
+    ).toEqual([
+      ['materialId'],
+      [],
+      [],
+      ['materialName', 'baseColor', 'roughness', 'metallic', 'targets'],
+    ]);
+    const materialPalette = recipeFor(catalog, 'blender.material.create_palette_and_assign');
+    const materialPaletteMcp = materialPalette.procedureMaterialization?.mcp;
+    if (
+      materialPaletteMcp?.availability !== 'available' ||
+      materialPaletteMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Material Palette operation-level MCP');
+    }
+    expect(materialPaletteMcp.toolName).toBe('operatingline.blender.material.palette.execute-next');
+    expect(materialPaletteMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      materialPaletteLeafOperationIds,
+    );
+    expect(
+      materialPaletteMcp.operations.map((operation) =>
+        operation.parameters.map(({ name }) => name),
+      ),
+    ).toEqual([[], [], ['materials'], []]);
+    expect(materialPaletteMcp.operations[2]!.parameters).toEqual([
+      {
+        name: 'materials',
+        source: {
+          kind: 'action_argument',
+          argumentName: 'materials',
+          transform: 'json_identity',
+        },
+      },
+    ]);
+    const mirrorOperationRecipe = recipeFor(catalog, 'blender.modifier.add_mirror');
+    const mirrorMcp = mirrorOperationRecipe.procedureMaterialization?.mcp;
+    if (
+      mirrorMcp?.availability !== 'available' ||
+      mirrorMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Mirror operation-level MCP');
+    }
+    expect(mirrorMcp.toolName).toBe('operatingline.blender.modifier.mirror.execute-next');
+    expect(mirrorMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      mirrorLeafOperationIds,
+    );
+    expect(
+      mirrorMcp.operations.map((operation) => operation.parameters.map(({ name }) => name)),
+    ).toEqual([['targetId', 'modifierId'], [], [], [], [], [], ['modifierName', 'axis']]);
     expect(
       blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
     ).toEqual([
@@ -331,10 +525,37 @@ describe('interaction catalog protocol', () => {
       '1.42.0',
       '1.43.0',
       '1.44.0',
+      '1.45.0',
+      '1.46.0',
+      '1.47.0',
+      '1.48.0',
+      '1.49.0',
+      '1.50.0',
+      '1.51.0',
+      '1.52.0',
+      '1.53.0',
+      '1.54.0',
+      '1.55.0',
+      '1.56.0',
+      '1.57.0',
+      '1.58.0',
+      '1.59.0',
+      '1.60.0',
+      '1.61.0',
+      '1.62.0',
+      '1.63.0',
+      '1.64.0',
+      '1.65.0',
+      '1.66.0',
+      '1.67.0',
+      '1.68.0',
+      '1.69.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
-      (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
+      (recipe) =>
+        recipe.procedureMaterialization?.mcp.availability === 'available' &&
+        recipe.procedureMaterialization.mcp.source === 'catalog.action_level_mcp',
     );
     expect(availableMcpRecipes.map((recipe) => recipe.actionName)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -345,16 +566,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
       'blender.mesh.edit_subdivide',
-      'blender.mesh.edit_triangulate',
-      'blender.mesh.edit_extrude_region',
-      'blender.mesh.edit_bevel_edges',
-      'blender.mesh.edit_inset_faces',
-      'blender.mesh.edit_poke_faces',
-      'blender.modifier.add_solidify',
-      'blender.modifier.add_mirror',
-      'blender.rig.create_armature',
-      'blender.rig.bind_skin_weights',
-      'blender.animation.create_pose_keyframes',
+      'blender.lookdev.create_light_trails_scene',
     ]);
     for (const recipe of availableMcpRecipes) {
       expect(recipe.procedureMaterialization?.mcp).toEqual({
@@ -370,8 +582,105 @@ describe('interaction catalog protocol', () => {
     }
     expect(
       catalog.recipes
+        .filter(
+          (recipe) =>
+            recipe.procedureMaterialization?.mcp.availability === 'available' &&
+            recipe.procedureMaterialization.mcp.source === 'catalog.operation_level_mcp',
+        )
+        .map((recipe) => recipe.actionName),
+    ).toEqual([
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
+      'blender.modifier.add_bevel',
+      'blender.modifier.add_solidify',
+      'blender.modifier.add_subdivision_surface',
+      'blender.modifier.add_mirror',
+      'blender.geometry_nodes.create_transform',
+      'blender.geometry_nodes.create_light_trails',
+      'blender.material.create_and_assign',
+      'blender.material.create_palette_and_assign',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.animation.create_pose_keyframes',
+    ]);
+    const editTriangulate = recipeFor(catalog, 'blender.mesh.edit_triangulate');
+    const editTriangulateMcp = editTriangulate.procedureMaterialization?.mcp;
+    if (
+      editTriangulateMcp?.availability !== 'available' ||
+      editTriangulateMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Edit Triangulate operation-level MCP');
+    }
+    expect(editTriangulateMcp.toolName).toBe(
+      'operatingline.blender.mesh.edit-triangulate.execute-next',
+    );
+    expect(editTriangulateMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editTriangulateLeafOperationIds,
+    );
+    expect(
+      editTriangulateMcp.operations.map((operation) =>
+        operation.parameters.map(({ name }) => name),
+      ),
+    ).toEqual([['targetId', 'resultMeshId'], [], [], [], [], ['resultMeshName']]);
+    const editExtrudeRegion = recipeFor(catalog, 'blender.mesh.edit_extrude_region');
+    const editExtrudeRegionMcp = editExtrudeRegion.procedureMaterialization?.mcp;
+    if (
+      editExtrudeRegionMcp?.availability !== 'available' ||
+      editExtrudeRegionMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Extrude Region operation-level MCP');
+    }
+    expect(editExtrudeRegionMcp.toolName).toBe(
+      'operatingline.blender.mesh.edit-extrude-region.execute-next',
+    );
+    expect(editExtrudeRegionMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editExtrudeRegionLeafOperationIds,
+    );
+    expect(
+      editExtrudeRegionMcp.operations.map((operation) =>
+        operation.parameters.map(({ name }) => name),
+      ),
+    ).toEqual([
+      ['targetId', 'resultMeshId'],
+      [],
+      [],
+      ['polygonIndices'],
+      ['translation'],
+      ['resultMeshName'],
+    ]);
+    const editBevel = recipeFor(catalog, 'blender.mesh.edit_bevel_edges');
+    const editBevelMcp = editBevel.procedureMaterialization?.mcp;
+    if (
+      editBevelMcp?.availability !== 'available' ||
+      editBevelMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected Edit Bevel operation-level MCP');
+    }
+    expect(editBevelMcp.toolName).toBe('operatingline.blender.mesh.edit-bevel-edges.execute-next');
+    expect(editBevelMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editBevelLeafOperationIds,
+    );
+    expect(
+      editBevelMcp.operations.map((operation) => operation.parameters.map(({ name }) => name)),
+    ).toEqual([
+      ['targetId', 'resultMeshId'],
+      [],
+      [],
+      [],
+      ['width', 'segments', 'profile'],
+      ['resultMeshName'],
+    ]);
+    expect(
+      catalog.recipes
         .filter((recipe) => !availableMcpRecipes.includes(recipe))
-        .every((recipe) => recipe.procedureMaterialization?.mcp.availability !== 'available'),
+        .every(
+          (recipe) =>
+            recipe.procedureMaterialization?.mcp.availability !== 'available' ||
+            recipe.procedureMaterialization.mcp.source === 'catalog.operation_level_mcp',
+        ),
     ).toBe(true);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -1264,6 +1573,12 @@ describe('interaction catalog protocol', () => {
     expect(subdivide.guidance.kind).toBe('semantic_path');
     expect(subdivide.procedureMaterialization).toMatchObject({
       menu: { availability: 'unavailable' },
+      menuCandidate: {
+        source: 'catalog.ordered_menu_candidate_operations',
+        projection: 'candidate_only',
+        equivalence: 'not_equivalent_to_managed_action',
+        executionAuthority: 'none',
+      },
       shortcut: {
         availability: 'available',
         source: 'catalog.ordered_shortcut_operations',
@@ -1273,6 +1588,46 @@ describe('interaction catalog protocol', () => {
       },
       mcp: { availability: 'available' },
     });
+    const subdivideMenuCandidate = subdivide.procedureMaterialization?.menuCandidate;
+    if (subdivideMenuCandidate === undefined) {
+      throw new Error('Expected Subdivide menu candidate materialization');
+    }
+    expect(subdivideMenuCandidate.operations.map((operation) => operation.id)).toEqual([
+      'candidate.workspace_layout',
+      'candidate.use_accepted_active_mesh',
+      'candidate.enter_edit_mode',
+      'candidate.open_select_menu',
+      'candidate.select_all_mesh_elements',
+      'candidate.open_edge_menu',
+      'candidate.execute_subdivide',
+      'candidate.open_adjust_last_operation',
+      'candidate.set_number_of_cuts',
+      'candidate.set_smoothness',
+      'candidate.return_to_object_mode',
+    ]);
+    expect(subdivideMenuCandidate.operations.slice(8, 10)).toMatchObject([
+      {
+        target: { kind: 'control', hostId: 'mesh.subdivide.number_cuts' },
+        parameters: [
+          {
+            name: 'value',
+            source: { kind: 'action_argument', argumentName: 'cuts', transform: 'identity' },
+          },
+        ],
+      },
+      {
+        target: { kind: 'control', hostId: 'mesh.subdivide.smoothness' },
+        parameters: [
+          {
+            name: 'value',
+            source: { kind: 'action_argument', argumentName: 'smooth', transform: 'identity' },
+          },
+        ],
+      },
+    ]);
+    expect(
+      subdivideMenuCandidate.omittedActionArguments.map(({ argumentName }) => argumentName),
+    ).toEqual(['targetId', 'resultMeshId', 'resultMeshName']);
     const subdivideShortcut = subdivide.procedureMaterialization?.shortcut;
     if (subdivideShortcut?.availability !== 'available') {
       throw new Error('Expected Subdivide shortcut materialization');
@@ -1341,8 +1696,27 @@ describe('interaction catalog protocol', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: {
+        availability: 'available',
+        source: 'catalog.operation_level_mcp',
+        semanticBinding: 'ordered_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+        authorization: 'accepted_replay_next_step',
+        resultBinding: 'companion_leaf_operation_progress',
+      },
     });
+    const subdivisionSurfaceMcp = subdivisionSurface.procedureMaterialization?.mcp;
+    if (
+      subdivisionSurfaceMcp?.availability !== 'available' ||
+      subdivisionSurfaceMcp.source !== 'catalog.operation_level_mcp'
+    ) {
+      throw new Error('Expected operation-level Subdivision Surface MCP');
+    }
+    expect(
+      subdivisionSurfaceMcp.operations.map((operation) => operation.sourceOperationId),
+    ).toEqual(subdivisionSurfaceLeafOperationIds);
     expect(subdivisionSurface.guidance).toMatchObject({
       kind: 'semantic_path',
       steps: [
@@ -1771,6 +2145,17 @@ describe('interaction catalog protocol', () => {
       'resultMeshId',
       'resultMeshName',
     ]);
+    const pokeMcp = pokeFaces.procedureMaterialization?.mcp;
+    if (pokeMcp?.availability !== 'available' || pokeMcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Poke Faces operation-level MCP');
+    }
+    expect(pokeMcp.toolName).toBe('operatingline.blender.mesh.edit-poke-faces.execute-next');
+    expect(pokeMcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editPokeLeafOperationIds,
+    );
+    expect(
+      pokeMcp.operations.map((operation) => operation.parameters.map(({ name }) => name)),
+    ).toEqual([['targetId', 'resultMeshId'], [], [], [], ['offset'], ['resultMeshName']]);
     const mirror = recipeFor(catalog, 'blender.modifier.add_mirror');
     if (mirror.guidance.kind !== 'semantic_path') {
       throw new Error('Expected semantic Mirror guidance');
@@ -1808,13 +2193,56 @@ describe('interaction catalog protocol', () => {
       },
       mcp: {
         availability: 'available',
-        source: 'catalog.action_level_mcp',
-        semanticBinding: 'all_leaf_operations',
-        parameterBinding: 'accepted_action_arguments',
+        source: 'catalog.operation_level_mcp',
+        semanticBinding: 'ordered_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
         serverName: 'operating-line',
-        toolName: 'operatingline.blender.action.execute',
+        toolName: 'operatingline.blender.modifier.mirror.execute-next',
         authorization: 'accepted_replay_next_step',
-        resultBinding: 'companion_state_report',
+        resultBinding: 'companion_leaf_operation_progress',
+        operations: mirrorLeafOperationIds.map((sourceOperationId, index) => ({
+          sourceOperationId,
+          parameters:
+            index === 0
+              ? [
+                  {
+                    name: 'targetId',
+                    source: {
+                      kind: 'action_argument',
+                      argumentName: 'targetId',
+                      transform: 'identity',
+                    },
+                  },
+                  {
+                    name: 'modifierId',
+                    source: {
+                      kind: 'action_argument',
+                      argumentName: 'modifierId',
+                      transform: 'identity',
+                    },
+                  },
+                ]
+              : index === 6
+                ? [
+                    {
+                      name: 'modifierName',
+                      source: {
+                        kind: 'action_argument',
+                        argumentName: 'modifierName',
+                        transform: 'identity',
+                      },
+                    },
+                    {
+                      name: 'axis',
+                      source: {
+                        kind: 'action_argument',
+                        argumentName: 'axis',
+                        transform: 'identity',
+                      },
+                    },
+                  ]
+                : [],
+        })),
       },
     });
     const materializedActionNames = new Set([
@@ -1833,7 +2261,13 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.edit_poke_faces',
       'blender.modifier.add_subdivision_surface',
       'blender.modifier.add_solidify',
+      'blender.modifier.add_bevel',
       'blender.modifier.add_mirror',
+      'blender.geometry_nodes.create_transform',
+      'blender.geometry_nodes.create_light_trails',
+      'blender.material.create_and_assign',
+      'blender.material.create_palette_and_assign',
+      'blender.lookdev.create_light_trails_scene',
       'blender.rig.create_armature',
       'blender.rig.bind_skin_weights',
       'blender.animation.create_pose_keyframes',
@@ -1842,6 +2276,58 @@ describe('interaction catalog protocol', () => {
       catalog.recipes.filter((recipe) => !materializedActionNames.has(recipe.actionName)),
     ).toSatisfy((recipes) =>
       recipes.every((recipe) => recipe.procedureMaterialization === undefined),
+    );
+  });
+
+  it('rejects partial node connections and connections on non-semantic targets', () => {
+    const partial = structuredClone(blenderInteractionCatalog) as unknown as {
+      recipes: Array<{
+        actionName: string;
+        guidance: { steps: Array<{ target: Record<string, unknown> }> };
+      }>;
+    };
+    const partialTransform = partial.recipes.find(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_transform',
+    );
+    if (partialTransform === undefined) throw new Error('Expected Transform Geometry recipe');
+    const partialConnection = partialTransform.guidance.steps[5]!.target.connection as Record<
+      string,
+      unknown
+    >;
+    delete partialConnection.toSocket;
+    expect(interactionCatalogSchema.safeParse(partial).success).toBe(false);
+
+    const wrongKind = structuredClone(blenderInteractionCatalog) as unknown as {
+      recipes: Array<{
+        actionName: string;
+        guidance: { steps: Array<{ target: Record<string, unknown> }> };
+      }>;
+    };
+    const wrongKindTransform = wrongKind.recipes.find(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_transform',
+    );
+    if (wrongKindTransform === undefined) throw new Error('Expected Transform Geometry recipe');
+    wrongKindTransform.guidance.steps[5]!.target.kind = 'node';
+    expect(interactionCatalogSchema.safeParse(wrongKind).success).toBe(false);
+
+    const dangling = structuredClone(blenderInteractionCatalog);
+    const danglingTransform = recipeFor(dangling, 'blender.geometry_nodes.create_transform');
+    danglingTransform.guidance.steps[5]!.target.connection!.fromNode = 'MissingNode';
+    expect(() => validateInteractionCatalog(dangling)).toThrow(
+      'fromNode MissingNode must reference exactly one declared node target',
+    );
+
+    const wrongIntent = structuredClone(blenderInteractionCatalog);
+    const wrongIntentTransform = recipeFor(wrongIntent, 'blender.geometry_nodes.create_transform');
+    wrongIntentTransform.guidance.steps[5]!.intent = 'configure';
+    expect(() => validateInteractionCatalog(wrongIntent)).toThrow('must use execute intent');
+
+    const duplicateNode = structuredClone(blenderInteractionCatalog);
+    const duplicateTransform = recipeFor(duplicateNode, 'blender.geometry_nodes.create_transform');
+    duplicateTransform.guidance.steps[2]!.target.hostId = 'GeometryNodeTransform';
+    duplicateTransform.guidance.steps[5]!.target.connection!.fromNode = 'GeometryNodeTransform';
+    expect(() => validateInteractionCatalog(duplicateNode)).toThrow(
+      'must reference exactly one declared node target',
     );
   });
 
@@ -1988,6 +2474,86 @@ describe('interaction catalog protocol', () => {
     missing.recipes.pop();
     expect(() => validateInteractionCatalog(missing, blenderActionCatalog)).toThrow(
       'action coverage mismatch',
+    );
+  });
+
+  it('keeps menu candidates catalog-owned, non-executable, ordered, and fully parameter-bound', () => {
+    const recipe = recipeFor(blenderInteractionCatalog, 'blender.mesh.edit_subdivide');
+    const candidate = recipe.procedureMaterialization?.menuCandidate;
+    if (candidate === undefined) throw new Error('Expected Edit Subdivide menu candidate');
+    expect(recipe.procedureMaterialization?.menu.availability).toBe('unavailable');
+    expect(candidate).toMatchObject({
+      projection: 'candidate_only',
+      equivalence: 'not_equivalent_to_managed_action',
+      executionAuthority: 'none',
+    });
+    expect(candidate.operations.flatMap((operation) => operation.parameters)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: expect.objectContaining({ argumentName: 'targetId' }),
+        }),
+        expect.objectContaining({
+          source: expect.objectContaining({ argumentName: 'resultMeshId' }),
+        }),
+        expect.objectContaining({
+          source: expect.objectContaining({ argumentName: 'resultMeshName' }),
+        }),
+      ]),
+    );
+
+    const elevated = structuredClone(blenderInteractionCatalog) as unknown as Record<
+      string,
+      unknown
+    >;
+    const elevatedRecipes = elevated['recipes'] as Array<Record<string, unknown>>;
+    const elevatedSubdivide = elevatedRecipes.find(
+      (item) => item['actionName'] === 'blender.mesh.edit_subdivide',
+    )!;
+    const elevatedMaterialization = elevatedSubdivide['procedureMaterialization'] as Record<
+      string,
+      unknown
+    >;
+    const elevatedCandidate = elevatedMaterialization['menuCandidate'] as Record<string, unknown>;
+    elevatedCandidate['executionAuthority'] = 'accepted_replay_next_step';
+    expect(interactionCatalogSchema.safeParse(elevated).success).toBe(false);
+
+    const duplicate = structuredClone(blenderInteractionCatalog);
+    const duplicateCandidate = recipeFor(duplicate, 'blender.mesh.edit_subdivide')
+      .procedureMaterialization?.menuCandidate;
+    if (duplicateCandidate === undefined) throw new Error('Expected menu candidate');
+    duplicateCandidate.operations[1]!.id = duplicateCandidate.operations[0]!.id;
+    expect(() => validateInteractionCatalog(duplicate, blenderActionCatalog)).toThrow(
+      'menu candidate contains duplicate operation id',
+    );
+
+    const uncovered = structuredClone(blenderInteractionCatalog);
+    const uncoveredCandidate = recipeFor(uncovered, 'blender.mesh.edit_subdivide')
+      .procedureMaterialization?.menuCandidate;
+    if (uncoveredCandidate === undefined) throw new Error('Expected menu candidate');
+    uncoveredCandidate.operations[9]!.parameters = [];
+    expect(() => validateInteractionCatalog(uncovered, blenderActionCatalog)).toThrow(
+      'menu candidate leaves action arguments unmapped: smooth',
+    );
+
+    const evidenceMismatch = structuredClone(blenderInteractionCatalog);
+    const evidenceCandidate = recipeFor(evidenceMismatch, 'blender.mesh.edit_subdivide')
+      .procedureMaterialization?.menuCandidate;
+    if (evidenceCandidate === undefined) throw new Error('Expected menu candidate');
+    evidenceCandidate.nativeEvidence = {
+      kind: 'bounded_blender_ui_probe',
+      executorId: 'blender.mesh_edit_subdivide_menu.event_simulate.v1',
+      hostVersions: ['4.5.3', '5.1.1'],
+      managedActionExecuted: false,
+      managedReceiptCreated: false,
+      managedReplacementMeshCreated: false,
+      nativeMutationKind: 'in_place_edit_mesh_subdivide',
+      operationIds: evidenceCandidate.operations.slice(1).map(({ id }) => id),
+      nativeUndoCheckpointRequired: true,
+      nativeUndoDepth: 1,
+      nativeRedoDepth: 1,
+    };
+    expect(() => validateInteractionCatalog(evidenceMismatch, blenderActionCatalog)).toThrow(
+      'native evidence must bind every ordered operation exactly',
     );
   });
 

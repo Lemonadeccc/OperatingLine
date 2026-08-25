@@ -1,0 +1,384 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 3,
+  "type": "array",
+  "items": {
+    "anyOf": [
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_property_write"
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.geometry-nodes.transform.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "enum": [
+              "projection.semantic.transform_geometry.translation",
+              "projection.semantic.transform_geometry.rotation",
+              "projection.semantic.transform_geometry.scale"
+            ]
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "node.transform_geometry"
+          },
+          "actionArgument": {
+            "type": "string",
+            "enum": [
+              "translation",
+              "rotation",
+              "scale"
+            ]
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeName": {
+            "type": "string",
+            "const": "OperatingLine Transform"
+          },
+          "nodeType": {
+            "type": "string",
+            "const": "GeometryNodeTransform"
+          },
+          "socketIdentifier": {
+            "type": "string",
+            "enum": [
+              "Translation",
+              "Rotation",
+              "Scale"
+            ]
+          },
+          "propertyName": {
+            "type": "string",
+            "const": "default_value"
+          },
+          "componentIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "componentLabel": {
+            "type": "string",
+            "enum": [
+              "X",
+              "Y",
+              "Z"
+            ]
+          },
+          "beforeValue": {
+            "type": "number"
+          },
+          "acceptedValue": {
+            "type": "number"
+          },
+          "observedValue": {
+            "type": "number"
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Geometry Nodes"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "OperatingLine Transform"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Translation",
+                  "Rotation",
+                  "Scale"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "X",
+                  "Y",
+                  "Z"
+                ]
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "order",
+          "executionMethod",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "actionArgument",
+          "nodeGroupId",
+          "nodeGroupName",
+          "nodeName",
+          "nodeType",
+          "socketIdentifier",
+          "propertyName",
+          "componentIndex",
+          "componentLabel",
+          "beforeValue",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_property_write"
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "enum": [
+              "projection.semantic.light_trails.tile_length",
+              "projection.semantic.light_trails.points_per_trail",
+              "projection.semantic.light_trails.trail_count",
+              "projection.semantic.light_trails.trail_spacing",
+              "projection.semantic.light_trails.noise_scale",
+              "projection.semantic.light_trails.noise_detail",
+              "projection.semantic.light_trails.noise_roughness",
+              "projection.semantic.light_trails.noise_seed",
+              "projection.semantic.light_trails.height",
+              "projection.semantic.light_trails.profile_sides",
+              "projection.semantic.light_trails.profile_radius",
+              "projection.semantic.light_trails.tile_repeat_count"
+            ]
+          },
+          "semanticAction": {
+            "type": "string",
+            "enum": [
+              "node.light_trails.half_tile_line",
+              "node.light_trails.trail_resolution",
+              "node.light_trails.trail_rows",
+              "node.light_trails.terrain_noise",
+              "node.light_trails.scale_height",
+              "node.light_trails.trail_profile",
+              "node.light_trails.loop_tiles"
+            ]
+          },
+          "actionArgument": {
+            "type": "string",
+            "enum": [
+              "tileLength",
+              "pointsPerTrail",
+              "trailCount",
+              "trailSpacing",
+              "noiseScale",
+              "noiseDetail",
+              "noiseRoughness",
+              "noiseSeed",
+              "height",
+              "profileSides",
+              "profileRadius",
+              "tileRepeatCount"
+            ]
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeName": {
+            "type": "string",
+            "enum": [
+              "OperatingLine Half Tile Line",
+              "OperatingLine Trail Resolution",
+              "OperatingLine Trail Rows",
+              "OperatingLine Terrain Noise",
+              "OperatingLine Scale Height",
+              "OperatingLine Trail Profile",
+              "OperatingLine Loop Tiles"
+            ]
+          },
+          "nodeType": {
+            "type": "string",
+            "enum": [
+              "GeometryNodeCurvePrimitiveLine",
+              "GeometryNodeResampleCurve",
+              "GeometryNodeMeshLine",
+              "ShaderNodeTexNoise",
+              "ShaderNodeMath",
+              "GeometryNodeCurvePrimitiveCircle"
+            ]
+          },
+          "socketIdentifier": {
+            "type": "string",
+            "enum": [
+              "Start",
+              "Count",
+              "Start Location",
+              "Offset",
+              "Scale",
+              "Detail",
+              "Roughness",
+              "W",
+              "Value_001",
+              "Resolution",
+              "Radius"
+            ]
+          },
+          "propertyName": {
+            "type": "string",
+            "const": "default_value"
+          },
+          "valueKind": {
+            "type": "string",
+            "enum": [
+              "scalar",
+              "vector_component"
+            ]
+          },
+          "componentIndex": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "componentLabel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "X",
+                  "Y",
+                  "Z"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projection": {
+            "type": "string",
+            "enum": [
+              "identity",
+              "negative_half_x",
+              "centered_rows_y_from_count",
+              "centered_rows_y_from_spacing",
+              "centered_tiles_x_from_count"
+            ]
+          },
+          "beforeValue": {
+            "type": "number"
+          },
+          "acceptedValue": {
+            "type": "number"
+          },
+          "projectedValue": {
+            "type": "number"
+          },
+          "observedValue": {
+            "type": "number"
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Geometry Nodes"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Value",
+                  "X",
+                  "Y",
+                  "Z"
+                ]
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "order",
+          "executionMethod",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "actionArgument",
+          "nodeGroupId",
+          "nodeGroupName",
+          "nodeName",
+          "nodeType",
+          "socketIdentifier",
+          "propertyName",
+          "valueKind",
+          "componentIndex",
+          "componentLabel",
+          "projection",
+          "beforeValue",
+          "acceptedValue",
+          "projectedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Transform X/Y/Z order and Light Trails write-set order, plus operation/node/socket/argument/projection/UI-path agreement, require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-rna-control-writes.json"
+}

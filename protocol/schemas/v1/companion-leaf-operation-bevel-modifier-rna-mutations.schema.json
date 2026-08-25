@@ -1,0 +1,371 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 5,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.bevel.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_bevel_modifier_create"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "control.add_modifier"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "control.add_modifier"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "bevel_modifier_create"
+          },
+          "pendingModifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingBevelModifier\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "BevelModifier"
+          },
+          "modifierType": {
+            "type": "string",
+            "const": "BEVEL"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "const": "Add Modifier"
+              },
+              {
+                "type": "string",
+                "const": "Generate"
+              },
+              {
+                "type": "string",
+                "const": "Bevel"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingBevelModifier\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 7,
+            "maxItems": 7
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingModifierName",
+          "resourceType",
+          "modifierType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.bevel.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_modifier_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.bevel_parameters"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.bevel_parameters"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "modifierName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "bevel_modifier_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingBevelModifier\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.bevel.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 5
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_bevel_modifier_property_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.bevel_parameters"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.bevel_parameters"
+          },
+          "valueSource": {
+            "type": "string",
+            "enum": [
+              "catalog_constant",
+              "accepted_action_argument"
+            ]
+          },
+          "actionArgument": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "const": "width"
+              },
+              {
+                "type": "string",
+                "const": "segments"
+              },
+              {
+                "type": "string",
+                "const": "angleLimit"
+              }
+            ]
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "bevel_modifier_property_write"
+          },
+          "modifierName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyName": {
+            "type": "string",
+            "enum": [
+              "width",
+              "segments",
+              "limit_method",
+              "angle_limit"
+            ]
+          },
+          "acceptedValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "observedValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "width",
+                  "segments",
+                  "limit_method",
+                  "angle_limit"
+                ]
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "modifierName",
+          "propertyName",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Bevel Modifier create, accepted name, and ordered width/segments/limit/angle RNA property writes plus observed values and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-bevel-modifier-rna-mutations.json"
+}

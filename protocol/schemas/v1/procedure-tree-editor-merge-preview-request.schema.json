@@ -126,6 +126,7 @@
                             "evidence",
                             "nodes",
                             "semanticOperations",
+                            "menuCandidates",
                             "menuTracks",
                             "shortcutTracks",
                             "mcpTracks",

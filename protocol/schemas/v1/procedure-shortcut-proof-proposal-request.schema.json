@@ -33,22 +33,22 @@
           "$ref": "#/definitions/__schema2"
         },
         "retrieval": {
-          "$ref": "#/definitions/__schema115"
+          "$ref": "#/definitions/__schema100"
         },
         "responseContract": {
-          "$ref": "#/definitions/__schema116"
+          "$ref": "#/definitions/__schema101"
         },
         "workflow": {
-          "$ref": "#/definitions/__schema118"
+          "$ref": "#/definitions/__schema103"
         },
         "limits": {
-          "$ref": "#/definitions/__schema120"
+          "$ref": "#/definitions/__schema105"
         },
         "sideEffects": {
-          "$ref": "#/definitions/__schema121"
+          "$ref": "#/definitions/__schema106"
         },
         "integrity": {
-          "$ref": "#/definitions/__schema122"
+          "$ref": "#/definitions/__schema107"
         }
       },
       "required": [
@@ -401,7 +401,7 @@
           "minItems": 1,
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema123"
+            "$ref": "#/definitions/__schema108"
           }
         },
         "evidence": {
@@ -506,7 +506,7 @@
           "minItems": 1,
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema124"
+            "$ref": "#/definitions/__schema109"
           }
         }
       },
@@ -573,7 +573,7 @@
           "$ref": "#/definitions/__schema51"
         },
         "constraints": {
-          "$ref": "#/definitions/__schema114"
+          "$ref": "#/definitions/__schema99"
         }
       },
       "required": [
@@ -2725,7 +2725,8 @@
         "1.3.0",
         "1.4.0",
         "1.5.0",
-        "1.6.0"
+        "1.6.0",
+        "1.7.0"
       ]
     },
     "__schema53": {
@@ -3064,16 +3065,490 @@
           "$ref": "#/definitions/__schema0"
         },
         "actionName": {
-          "$ref": "#/definitions/__schema70"
+          "type": "string",
+          "minLength": 1
         },
         "title": {
-          "$ref": "#/definitions/__schema71"
+          "type": "string",
+          "minLength": 1
         },
         "guidance": {
-          "$ref": "#/definitions/__schema72"
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "native_path"
+                },
+                "surfaceId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "preconditions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "workspace",
+                          "editor",
+                          "mode",
+                          "selection"
+                        ]
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "label",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "steps": {
+                  "minItems": 2,
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/__schema70"
+                  }
+                },
+                "execution": {
+                  "type": "object",
+                  "properties": {
+                    "stepId": {
+                      "$ref": "#/definitions/__schema0"
+                    },
+                    "operatorId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "binding": {
+                      "type": "string",
+                      "const": "accepted_plan_action"
+                    }
+                  },
+                  "required": [
+                    "stepId",
+                    "operatorId",
+                    "binding"
+                  ],
+                  "additionalProperties": false
+                },
+                "manualReference": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "kind",
+                "surfaceId",
+                "preconditions",
+                "steps",
+                "execution"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "semantic_path"
+                },
+                "steps": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/__schema70"
+                  }
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "manualReference": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": [
+                "kind",
+                "steps",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          ]
         },
         "procedureMaterialization": {
-          "$ref": "#/definitions/__schema74"
+          "type": "object",
+          "properties": {
+            "semantic": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "const": "catalog.semantic_parameter_projections"
+                },
+                "projections": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/__schema74"
+                  }
+                },
+                "omittedActionArguments": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/__schema78"
+                  }
+                }
+              },
+              "required": [
+                "source",
+                "projections",
+                "omittedActionArguments"
+              ],
+              "additionalProperties": false
+            },
+            "menu": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/__schema79"
+                },
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "availability": {
+                          "type": "string",
+                          "const": "available"
+                        },
+                        "source": {
+                          "type": "string",
+                          "const": "guidance.native_path"
+                        },
+                        "semanticBinding": {
+                          "type": "string",
+                          "const": "all_leaf_operations"
+                        },
+                        "parameterBinding": {
+                          "type": "string",
+                          "const": "accepted_action_arguments"
+                        }
+                      },
+                      "required": [
+                        "availability",
+                        "source",
+                        "semanticBinding",
+                        "parameterBinding"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "availability": {
+                          "type": "string",
+                          "const": "available"
+                        },
+                        "source": {
+                          "type": "string",
+                          "const": "guidance.native_path"
+                        },
+                        "semanticBinding": {
+                          "type": "string",
+                          "const": "all_leaf_operations"
+                        },
+                        "parameterBinding": {
+                          "type": "string",
+                          "const": "ordered_parameter_operations"
+                        },
+                        "operatorParameters": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/__schema80"
+                          }
+                        },
+                        "controlOperations": {
+                          "type": "object",
+                          "properties": {
+                            "insertAfterStepId": {
+                              "$ref": "#/definitions/__schema0"
+                            },
+                            "operations": {
+                              "minItems": 1,
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/definitions/__schema82"
+                              }
+                            }
+                          },
+                          "required": [
+                            "insertAfterStepId",
+                            "operations"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "omittedActionArguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/__schema78"
+                          }
+                        }
+                      },
+                      "required": [
+                        "availability",
+                        "source",
+                        "semanticBinding",
+                        "parameterBinding",
+                        "operatorParameters",
+                        "controlOperations",
+                        "omittedActionArguments"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              ]
+            },
+            "shortcut": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/__schema79"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "availability": {
+                      "type": "string",
+                      "const": "available"
+                    },
+                    "source": {
+                      "type": "string",
+                      "const": "catalog.ordered_shortcut_operations"
+                    },
+                    "semanticBinding": {
+                      "type": "string",
+                      "const": "all_leaf_operations"
+                    },
+                    "parameterBinding": {
+                      "type": "string",
+                      "const": "ordered_parameter_operations"
+                    },
+                    "projection": {
+                      "type": "string",
+                      "const": "candidate_only"
+                    },
+                    "preconditions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "workspace",
+                              "editor",
+                              "mode",
+                              "selection",
+                              "keymap",
+                              "modal_state",
+                              "scene_state"
+                            ]
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "label",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "operations": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/__schema84"
+                      }
+                    },
+                    "omittedActionArguments": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/__schema78"
+                      }
+                    }
+                  },
+                  "required": [
+                    "availability",
+                    "source",
+                    "semanticBinding",
+                    "parameterBinding",
+                    "projection",
+                    "preconditions",
+                    "operations",
+                    "omittedActionArguments"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "mcp": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/__schema79"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "availability": {
+                      "type": "string",
+                      "const": "available"
+                    },
+                    "source": {
+                      "type": "string",
+                      "const": "catalog.action_level_mcp"
+                    },
+                    "semanticBinding": {
+                      "type": "string",
+                      "const": "all_leaf_operations"
+                    },
+                    "parameterBinding": {
+                      "type": "string",
+                      "const": "accepted_action_arguments"
+                    },
+                    "serverName": {
+                      "type": "string",
+                      "const": "operating-line"
+                    },
+                    "toolName": {
+                      "type": "string",
+                      "const": "operatingline.blender.action.execute"
+                    },
+                    "authorization": {
+                      "type": "string",
+                      "const": "accepted_replay_next_step"
+                    },
+                    "resultBinding": {
+                      "type": "string",
+                      "const": "companion_state_report"
+                    }
+                  },
+                  "required": [
+                    "availability",
+                    "source",
+                    "semanticBinding",
+                    "parameterBinding",
+                    "serverName",
+                    "toolName",
+                    "authorization",
+                    "resultBinding"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "availability": {
+                      "type": "string",
+                      "const": "available"
+                    },
+                    "source": {
+                      "type": "string",
+                      "const": "catalog.operation_level_mcp"
+                    },
+                    "semanticBinding": {
+                      "type": "string",
+                      "const": "ordered_leaf_operations"
+                    },
+                    "parameterBinding": {
+                      "type": "string",
+                      "const": "ordered_parameter_operations"
+                    },
+                    "serverName": {
+                      "type": "string",
+                      "const": "operating-line"
+                    },
+                    "toolName": {
+                      "type": "string",
+                      "enum": [
+                        "operatingline.blender.geometry-nodes.transform.execute-next",
+                        "operatingline.blender.geometry-nodes.light-trails.execute-next",
+                        "operatingline.blender.animation.pose-keyframes.execute-next",
+                        "operatingline.blender.rig.armature.execute-next",
+                        "operatingline.blender.rig.skin-weights.execute-next",
+                        "operatingline.blender.modifier.solidify.execute-next",
+                        "operatingline.blender.modifier.bevel.execute-next",
+                        "operatingline.blender.material.single.execute-next",
+                        "operatingline.blender.material.palette.execute-next",
+                        "operatingline.blender.modifier.mirror.execute-next",
+                        "operatingline.blender.modifier.subdivision-surface.execute-next",
+                        "operatingline.blender.mesh.edit-bevel-edges.execute-next",
+                        "operatingline.blender.mesh.edit-inset-faces.execute-next",
+                        "operatingline.blender.mesh.edit-triangulate.execute-next",
+                        "operatingline.blender.mesh.edit-extrude-region.execute-next",
+                        "operatingline.blender.mesh.edit-poke-faces.execute-next"
+                      ]
+                    },
+                    "authorization": {
+                      "type": "string",
+                      "const": "accepted_replay_next_step"
+                    },
+                    "resultBinding": {
+                      "type": "string",
+                      "const": "companion_leaf_operation_progress"
+                    },
+                    "operations": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/__schema98"
+                      }
+                    }
+                  },
+                  "required": [
+                    "availability",
+                    "source",
+                    "semanticBinding",
+                    "parameterBinding",
+                    "serverName",
+                    "toolName",
+                    "authorization",
+                    "resultBinding",
+                    "operations"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "menu",
+            "shortcut",
+            "mcp"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -3082,240 +3557,9 @@
         "title",
         "guidance"
       ],
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "procedureMaterialization": {
-                "type": "object",
-                "properties": {
-                  "menu": {
-                    "type": "object",
-                    "required": [
-                      "proofExecution"
-                    ]
-                  }
-                },
-                "required": [
-                  "menu"
-                ]
-              }
-            },
-            "required": [
-              "procedureMaterialization"
-            ]
-          },
-          "then": {
-            "properties": {
-              "id": {
-                "const": "blender.mesh.create_uv_sphere.native"
-              },
-              "actionName": {
-                "const": "blender.mesh.create_uv_sphere"
-              },
-              "guidance": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "const": "native_path"
-                  },
-                  "steps": {
-                    "const": [
-                      {
-                        "id": "workspace.layout",
-                        "order": 1,
-                        "label": "Layout",
-                        "intent": "navigate",
-                        "target": {
-                          "kind": "workspace",
-                          "hostId": "Layout"
-                        }
-                      },
-                      {
-                        "id": "menu.add",
-                        "order": 2,
-                        "label": "Add",
-                        "intent": "navigate",
-                        "target": {
-                          "kind": "menu",
-                          "hostId": "VIEW3D_MT_add"
-                        }
-                      },
-                      {
-                        "id": "menu.mesh",
-                        "order": 3,
-                        "label": "Mesh",
-                        "intent": "navigate",
-                        "target": {
-                          "kind": "menu",
-                          "hostId": "VIEW3D_MT_mesh_add"
-                        }
-                      },
-                      {
-                        "id": "operator.uv_sphere",
-                        "order": 4,
-                        "label": "UV Sphere",
-                        "intent": "execute",
-                        "target": {
-                          "kind": "operator",
-                          "hostId": "mesh.primitive_uv_sphere_add"
-                        }
-                      }
-                    ]
-                  },
-                  "execution": {
-                    "const": {
-                      "stepId": "operator.uv_sphere",
-                      "operatorId": "mesh.primitive_uv_sphere_add",
-                      "binding": "accepted_plan_action"
-                    }
-                  }
-                },
-                "required": [
-                  "kind",
-                  "steps",
-                  "execution"
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "actionName",
-              "guidance"
-            ]
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "__schema70": {
-      "type": "string",
-      "minLength": 1
-    },
-    "__schema71": {
-      "type": "string",
-      "minLength": 1
-    },
-    "__schema72": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "native_path"
-            },
-            "surfaceId": {
-              "type": "string",
-              "minLength": 1
-            },
-            "preconditions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "workspace",
-                      "editor",
-                      "mode",
-                      "selection"
-                    ]
-                  },
-                  "label": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "value": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "kind",
-                  "label",
-                  "value"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "steps": {
-              "minItems": 2,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema73"
-              }
-            },
-            "execution": {
-              "type": "object",
-              "properties": {
-                "stepId": {
-                  "$ref": "#/definitions/__schema0"
-                },
-                "operatorId": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "binding": {
-                  "type": "string",
-                  "const": "accepted_plan_action"
-                }
-              },
-              "required": [
-                "stepId",
-                "operatorId",
-                "binding"
-              ],
-              "additionalProperties": false
-            },
-            "manualReference": {
-              "type": "string",
-              "format": "uri"
-            }
-          },
-          "required": [
-            "kind",
-            "surfaceId",
-            "preconditions",
-            "steps",
-            "execution"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "semantic_path"
-            },
-            "steps": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema73"
-              }
-            },
-            "reason": {
-              "type": "string",
-              "minLength": 1
-            },
-            "manualReference": {
-              "type": "string",
-              "format": "uri"
-            }
-          },
-          "required": [
-            "kind",
-            "steps",
-            "reason"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    "__schema73": {
       "type": "object",
       "properties": {
         "id": {
@@ -3343,25 +3587,13 @@
           "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
-              "enum": [
-                "workspace",
-                "editor",
-                "mode",
-                "menu",
-                "menu_item",
-                "operator",
-                "control",
-                "panel",
-                "node",
-                "socket",
-                "canvas",
-                "semantic"
-              ]
+              "$ref": "#/definitions/__schema71"
             },
             "hostId": {
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/definitions/__schema72"
+            },
+            "connection": {
+              "$ref": "#/definitions/__schema73"
             }
           },
           "required": [
@@ -3380,553 +3612,56 @@
       ],
       "additionalProperties": false
     },
-    "__schema74": {
+    "__schema71": {
+      "type": "string",
+      "enum": [
+        "workspace",
+        "editor",
+        "mode",
+        "menu",
+        "menu_item",
+        "operator",
+        "control",
+        "panel",
+        "node",
+        "socket",
+        "canvas",
+        "semantic"
+      ]
+    },
+    "__schema72": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema73": {
       "type": "object",
       "properties": {
-        "semantic": {
-          "type": "object",
-          "properties": {
-            "source": {
-              "type": "string",
-              "const": "catalog.semantic_parameter_projections"
-            },
-            "projections": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema75"
-              }
-            },
-            "omittedActionArguments": {
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema79"
-              }
-            }
-          },
-          "required": [
-            "source",
-            "projections",
-            "omittedActionArguments"
-          ],
-          "additionalProperties": false
+        "fromNode": {
+          "type": "string",
+          "minLength": 1
         },
-        "menu": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/__schema80"
-            },
-            {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "availability": {
-                      "type": "string",
-                      "const": "available"
-                    },
-                    "source": {
-                      "type": "string",
-                      "const": "guidance.native_path"
-                    },
-                    "semanticBinding": {
-                      "type": "string",
-                      "const": "all_leaf_operations"
-                    },
-                    "parameterBinding": {
-                      "type": "string",
-                      "const": "accepted_action_arguments"
-                    }
-                  },
-                  "required": [
-                    "availability",
-                    "source",
-                    "semanticBinding",
-                    "parameterBinding"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "availability": {
-                      "$ref": "#/definitions/__schema81"
-                    },
-                    "source": {
-                      "$ref": "#/definitions/__schema82"
-                    },
-                    "semanticBinding": {
-                      "$ref": "#/definitions/__schema83"
-                    },
-                    "parameterBinding": {
-                      "$ref": "#/definitions/__schema84"
-                    },
-                    "operatorParameters": {
-                      "$ref": "#/definitions/__schema85"
-                    },
-                    "controlOperations": {
-                      "$ref": "#/definitions/__schema88"
-                    },
-                    "omittedActionArguments": {
-                      "$ref": "#/definitions/__schema91"
-                    },
-                    "proofExecution": {
-                      "$ref": "#/definitions/__schema92"
-                    }
-                  },
-                  "required": [
-                    "availability",
-                    "source",
-                    "semanticBinding",
-                    "parameterBinding",
-                    "operatorParameters",
-                    "controlOperations",
-                    "omittedActionArguments"
-                  ],
-                  "additionalProperties": false,
-                  "allOf": [
-                    {
-                      "if": {
-                        "required": [
-                          "proofExecution"
-                        ]
-                      },
-                      "then": {
-                        "properties": {
-                          "operatorParameters": {
-                            "const": [
-                              {
-                                "name": "radius",
-                                "source": {
-                                  "kind": "literal",
-                                  "value": 1
-                                }
-                              }
-                            ]
-                          },
-                          "controlOperations": {
-                            "const": {
-                              "insertAfterStepId": "operator.uv_sphere",
-                              "operations": [
-                                {
-                                  "id": "control.location",
-                                  "label": "Location",
-                                  "target": {
-                                    "kind": "control",
-                                    "hostId": "VIEW3D_PT_item.transform.location"
-                                  },
-                                  "path": [
-                                    "Sidebar",
-                                    "Item",
-                                    "Transform",
-                                    "Location"
-                                  ],
-                                  "parameters": [
-                                    {
-                                      "name": "value",
-                                      "source": {
-                                        "kind": "action_argument",
-                                        "argumentName": "location",
-                                        "transform": "identity"
-                                      }
-                                    }
-                                  ]
-                                },
-                                {
-                                  "id": "control.scale",
-                                  "label": "Scale",
-                                  "target": {
-                                    "kind": "control",
-                                    "hostId": "VIEW3D_PT_item.transform.scale"
-                                  },
-                                  "path": [
-                                    "Sidebar",
-                                    "Item",
-                                    "Transform",
-                                    "Scale"
-                                  ],
-                                  "parameters": [
-                                    {
-                                      "name": "value",
-                                      "source": {
-                                        "kind": "action_argument",
-                                        "argumentName": "radius",
-                                        "transform": "uniform_vector3"
-                                      }
-                                    }
-                                  ]
-                                },
-                                {
-                                  "id": "control.object_name",
-                                  "label": "Object Name",
-                                  "target": {
-                                    "kind": "control",
-                                    "hostId": "PROPERTIES.object.name"
-                                  },
-                                  "path": [
-                                    "Properties",
-                                    "Object",
-                                    "Name"
-                                  ],
-                                  "parameters": [
-                                    {
-                                      "name": "value",
-                                      "source": {
-                                        "kind": "action_argument",
-                                        "argumentName": "objectName",
-                                        "transform": "identity"
-                                      }
-                                    }
-                                  ]
-                                }
-                              ]
-                            }
-                          },
-                          "omittedActionArguments": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 1,
-                            "contains": {
-                              "type": "object",
-                              "properties": {
-                                "argumentName": {
-                                  "const": "resourceId"
-                                }
-                              },
-                              "required": [
-                                "argumentName"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
+        "fromSocket": {
+          "type": "string",
+          "minLength": 1
         },
-        "shortcut": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/__schema80"
-            },
-            {
-              "type": "object",
-              "properties": {
-                "availability": {
-                  "type": "string",
-                  "const": "available"
-                },
-                "source": {
-                  "type": "string",
-                  "const": "catalog.ordered_shortcut_operations"
-                },
-                "semanticBinding": {
-                  "type": "string",
-                  "const": "all_leaf_operations"
-                },
-                "parameterBinding": {
-                  "type": "string",
-                  "const": "ordered_parameter_operations"
-                },
-                "projection": {
-                  "type": "string",
-                  "const": "candidate_only"
-                },
-                "preconditions": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "workspace",
-                          "editor",
-                          "mode",
-                          "selection",
-                          "keymap",
-                          "modal_state",
-                          "scene_state"
-                        ]
-                      },
-                      "label": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "value": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "label",
-                      "value"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "operations": {
-                  "minItems": 1,
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/__schema96"
-                  }
-                },
-                "omittedActionArguments": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/__schema79"
-                  }
-                },
-                "proofExecution": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "executorId": {
-                          "type": "string",
-                          "const": "blender.subdivision_surface_f9.event_simulate.v1"
-                        },
-                        "targetProfile": {
-                          "type": "string",
-                          "const": "factory_cube_8_12_6"
-                        },
-                        "executionBoundary": {
-                          "type": "string",
-                          "const": "blender_window_event_simulate"
-                        },
-                        "osHidInput": {
-                          "type": "boolean",
-                          "const": false
-                        },
-                        "managedActionExecuted": {
-                          "type": "boolean",
-                          "const": false
-                        },
-                        "managedReceiptCreated": {
-                          "type": "boolean",
-                          "const": false
-                        },
-                        "authorization": {
-                          "type": "string",
-                          "const": "accepted_replay_next_step"
-                        },
-                        "transport": {
-                          "type": "string",
-                          "const": "event_simulate"
-                        },
-                        "hostVersions": {
-                          "$ref": "#/definitions/__schema110"
-                        },
-                        "operationIds": {
-                          "minItems": 4,
-                          "maxItems": 4,
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/definitions/__schema112"
-                          }
-                        },
-                        "strongObservationKind": {
-                          "type": "string",
-                          "const": "subdivision_surface_shortcut_ready"
-                        },
-                        "nativeUndoCheckpointRequired": {
-                          "type": "boolean",
-                          "const": true
-                        }
-                      },
-                      "required": [
-                        "executorId",
-                        "targetProfile",
-                        "executionBoundary",
-                        "osHidInput",
-                        "managedActionExecuted",
-                        "managedReceiptCreated",
-                        "authorization",
-                        "transport",
-                        "hostVersions",
-                        "operationIds",
-                        "strongObservationKind",
-                        "nativeUndoCheckpointRequired"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "executorId": {
-                          "type": "string",
-                          "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
-                        },
-                        "targetProfile": {
-                          "type": "string",
-                          "const": "factory_cube_single_user_mesh_8_12_6"
-                        },
-                        "executionBoundary": {
-                          "type": "string",
-                          "const": "blender_window_event_simulate"
-                        },
-                        "osHidInput": {
-                          "type": "boolean",
-                          "const": false
-                        },
-                        "managedActionExecuted": {
-                          "type": "boolean",
-                          "const": false
-                        },
-                        "managedReceiptCreated": {
-                          "type": "boolean",
-                          "const": false
-                        },
-                        "managedReplacementMeshCreated": {
-                          "type": "boolean",
-                          "const": false
-                        },
-                        "nativeMutationKind": {
-                          "type": "string",
-                          "const": "in_place_edit_mesh_subdivide"
-                        },
-                        "authorization": {
-                          "type": "string",
-                          "const": "accepted_replay_next_step"
-                        },
-                        "transport": {
-                          "type": "string",
-                          "const": "event_simulate"
-                        },
-                        "hostVersions": {
-                          "$ref": "#/definitions/__schema110"
-                        },
-                        "operationIds": {
-                          "minItems": 9,
-                          "maxItems": 9,
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/definitions/__schema113"
-                          }
-                        },
-                        "strongObservationKind": {
-                          "type": "string",
-                          "const": "mesh_edit_subdivide_shortcut_ready"
-                        },
-                        "nativeUndoCheckpointRequired": {
-                          "type": "boolean",
-                          "const": true
-                        },
-                        "nativeUndoDepth": {
-                          "type": "number",
-                          "const": 4
-                        },
-                        "nativeRedoDepth": {
-                          "type": "number",
-                          "const": 4
-                        }
-                      },
-                      "required": [
-                        "executorId",
-                        "targetProfile",
-                        "executionBoundary",
-                        "osHidInput",
-                        "managedActionExecuted",
-                        "managedReceiptCreated",
-                        "managedReplacementMeshCreated",
-                        "nativeMutationKind",
-                        "authorization",
-                        "transport",
-                        "hostVersions",
-                        "operationIds",
-                        "strongObservationKind",
-                        "nativeUndoCheckpointRequired",
-                        "nativeUndoDepth",
-                        "nativeRedoDepth"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "availability",
-                "source",
-                "semanticBinding",
-                "parameterBinding",
-                "projection",
-                "preconditions",
-                "operations",
-                "omittedActionArguments"
-              ],
-              "additionalProperties": false
-            }
-          ]
+        "toNode": {
+          "type": "string",
+          "minLength": 1
         },
-        "mcp": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/__schema80"
-            },
-            {
-              "type": "object",
-              "properties": {
-                "availability": {
-                  "type": "string",
-                  "const": "available"
-                },
-                "source": {
-                  "type": "string",
-                  "const": "catalog.action_level_mcp"
-                },
-                "semanticBinding": {
-                  "type": "string",
-                  "const": "all_leaf_operations"
-                },
-                "parameterBinding": {
-                  "type": "string",
-                  "const": "accepted_action_arguments"
-                },
-                "serverName": {
-                  "type": "string",
-                  "const": "operating-line"
-                },
-                "toolName": {
-                  "type": "string",
-                  "const": "operatingline.blender.action.execute"
-                },
-                "authorization": {
-                  "type": "string",
-                  "const": "accepted_replay_next_step"
-                },
-                "resultBinding": {
-                  "type": "string",
-                  "const": "companion_state_report"
-                }
-              },
-              "required": [
-                "availability",
-                "source",
-                "semanticBinding",
-                "parameterBinding",
-                "serverName",
-                "toolName",
-                "authorization",
-                "resultBinding"
-              ],
-              "additionalProperties": false
-            }
-          ]
+        "toSocket": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
-        "menu",
-        "shortcut",
-        "mcp"
+        "fromNode",
+        "fromSocket",
+        "toNode",
+        "toSocket"
       ],
       "additionalProperties": false
     },
-    "__schema75": {
+    "__schema74": {
       "type": "object",
       "properties": {
         "id": {
@@ -3940,14 +3675,14 @@
           "maxItems": 32,
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema76"
+            "$ref": "#/definitions/__schema75"
           }
         },
         "actionArgument": {
-          "$ref": "#/definitions/__schema77"
+          "$ref": "#/definitions/__schema76"
         },
         "transform": {
-          "$ref": "#/definitions/__schema78"
+          "$ref": "#/definitions/__schema77"
         }
       },
       "required": [
@@ -3959,7 +3694,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema76": {
+    "__schema75": {
       "oneOf": [
         {
           "type": "object",
@@ -4001,14 +3736,15 @@
         }
       ]
     },
-    "__schema77": {
+    "__schema76": {
       "type": "string",
       "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
     },
-    "__schema78": {
+    "__schema77": {
       "type": "string",
       "enum": [
         "identity",
+        "json_identity",
         "uniform_vector3",
         "divide_by_two",
         "vector3_x",
@@ -4016,7 +3752,7 @@
         "vector3_z"
       ]
     },
-    "__schema79": {
+    "__schema78": {
       "type": "object",
       "properties": {
         "argumentName": {
@@ -4034,7 +3770,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema80": {
+    "__schema79": {
       "type": "object",
       "properties": {
         "availability": {
@@ -4052,33 +3788,11 @@
       ],
       "additionalProperties": false
     },
-    "__schema81": {
-      "type": "string",
-      "const": "available"
-    },
-    "__schema82": {
-      "type": "string",
-      "const": "guidance.native_path"
-    },
-    "__schema83": {
-      "type": "string",
-      "const": "all_leaf_operations"
-    },
-    "__schema84": {
-      "type": "string",
-      "const": "ordered_parameter_operations"
-    },
-    "__schema85": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/__schema86"
-      }
-    },
-    "__schema86": {
+    "__schema80": {
       "type": "object",
       "properties": {
         "name": {
-          "$ref": "#/definitions/__schema77"
+          "$ref": "#/definitions/__schema76"
         },
         "source": {
           "oneOf": [
@@ -4090,7 +3804,7 @@
                   "const": "literal"
                 },
                 "value": {
-                  "$ref": "#/definitions/__schema87"
+                  "$ref": "#/definitions/__schema81"
                 }
               },
               "required": [
@@ -4114,6 +3828,7 @@
                   "type": "string",
                   "enum": [
                     "identity",
+                    "json_identity",
                     "divide_by_two",
                     "uniform_vector3",
                     "vector3_x",
@@ -4175,7 +3890,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema87": {
+    "__schema81": {
       "anyOf": [
         {
           "type": "string"
@@ -4192,7 +3907,7 @@
         {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema87"
+            "$ref": "#/definitions/__schema81"
           }
         },
         {
@@ -4201,32 +3916,12 @@
             "type": "string"
           },
           "additionalProperties": {
-            "$ref": "#/definitions/__schema87"
+            "$ref": "#/definitions/__schema81"
           }
         }
       ]
     },
-    "__schema88": {
-      "type": "object",
-      "properties": {
-        "insertAfterStepId": {
-          "$ref": "#/definitions/__schema0"
-        },
-        "operations": {
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/__schema89"
-          }
-        }
-      },
-      "required": [
-        "insertAfterStepId",
-        "operations"
-      ],
-      "additionalProperties": false
-    },
-    "__schema89": {
+    "__schema82": {
       "type": "object",
       "properties": {
         "id": {
@@ -4258,14 +3953,14 @@
           "minItems": 1,
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema90"
+            "$ref": "#/definitions/__schema83"
           }
         },
         "parameters": {
           "minItems": 1,
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema86"
+            "$ref": "#/definitions/__schema80"
           }
         }
       },
@@ -4278,189 +3973,11 @@
       ],
       "additionalProperties": false
     },
-    "__schema90": {
+    "__schema83": {
       "type": "string",
       "minLength": 1
     },
-    "__schema91": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/__schema79"
-      }
-    },
-    "__schema92": {
-      "type": "object",
-      "properties": {
-        "executorId": {
-          "type": "string",
-          "const": "blender.uv_sphere_menu_controls.event_simulate.v1"
-        },
-        "targetProfile": {
-          "type": "string",
-          "const": "factory_layout_three_object_ui_scale_2"
-        },
-        "executionBoundary": {
-          "type": "string",
-          "const": "blender_window_event_simulate"
-        },
-        "osHidInput": {
-          "type": "boolean",
-          "const": false
-        },
-        "managedActionExecuted": {
-          "type": "boolean",
-          "const": false
-        },
-        "managedReceiptCreated": {
-          "type": "boolean",
-          "const": false
-        },
-        "authorization": {
-          "type": "string",
-          "const": "accepted_replay_next_step"
-        },
-        "transport": {
-          "type": "string",
-          "const": "event_simulate"
-        },
-        "hostVersions": {
-          "minItems": 2,
-          "maxItems": 2,
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/__schema93"
-          },
-          "const": [
-            "4.5.3",
-            "5.1.1"
-          ]
-        },
-        "operationIds": {
-          "minItems": 7,
-          "maxItems": 7,
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/__schema94"
-          },
-          "const": [
-            "workspace.layout",
-            "menu.add",
-            "menu.mesh",
-            "operator.uv_sphere",
-            "control.location",
-            "control.scale",
-            "control.object_name"
-          ]
-        },
-        "strongObservationKind": {
-          "type": "string",
-          "const": "uv_sphere_menu_controls_ready"
-        },
-        "nativeUndoCheckpointRequired": {
-          "type": "boolean",
-          "const": true
-        },
-        "nativeUndoDepth": {
-          "type": "number",
-          "const": 8
-        },
-        "uiScale": {
-          "type": "number",
-          "const": 2
-        },
-        "proofArguments": {
-          "type": "object",
-          "properties": {
-            "resourceId": {
-              "type": "string",
-              "const": "proof.uv_sphere.eye"
-            },
-            "objectName": {
-              "type": "string",
-              "const": "OperatingLine.TutorialEye"
-            },
-            "radius": {
-              "type": "number",
-              "const": 1.5
-            },
-            "location": {
-              "minItems": 3,
-              "maxItems": 3,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema95"
-              },
-              "const": [
-                1.25,
-                -2,
-                0.75
-              ]
-            }
-          },
-          "required": [
-            "resourceId",
-            "objectName",
-            "radius",
-            "location"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "executorId",
-        "targetProfile",
-        "executionBoundary",
-        "osHidInput",
-        "managedActionExecuted",
-        "managedReceiptCreated",
-        "authorization",
-        "transport",
-        "hostVersions",
-        "operationIds",
-        "strongObservationKind",
-        "nativeUndoCheckpointRequired",
-        "nativeUndoDepth",
-        "uiScale",
-        "proofArguments"
-      ],
-      "additionalProperties": false
-    },
-    "__schema93": {
-      "type": "string",
-      "enum": [
-        "4.5.3",
-        "5.1.1"
-      ]
-    },
-    "__schema94": {
-      "type": "string",
-      "enum": [
-        "workspace.layout",
-        "menu.add",
-        "menu.mesh",
-        "operator.uv_sphere",
-        "control.location",
-        "control.scale",
-        "control.object_name"
-      ]
-    },
-    "__schema95": {
-      "anyOf": [
-        {
-          "type": "number",
-          "const": 1.25
-        },
-        {
-          "type": "number",
-          "const": -2
-        },
-        {
-          "type": "number",
-          "const": 0.75
-        }
-      ]
-    },
-    "__schema96": {
+    "__schema84": {
       "anyOf": [
         {
           "type": "object",
@@ -4483,21 +4000,21 @@
               "minItems": 1,
               "type": "array",
               "items": {
-                "$ref": "#/definitions/__schema97"
+                "$ref": "#/definitions/__schema85"
               }
             },
             "selectionPath": {
               "minItems": 1,
               "type": "array",
               "items": {
-                "$ref": "#/definitions/__schema98"
+                "$ref": "#/definitions/__schema86"
               }
             },
             "parameters": {
               "minItems": 1,
               "type": "array",
               "items": {
-                "$ref": "#/definitions/__schema86"
+                "$ref": "#/definitions/__schema80"
               }
             }
           },
@@ -4516,31 +4033,31 @@
               "type": "object",
               "properties": {
                 "kind": {
-                  "$ref": "#/definitions/__schema99"
+                  "$ref": "#/definitions/__schema87"
                 },
                 "id": {
                   "$ref": "#/definitions/__schema0"
                 },
                 "label": {
-                  "$ref": "#/definitions/__schema100"
+                  "$ref": "#/definitions/__schema88"
                 },
                 "keyMode": {
-                  "$ref": "#/definitions/__schema101"
+                  "$ref": "#/definitions/__schema89"
                 },
                 "keys": {
-                  "$ref": "#/definitions/__schema102"
+                  "$ref": "#/definitions/__schema90"
                 },
                 "selectionPath": {
-                  "$ref": "#/definitions/__schema104"
+                  "$ref": "#/definitions/__schema92"
                 },
                 "parameters": {
-                  "$ref": "#/definitions/__schema106"
+                  "$ref": "#/definitions/__schema94"
                 },
                 "opensSurface": {
-                  "$ref": "#/definitions/__schema107"
+                  "$ref": "#/definitions/__schema95"
                 },
                 "closesSurfaceOperationId": {
-                  "$ref": "#/definitions/__schema108"
+                  "$ref": "#/definitions/__schema96"
                 }
               },
               "required": [
@@ -4592,7 +4109,7 @@
                   "minItems": 1,
                   "type": "array",
                   "items": {
-                    "$ref": "#/definitions/__schema109"
+                    "$ref": "#/definitions/__schema97"
                   }
                 },
                 "parameters": {
@@ -4600,7 +4117,7 @@
                   "maxItems": 1,
                   "type": "array",
                   "items": {
-                    "$ref": "#/definitions/__schema86"
+                    "$ref": "#/definitions/__schema80"
                   }
                 }
               },
@@ -4619,58 +4136,58 @@
         }
       ]
     },
-    "__schema97": {
+    "__schema85": {
       "type": "string",
       "minLength": 1
     },
-    "__schema98": {
+    "__schema86": {
       "type": "string",
       "minLength": 1
     },
-    "__schema99": {
+    "__schema87": {
       "type": "string",
       "const": "key_input"
     },
-    "__schema100": {
+    "__schema88": {
       "type": "string",
       "minLength": 1
     },
-    "__schema101": {
+    "__schema89": {
       "type": "string",
       "enum": [
         "chord",
         "sequence"
       ]
     },
-    "__schema102": {
+    "__schema90": {
       "minItems": 1,
       "type": "array",
       "items": {
-        "$ref": "#/definitions/__schema103"
+        "$ref": "#/definitions/__schema91"
       }
     },
-    "__schema103": {
+    "__schema91": {
       "type": "string",
       "minLength": 1
     },
-    "__schema104": {
+    "__schema92": {
       "minItems": 1,
       "type": "array",
       "items": {
-        "$ref": "#/definitions/__schema105"
+        "$ref": "#/definitions/__schema93"
       }
     },
-    "__schema105": {
+    "__schema93": {
       "type": "string",
       "minLength": 1
     },
-    "__schema106": {
+    "__schema94": {
       "type": "array",
       "items": {
-        "$ref": "#/definitions/__schema86"
+        "$ref": "#/definitions/__schema80"
       }
     },
-    "__schema107": {
+    "__schema95": {
       "type": "object",
       "properties": {
         "kind": {
@@ -4697,56 +4214,37 @@
       ],
       "additionalProperties": false
     },
-    "__schema108": {
+    "__schema96": {
       "allOf": [
         {
           "$ref": "#/definitions/__schema0"
         }
       ]
     },
-    "__schema109": {
+    "__schema97": {
       "type": "string",
       "minLength": 1
     },
-    "__schema110": {
-      "minItems": 2,
-      "maxItems": 2,
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/__schema111"
-      }
+    "__schema98": {
+      "type": "object",
+      "properties": {
+        "sourceOperationId": {
+          "$ref": "#/definitions/__schema0"
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema80"
+          }
+        }
+      },
+      "required": [
+        "sourceOperationId",
+        "parameters"
+      ],
+      "additionalProperties": false
     },
-    "__schema111": {
-      "type": "string",
-      "enum": [
-        "4.5.3",
-        "5.1.1"
-      ]
-    },
-    "__schema112": {
-      "type": "string",
-      "enum": [
-        "shortcut.add_subdivision_surface_level_one",
-        "shortcut.open_adjust_last_operation",
-        "shortcut.set_viewport_level",
-        "shortcut.close_adjust_last_operation"
-      ]
-    },
-    "__schema113": {
-      "type": "string",
-      "enum": [
-        "shortcut.enter_edit_mode",
-        "shortcut.select_all_mesh_elements",
-        "shortcut.search_subdivide",
-        "shortcut.execute_subdivide",
-        "shortcut.open_adjust_last_operation",
-        "shortcut.set_number_of_cuts",
-        "shortcut.set_smoothness",
-        "shortcut.close_adjust_last_operation",
-        "shortcut.return_to_object_mode"
-      ]
-    },
-    "__schema114": {
+    "__schema99": {
       "type": "object",
       "properties": {
         "allGeneratedLeavesCandidate": {
@@ -4799,7 +4297,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema115": {
+    "__schema100": {
       "type": "object",
       "properties": {
         "toolName": {
@@ -4822,7 +4320,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema116": {
+    "__schema101": {
       "type": "object",
       "properties": {
         "mediaType": {
@@ -4835,7 +4333,7 @@
             "type": "string"
           },
           "additionalProperties": {
-            "$ref": "#/definitions/__schema117"
+            "$ref": "#/definitions/__schema102"
           }
         }
       },
@@ -4845,7 +4343,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema117": {
+    "__schema102": {
       "anyOf": [
         {
           "type": "string"
@@ -4862,7 +4360,7 @@
         {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema117"
+            "$ref": "#/definitions/__schema102"
           }
         },
         {
@@ -4871,12 +4369,12 @@
             "type": "string"
           },
           "additionalProperties": {
-            "$ref": "#/definitions/__schema117"
+            "$ref": "#/definitions/__schema102"
           }
         }
       ]
     },
-    "__schema118": {
+    "__schema103": {
       "type": "object",
       "properties": {
         "validationToolName": {
@@ -4891,7 +4389,7 @@
           "minItems": 1,
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema119"
+            "$ref": "#/definitions/__schema104"
           }
         }
       },
@@ -4902,16 +4400,24 @@
       ],
       "additionalProperties": false
     },
-    "__schema119": {
+    "__schema104": {
       "type": "string",
       "minLength": 1
     },
-    "__schema120": {
+    "__schema105": {
       "type": "object",
       "properties": {
         "maxCanonicalBytes": {
-          "type": "number",
-          "const": 262144
+          "anyOf": [
+            {
+              "type": "number",
+              "const": 262144
+            },
+            {
+              "type": "number",
+              "const": 524288
+            }
+          ]
         }
       },
       "required": [
@@ -4919,7 +4425,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema121": {
+    "__schema106": {
       "type": "object",
       "properties": {
         "modelCalled": {
@@ -4947,7 +4453,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema122": {
+    "__schema107": {
       "type": "object",
       "properties": {
         "algorithm": {
@@ -4970,7 +4476,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema123": {
+    "__schema108": {
       "oneOf": [
         {
           "type": "object",
@@ -5072,7 +4578,7 @@
         }
       ]
     },
-    "__schema124": {
+    "__schema109": {
       "oneOf": [
         {
           "type": "object",
@@ -5081,19 +4587,19 @@
               "$ref": "#/definitions/__schema0"
             },
             "parentId": {
-              "$ref": "#/definitions/__schema125"
+              "$ref": "#/definitions/__schema110"
             },
             "order": {
-              "$ref": "#/definitions/__schema126"
+              "$ref": "#/definitions/__schema111"
             },
             "dependsOn": {
-              "$ref": "#/definitions/__schema127"
+              "$ref": "#/definitions/__schema112"
             },
             "title": {
-              "$ref": "#/definitions/__schema128"
+              "$ref": "#/definitions/__schema113"
             },
             "intent": {
-              "$ref": "#/definitions/__schema129"
+              "$ref": "#/definitions/__schema114"
             },
             "kind": {
               "type": "string",
@@ -5118,373 +4624,55 @@
               "$ref": "#/definitions/__schema0"
             },
             "parentId": {
-              "$ref": "#/definitions/__schema125"
+              "$ref": "#/definitions/__schema110"
             },
             "order": {
-              "$ref": "#/definitions/__schema126"
+              "$ref": "#/definitions/__schema111"
             },
             "dependsOn": {
-              "$ref": "#/definitions/__schema127"
+              "$ref": "#/definitions/__schema112"
             },
             "title": {
-              "$ref": "#/definitions/__schema128"
+              "$ref": "#/definitions/__schema113"
             },
             "intent": {
-              "$ref": "#/definitions/__schema129"
+              "$ref": "#/definitions/__schema114"
             },
             "kind": {
-              "type": "string",
-              "const": "leaf"
+              "$ref": "#/definitions/__schema115"
             },
             "action": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "adapterId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "arguments": {
-                      "type": "object",
-                      "propertyNames": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "additionalProperties": {
-                        "$ref": "#/definitions/__schema130"
-                      }
-                    }
-                  },
-                  "required": [
-                    "adapterId",
-                    "name",
-                    "arguments"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/definitions/__schema116"
             },
             "semanticOperations": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema131"
-              }
+              "$ref": "#/definitions/__schema118"
             },
             "menuTracks": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema133"
-              }
+              "$ref": "#/definitions/__schema121"
             },
             "shortcutTracks": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema134"
-              }
+              "$ref": "#/definitions/__schema123"
             },
             "mcpTracks": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/__schema135"
-              }
+              "$ref": "#/definitions/__schema125"
             },
             "anchors": {
-              "type": "array",
-              "items": {
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "const": "object"
-                      },
-                      "objectName": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "objectName"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "const": "world_position"
-                      },
-                      "position": {
-                        "minItems": 3,
-                        "maxItems": 3,
-                        "type": "array",
-                        "items": {
-                          "$ref": "#/definitions/__schema136"
-                        }
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "position"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "const": "operator"
-                      },
-                      "operatorId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "menuPath": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "operatorId"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "const": "owned_control"
-                      },
-                      "surfaceId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "controlId": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "surfaceId",
-                      "controlId"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "const": "unavailable"
-                      },
-                      "reason": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "reason"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
+              "$ref": "#/definitions/__schema127"
             },
             "expectedObservations": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "parameters": {
-                    "type": "object",
-                    "propertyNames": {
-                      "type": "string"
-                    },
-                    "additionalProperties": {}
-                  }
-                },
-                "required": [
-                  "kind",
-                  "parameters"
-                ],
-                "additionalProperties": false
-              }
+              "$ref": "#/definitions/__schema129"
             },
             "observationPolicy": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "const": "telemetry"
-                    }
-                  },
-                  "required": [
-                    "mode"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "$ref": "#/definitions/__schema137"
-                    },
-                    "failureStrategy": {
-                      "$ref": "#/definitions/__schema138"
-                    },
-                    "retryPolicy": {
-                      "$ref": "#/definitions/__schema139"
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "failureStrategy"
-                  ],
-                  "additionalProperties": false,
-                  "allOf": [
-                    {
-                      "if": {
-                        "required": [
-                          "retryPolicy"
-                        ]
-                      },
-                      "then": {
-                        "properties": {
-                          "failureStrategy": {
-                            "const": "rollback_step"
-                          }
-                        }
-                      }
-                    }
-                  ]
-                }
-              ]
+              "$ref": "#/definitions/__schema130"
             },
             "rollback": {
-              "type": "object",
-              "properties": {
-                "mode": {
-                  "$ref": "#/definitions/__schema68"
-                },
-                "checkpointRequired": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "mode",
-                "checkpointRequired"
-              ],
-              "additionalProperties": false
+              "$ref": "#/definitions/__schema134"
             },
             "validation": {
-              "type": "object",
-              "properties": {
-                "status": {
-                  "type": "string",
-                  "const": "candidate"
-                },
-                "validatedHostVersions": {
-                  "minItems": 0,
-                  "maxItems": 0,
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/__schema53"
-                  }
-                },
-                "notes": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
-              },
-              "required": [
-                "status",
-                "validatedHostVersions",
-                "notes"
-              ],
-              "additionalProperties": false
+              "$ref": "#/definitions/__schema135"
             },
             "parameterProjection": {
-              "type": "object",
-              "properties": {
-                "formatVersion": {
-                  "type": "string",
-                  "const": "1.0.0"
-                },
-                "provenance": {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "const": "interaction_catalog_materialization"
-                    },
-                    "interactionCatalogVersion": {
-                      "$ref": "#/definitions/__schema53"
-                    },
-                    "recipeId": {
-                      "$ref": "#/definitions/__schema0"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "interactionCatalogVersion",
-                    "recipeId"
-                  ],
-                  "additionalProperties": false
-                },
-                "arguments": {
-                  "maxItems": 1000,
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/__schema140"
-                  }
-                },
-                "bindings": {
-                  "maxItems": 10000,
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/definitions/__schema142"
-                  }
-                }
-              },
-              "required": [
-                "formatVersion",
-                "provenance",
-                "arguments",
-                "bindings"
-              ],
-              "additionalProperties": false
+              "$ref": "#/definitions/__schema136"
             }
           },
           "required": [
@@ -5509,7 +4697,7 @@
         }
       ]
     },
-    "__schema125": {
+    "__schema110": {
       "anyOf": [
         {
           "$ref": "#/definitions/__schema0"
@@ -5519,26 +4707,66 @@
         }
       ]
     },
-    "__schema126": {
+    "__schema111": {
       "type": "integer",
       "exclusiveMinimum": 0,
       "maximum": 9007199254740991
     },
-    "__schema127": {
+    "__schema112": {
       "type": "array",
       "items": {
         "$ref": "#/definitions/__schema0"
       }
     },
-    "__schema128": {
+    "__schema113": {
       "type": "string",
       "minLength": 1
     },
-    "__schema129": {
+    "__schema114": {
       "type": "string",
       "minLength": 1
     },
-    "__schema130": {
+    "__schema115": {
+      "type": "string",
+      "const": "leaf"
+    },
+    "__schema116": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "arguments": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema117"
+              }
+            }
+          },
+          "required": [
+            "adapterId",
+            "name",
+            "arguments"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "__schema117": {
       "anyOf": [
         {
           "type": "string"
@@ -5555,7 +4783,7 @@
         {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema130"
+            "$ref": "#/definitions/__schema117"
           }
         },
         {
@@ -5564,12 +4792,19 @@
             "type": "string"
           },
           "additionalProperties": {
-            "$ref": "#/definitions/__schema130"
+            "$ref": "#/definitions/__schema117"
           }
         }
       ]
     },
-    "__schema131": {
+    "__schema118": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/__schema119"
+      }
+    },
+    "__schema119": {
       "type": "object",
       "properties": {
         "id": {
@@ -5594,7 +4829,7 @@
             "minLength": 1
           },
           "additionalProperties": {
-            "$ref": "#/definitions/__schema132"
+            "$ref": "#/definitions/__schema120"
           }
         },
         "evidenceRefs": {
@@ -5614,7 +4849,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema132": {
+    "__schema120": {
       "anyOf": [
         {
           "type": "string"
@@ -5631,7 +4866,7 @@
         {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/__schema132"
+            "$ref": "#/definitions/__schema120"
           }
         },
         {
@@ -5640,12 +4875,19 @@
             "type": "string"
           },
           "additionalProperties": {
-            "$ref": "#/definitions/__schema132"
+            "$ref": "#/definitions/__schema120"
           }
         }
       ]
     },
-    "__schema133": {
+    "__schema121": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/__schema122"
+      }
+    },
+    "__schema122": {
       "type": "object",
       "properties": {
         "id": {
@@ -5677,7 +4919,14 @@
       ],
       "additionalProperties": false
     },
-    "__schema134": {
+    "__schema123": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/__schema124"
+      }
+    },
+    "__schema124": {
       "type": "object",
       "properties": {
         "id": {
@@ -5709,7 +4958,14 @@
       ],
       "additionalProperties": false
     },
-    "__schema135": {
+    "__schema125": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/__schema126"
+      }
+    },
+    "__schema126": {
       "type": "object",
       "properties": {
         "id": {
@@ -5741,21 +4997,210 @@
       ],
       "additionalProperties": false
     },
-    "__schema136": {
+    "__schema127": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "object"
+              },
+              "objectName": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind",
+              "objectName"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "world_position"
+              },
+              "position": {
+                "minItems": 3,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/__schema128"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "position"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "operator"
+              },
+              "operatorId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "menuPath": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "operatorId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "owned_control"
+              },
+              "surfaceId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "controlId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind",
+              "surfaceId",
+              "controlId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "unavailable"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "__schema128": {
       "type": "number"
     },
-    "__schema137": {
+    "__schema129": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parameters": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "kind",
+          "parameters"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "__schema130": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "telemetry"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/definitions/__schema131"
+            },
+            "failureStrategy": {
+              "$ref": "#/definitions/__schema132"
+            },
+            "retryPolicy": {
+              "$ref": "#/definitions/__schema133"
+            }
+          },
+          "required": [
+            "mode",
+            "failureStrategy"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "retryPolicy"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "failureStrategy": {
+                    "const": "rollback_step"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "__schema131": {
       "type": "string",
       "const": "success_gate"
     },
-    "__schema138": {
+    "__schema132": {
       "type": "string",
       "enum": [
         "rollback_step",
         "retain_for_repair"
       ]
     },
-    "__schema139": {
+    "__schema133": {
       "type": "object",
       "properties": {
         "mode": {
@@ -5773,6 +5218,111 @@
         "maxAttempts"
       ],
       "additionalProperties": false
+    },
+    "__schema134": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/__schema68"
+        },
+        "checkpointRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "checkpointRequired"
+      ],
+      "additionalProperties": false
+    },
+    "__schema135": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "candidate"
+        },
+        "validatedHostVersions": {
+          "minItems": 0,
+          "maxItems": 0,
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema53"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "status",
+        "validatedHostVersions",
+        "notes"
+      ],
+      "additionalProperties": false
+    },
+    "__schema136": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "$ref": "#/definitions/__schema137"
+        },
+        "provenance": {
+          "$ref": "#/definitions/__schema138"
+        },
+        "arguments": {
+          "$ref": "#/definitions/__schema139"
+        },
+        "bindings": {
+          "$ref": "#/definitions/__schema142"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "provenance",
+        "arguments",
+        "bindings"
+      ],
+      "additionalProperties": false
+    },
+    "__schema137": {
+      "type": "string",
+      "enum": [
+        "1.0.0",
+        "1.1.0"
+      ]
+    },
+    "__schema138": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "interaction_catalog_materialization"
+        },
+        "interactionCatalogVersion": {
+          "$ref": "#/definitions/__schema53"
+        },
+        "recipeId": {
+          "$ref": "#/definitions/__schema0"
+        }
+      },
+      "required": [
+        "kind",
+        "interactionCatalogVersion",
+        "recipeId"
+      ],
+      "additionalProperties": false
+    },
+    "__schema139": {
+      "maxItems": 1000,
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/__schema140"
+      }
     },
     "__schema140": {
       "oneOf": [
@@ -5842,6 +5392,13 @@
       "maxLength": 180
     },
     "__schema142": {
+      "maxItems": 10000,
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/__schema143"
+      }
+    },
+    "__schema143": {
       "type": "object",
       "properties": {
         "id": {
@@ -5851,7 +5408,7 @@
           "$ref": "#/definitions/__schema141"
         },
         "transform": {
-          "$ref": "#/definitions/__schema78"
+          "$ref": "#/definitions/__schema77"
         },
         "target": {
           "oneOf": [
@@ -5866,7 +5423,7 @@
                   "$ref": "#/definitions/__schema0"
                 },
                 "path": {
-                  "$ref": "#/definitions/__schema143"
+                  "$ref": "#/definitions/__schema144"
                 }
               },
               "required": [
@@ -5890,7 +5447,32 @@
                   "$ref": "#/definitions/__schema0"
                 },
                 "path": {
-                  "$ref": "#/definitions/__schema143"
+                  "$ref": "#/definitions/__schema144"
+                }
+              },
+              "required": [
+                "modality",
+                "trackId",
+                "operationId",
+                "path"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "modality": {
+                  "type": "string",
+                  "const": "menu_candidate"
+                },
+                "trackId": {
+                  "$ref": "#/definitions/__schema0"
+                },
+                "operationId": {
+                  "$ref": "#/definitions/__schema0"
+                },
+                "path": {
+                  "$ref": "#/definitions/__schema144"
                 }
               },
               "required": [
@@ -5915,7 +5497,7 @@
                   "$ref": "#/definitions/__schema0"
                 },
                 "path": {
-                  "$ref": "#/definitions/__schema143"
+                  "$ref": "#/definitions/__schema144"
                 }
               },
               "required": [
@@ -5940,7 +5522,7 @@
                   "$ref": "#/definitions/__schema0"
                 },
                 "path": {
-                  "$ref": "#/definitions/__schema143"
+                  "$ref": "#/definitions/__schema144"
                 }
               },
               "required": [
@@ -5962,12 +5544,12 @@
       ],
       "additionalProperties": false
     },
-    "__schema143": {
+    "__schema144": {
       "minItems": 1,
       "maxItems": 32,
       "type": "array",
       "items": {
-        "$ref": "#/definitions/__schema76"
+        "$ref": "#/definitions/__schema75"
       }
     }
   },

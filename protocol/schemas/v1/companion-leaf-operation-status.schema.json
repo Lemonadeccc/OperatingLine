@@ -1,0 +1,3731 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "replayId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "adapterId": {
+          "type": "string",
+          "const": "blender"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        }
+      },
+      "required": [
+        "adapterId",
+        "instanceId"
+      ],
+      "additionalProperties": false
+    },
+    "proposalId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "planContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "executionId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "leafId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stepId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actionName": {
+      "type": "string",
+      "enum": [
+        "blender.geometry_nodes.create_transform",
+        "blender.geometry_nodes.create_light_trails",
+        "blender.animation.create_pose_keyframes",
+        "blender.rig.create_armature",
+        "blender.rig.bind_skin_weights",
+        "blender.modifier.add_solidify",
+        "blender.modifier.add_bevel",
+        "blender.material.create_and_assign",
+        "blender.material.create_palette_and_assign",
+        "blender.modifier.add_mirror",
+        "blender.modifier.add_subdivision_surface",
+        "blender.mesh.edit_bevel_edges",
+        "blender.mesh.edit_inset_faces",
+        "blender.mesh.edit_triangulate",
+        "blender.mesh.edit_extrude_region",
+        "blender.mesh.edit_poke_faces"
+      ]
+    },
+    "recipeId": {
+      "type": "string",
+      "enum": [
+        "blender.geometry_nodes.create_transform.semantic",
+        "blender.geometry_nodes.create_light_trails.semantic",
+        "blender.animation.create_pose_keyframes.semantic",
+        "blender.rig.create_armature.semantic",
+        "blender.rig.bind_skin_weights.semantic",
+        "blender.modifier.add_solidify.semantic",
+        "blender.modifier.add_bevel.semantic",
+        "blender.material.create_and_assign.semantic",
+        "blender.material.create_palette_and_assign.semantic",
+        "blender.modifier.add_mirror.semantic",
+        "blender.modifier.add_subdivision_surface.semantic",
+        "blender.mesh.edit_bevel_edges.semantic",
+        "blender.mesh.edit_inset_faces.semantic",
+        "blender.mesh.edit_triangulate.semantic",
+        "blender.mesh.edit_extrude_region.semantic",
+        "blender.mesh.edit_poke_faces.semantic"
+      ]
+    },
+    "catalogVersion": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+    },
+    "interactionCatalogContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "materializationContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "mcpTrackContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "expectedState": {
+      "type": "object",
+      "properties": {
+        "reportId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "sequence": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "reportId",
+        "sequence"
+      ],
+      "additionalProperties": false
+    },
+    "operationIds": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "semantic.preflight_transform_geometry_resources"
+            },
+            {
+              "type": "string",
+              "const": "semantic.new_geometry_modifier"
+            },
+            {
+              "type": "string",
+              "const": "node.group_input"
+            },
+            {
+              "type": "string",
+              "const": "node.transform_geometry"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.transform_geometry.translation"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.transform_geometry.rotation"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.transform_geometry.scale"
+            },
+            {
+              "type": "string",
+              "const": "node.group_output"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_group_input_geometry_to_transform"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_transform_geometry_to_group_output"
+            },
+            {
+              "type": "string",
+              "const": "semantic.verify_node_links"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 11,
+          "maxItems": 11
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.geometry_nodes"
+            },
+            {
+              "type": "string",
+              "const": "semantic.new_geometry_modifier"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.group_input"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.half_tile_line"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.tile_length"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.trail_resolution"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.points_per_trail"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.trail_rows"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.trail_count"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.trail_spacing"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.trail_instances"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.realize_trails"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.trail_position"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.terrain_noise"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.noise_scale"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.noise_detail"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.noise_roughness"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.noise_seed"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.center_noise"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.scale_height"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.height"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.z_offset"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.displace_trails"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.mirror_half_tile"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.mirrored_tile"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.trail_profile"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.profile_sides"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.profile_radius"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.curve_to_mesh"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.loop_tiles"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.light_trails.tile_repeat_count"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.tile_instances"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.realize_tiles"
+            },
+            {
+              "type": "string",
+              "const": "node.light_trails.group_output"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.half_line_to_resolution"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.rows_to_instances"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.resolution_to_instances"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.instances_to_realize"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.position_to_noise"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.noise_to_center"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.center_to_height"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.height_to_offset"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.realize_to_displace"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.offset_to_displace"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.displace_to_mirror"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.displace_to_join"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.mirror_to_join"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.join_to_curve_mesh"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.profile_to_curve_mesh"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.tiles_to_instances"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.mesh_to_instances"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.instances_to_final_realize"
+            },
+            {
+              "type": "string",
+              "const": "semantic.connect_light_trails.realize_to_output"
+            },
+            {
+              "type": "string",
+              "const": "semantic.verify_no_bake"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 54,
+          "maxItems": 54
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.animation"
+            },
+            {
+              "type": "string",
+              "const": "editor.action"
+            },
+            {
+              "type": "string",
+              "const": "mode.pose"
+            },
+            {
+              "type": "string",
+              "const": "semantic.create_pose_action"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.pose_animation.action_name"
+            },
+            {
+              "type": "string",
+              "const": "operator.insert_keyframe"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.pose_animation.keyframes"
+            },
+            {
+              "type": "string",
+              "const": "control.pose_interpolation"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.pose_animation.interpolation"
+            },
+            {
+              "type": "string",
+              "const": "control.pose_extrapolation"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.pose_animation.extrapolation"
+            },
+            {
+              "type": "string",
+              "const": "semantic.verify_pose_animation"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 12,
+          "maxItems": 12
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "menu.add_armature"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.armature.object_name"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.armature.data_name"
+            },
+            {
+              "type": "string",
+              "const": "mode.edit_bones"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.armature.bones"
+            },
+            {
+              "type": "string",
+              "const": "semantic.rigid_parent"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.armature.bindings"
+            },
+            {
+              "type": "string",
+              "const": "semantic.verify_armature"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 9,
+          "maxItems": 9
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "panel.object_data"
+            },
+            {
+              "type": "string",
+              "const": "mode.weight_paint"
+            },
+            {
+              "type": "string",
+              "const": "semantic.normalized_weights"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.skin_weights.weights"
+            },
+            {
+              "type": "string",
+              "const": "semantic.armature_modifier"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.skin_weights.preserve_volume"
+            },
+            {
+              "type": "string",
+              "const": "projection.semantic.skin_weights.modifier_name"
+            },
+            {
+              "type": "string",
+              "const": "semantic.verify_skin_weights"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 9,
+          "maxItems": 9
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "panel.modifier_properties"
+            },
+            {
+              "type": "string",
+              "const": "control.add_modifier"
+            },
+            {
+              "type": "string",
+              "const": "semantic.solidify_parameters"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "panel.modifier_properties"
+            },
+            {
+              "type": "string",
+              "const": "control.add_modifier"
+            },
+            {
+              "type": "string",
+              "const": "semantic.bevel_parameters"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.shading"
+            },
+            {
+              "type": "string",
+              "const": "panel.material_properties"
+            },
+            {
+              "type": "string",
+              "const": "control.new_material"
+            },
+            {
+              "type": "string",
+              "const": "semantic.principled_surface"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.shading"
+            },
+            {
+              "type": "string",
+              "const": "panel.material_properties"
+            },
+            {
+              "type": "string",
+              "const": "semantic.palette_entries"
+            },
+            {
+              "type": "string",
+              "const": "semantic.assign_targets"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_owned_mesh"
+            },
+            {
+              "type": "string",
+              "const": "panel.modifier_properties"
+            },
+            {
+              "type": "string",
+              "const": "control.add_modifier"
+            },
+            {
+              "type": "string",
+              "const": "category.generate"
+            },
+            {
+              "type": "string",
+              "const": "modifier.mirror"
+            },
+            {
+              "type": "string",
+              "const": "semantic.mirror_contract"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 7,
+          "maxItems": 7
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_owned_mesh"
+            },
+            {
+              "type": "string",
+              "const": "operator.subdivision_set"
+            },
+            {
+              "type": "string",
+              "const": "semantic.subdivision_surface_contract"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_owned_mesh"
+            },
+            {
+              "type": "string",
+              "const": "mode.edit_mesh"
+            },
+            {
+              "type": "string",
+              "const": "menu.edge"
+            },
+            {
+              "type": "string",
+              "const": "operator.bevel_edges"
+            },
+            {
+              "type": "string",
+              "const": "semantic.managed_bevel_edges_contract"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 6,
+          "maxItems": 6
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_owned_mesh"
+            },
+            {
+              "type": "string",
+              "const": "mode.edit_mesh"
+            },
+            {
+              "type": "string",
+              "const": "menu.face"
+            },
+            {
+              "type": "string",
+              "const": "operator.inset_faces"
+            },
+            {
+              "type": "string",
+              "const": "semantic.managed_inset_faces_contract"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 6,
+          "maxItems": 6
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_owned_mesh"
+            },
+            {
+              "type": "string",
+              "const": "mode.edit_mesh"
+            },
+            {
+              "type": "string",
+              "const": "menu.face"
+            },
+            {
+              "type": "string",
+              "const": "operator.triangulate_faces"
+            },
+            {
+              "type": "string",
+              "const": "semantic.managed_triangulate_contract"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 6,
+          "maxItems": 6
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_owned_mesh"
+            },
+            {
+              "type": "string",
+              "const": "mode.edit_mesh"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_face_region"
+            },
+            {
+              "type": "string",
+              "const": "operator.extrude_region_move"
+            },
+            {
+              "type": "string",
+              "const": "semantic.managed_extrude_region_contract"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 6,
+          "maxItems": 6
+        },
+        {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "workspace.layout"
+            },
+            {
+              "type": "string",
+              "const": "semantic.select_owned_mesh"
+            },
+            {
+              "type": "string",
+              "const": "mode.edit_mesh"
+            },
+            {
+              "type": "string",
+              "const": "menu.face"
+            },
+            {
+              "type": "string",
+              "const": "operator.poke_faces"
+            },
+            {
+              "type": "string",
+              "const": "semantic.managed_poke_faces_contract"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 6,
+          "maxItems": 6
+        }
+      ]
+    },
+    "operationOrdinal": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 54
+    },
+    "sourceOperationId": {
+      "type": "string",
+      "enum": [
+        "semantic.preflight_transform_geometry_resources",
+        "semantic.new_geometry_modifier",
+        "node.group_input",
+        "node.transform_geometry",
+        "projection.semantic.transform_geometry.translation",
+        "projection.semantic.transform_geometry.rotation",
+        "projection.semantic.transform_geometry.scale",
+        "node.group_output",
+        "semantic.connect_group_input_geometry_to_transform",
+        "semantic.connect_transform_geometry_to_group_output",
+        "semantic.verify_node_links",
+        "workspace.geometry_nodes",
+        "node.light_trails.group_input",
+        "node.light_trails.half_tile_line",
+        "projection.semantic.light_trails.tile_length",
+        "node.light_trails.trail_resolution",
+        "projection.semantic.light_trails.points_per_trail",
+        "node.light_trails.trail_rows",
+        "projection.semantic.light_trails.trail_count",
+        "projection.semantic.light_trails.trail_spacing",
+        "node.light_trails.trail_instances",
+        "node.light_trails.realize_trails",
+        "node.light_trails.trail_position",
+        "node.light_trails.terrain_noise",
+        "projection.semantic.light_trails.noise_scale",
+        "projection.semantic.light_trails.noise_detail",
+        "projection.semantic.light_trails.noise_roughness",
+        "projection.semantic.light_trails.noise_seed",
+        "node.light_trails.center_noise",
+        "node.light_trails.scale_height",
+        "projection.semantic.light_trails.height",
+        "node.light_trails.z_offset",
+        "node.light_trails.displace_trails",
+        "node.light_trails.mirror_half_tile",
+        "node.light_trails.mirrored_tile",
+        "node.light_trails.trail_profile",
+        "projection.semantic.light_trails.profile_sides",
+        "projection.semantic.light_trails.profile_radius",
+        "node.light_trails.curve_to_mesh",
+        "node.light_trails.loop_tiles",
+        "projection.semantic.light_trails.tile_repeat_count",
+        "node.light_trails.tile_instances",
+        "node.light_trails.realize_tiles",
+        "node.light_trails.group_output",
+        "semantic.connect_light_trails.half_line_to_resolution",
+        "semantic.connect_light_trails.rows_to_instances",
+        "semantic.connect_light_trails.resolution_to_instances",
+        "semantic.connect_light_trails.instances_to_realize",
+        "semantic.connect_light_trails.position_to_noise",
+        "semantic.connect_light_trails.noise_to_center",
+        "semantic.connect_light_trails.center_to_height",
+        "semantic.connect_light_trails.height_to_offset",
+        "semantic.connect_light_trails.realize_to_displace",
+        "semantic.connect_light_trails.offset_to_displace",
+        "semantic.connect_light_trails.displace_to_mirror",
+        "semantic.connect_light_trails.displace_to_join",
+        "semantic.connect_light_trails.mirror_to_join",
+        "semantic.connect_light_trails.join_to_curve_mesh",
+        "semantic.connect_light_trails.profile_to_curve_mesh",
+        "semantic.connect_light_trails.tiles_to_instances",
+        "semantic.connect_light_trails.mesh_to_instances",
+        "semantic.connect_light_trails.instances_to_final_realize",
+        "semantic.connect_light_trails.realize_to_output",
+        "semantic.verify_no_bake",
+        "workspace.animation",
+        "editor.action",
+        "mode.pose",
+        "semantic.create_pose_action",
+        "projection.semantic.pose_animation.action_name",
+        "operator.insert_keyframe",
+        "projection.semantic.pose_animation.keyframes",
+        "control.pose_interpolation",
+        "projection.semantic.pose_animation.interpolation",
+        "control.pose_extrapolation",
+        "projection.semantic.pose_animation.extrapolation",
+        "semantic.verify_pose_animation",
+        "workspace.layout",
+        "menu.add_armature",
+        "projection.semantic.armature.object_name",
+        "projection.semantic.armature.data_name",
+        "mode.edit_bones",
+        "projection.semantic.armature.bones",
+        "semantic.rigid_parent",
+        "projection.semantic.armature.bindings",
+        "semantic.verify_armature",
+        "panel.object_data",
+        "mode.weight_paint",
+        "semantic.normalized_weights",
+        "projection.semantic.skin_weights.weights",
+        "semantic.armature_modifier",
+        "projection.semantic.skin_weights.preserve_volume",
+        "projection.semantic.skin_weights.modifier_name",
+        "semantic.verify_skin_weights",
+        "panel.modifier_properties",
+        "control.add_modifier",
+        "semantic.solidify_parameters",
+        "semantic.bevel_parameters",
+        "workspace.shading",
+        "panel.material_properties",
+        "control.new_material",
+        "semantic.principled_surface",
+        "semantic.palette_entries",
+        "semantic.assign_targets",
+        "semantic.select_owned_mesh",
+        "category.generate",
+        "modifier.mirror",
+        "semantic.mirror_contract",
+        "operator.subdivision_set",
+        "semantic.subdivision_surface_contract",
+        "mode.edit_mesh",
+        "menu.edge",
+        "operator.bevel_edges",
+        "semantic.managed_bevel_edges_contract",
+        "menu.face",
+        "operator.inset_faces",
+        "semantic.managed_inset_faces_contract",
+        "operator.triangulate_faces",
+        "semantic.managed_triangulate_contract",
+        "semantic.select_face_region",
+        "operator.extrude_region_move",
+        "semantic.managed_extrude_region_contract",
+        "operator.poke_faces",
+        "semantic.managed_poke_faces_contract"
+      ]
+    },
+    "operationParameters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    "operationBindingSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "deliveryId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "dispatchedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "dispatched",
+        "pre_dispatch_authority_expired",
+        "succeeded",
+        "failed",
+        "rejected",
+        "recovery_required"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "replayId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "adapterId",
+            "instanceId"
+          ],
+          "additionalProperties": false
+        },
+        "proposalId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "id",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "planContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "leafId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stepId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actionName": {
+          "type": "string",
+          "enum": [
+            "blender.geometry_nodes.create_transform",
+            "blender.geometry_nodes.create_light_trails",
+            "blender.animation.create_pose_keyframes",
+            "blender.rig.create_armature",
+            "blender.rig.bind_skin_weights",
+            "blender.modifier.add_solidify",
+            "blender.modifier.add_bevel",
+            "blender.material.create_and_assign",
+            "blender.material.create_palette_and_assign",
+            "blender.modifier.add_mirror",
+            "blender.modifier.add_subdivision_surface",
+            "blender.mesh.edit_bevel_edges",
+            "blender.mesh.edit_inset_faces",
+            "blender.mesh.edit_triangulate",
+            "blender.mesh.edit_extrude_region",
+            "blender.mesh.edit_poke_faces"
+          ]
+        },
+        "recipeId": {
+          "type": "string",
+          "enum": [
+            "blender.geometry_nodes.create_transform.semantic",
+            "blender.geometry_nodes.create_light_trails.semantic",
+            "blender.animation.create_pose_keyframes.semantic",
+            "blender.rig.create_armature.semantic",
+            "blender.rig.bind_skin_weights.semantic",
+            "blender.modifier.add_solidify.semantic",
+            "blender.modifier.add_bevel.semantic",
+            "blender.material.create_and_assign.semantic",
+            "blender.material.create_palette_and_assign.semantic",
+            "blender.modifier.add_mirror.semantic",
+            "blender.modifier.add_subdivision_surface.semantic",
+            "blender.mesh.edit_bevel_edges.semantic",
+            "blender.mesh.edit_inset_faces.semantic",
+            "blender.mesh.edit_triangulate.semantic",
+            "blender.mesh.edit_extrude_region.semantic",
+            "blender.mesh.edit_poke_faces.semantic"
+          ]
+        },
+        "catalogVersion": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+        },
+        "interactionCatalogContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "materializationContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mcpTrackContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "expectedState": {
+          "type": "object",
+          "properties": {
+            "reportId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "sequence": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "reportId",
+            "sequence"
+          ],
+          "additionalProperties": false
+        },
+        "operationIds": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "semantic.preflight_transform_geometry_resources"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.new_geometry_modifier"
+                },
+                {
+                  "type": "string",
+                  "const": "node.group_input"
+                },
+                {
+                  "type": "string",
+                  "const": "node.transform_geometry"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.transform_geometry.translation"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.transform_geometry.rotation"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.transform_geometry.scale"
+                },
+                {
+                  "type": "string",
+                  "const": "node.group_output"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_group_input_geometry_to_transform"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_transform_geometry_to_group_output"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.verify_node_links"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 11,
+              "maxItems": 11
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.geometry_nodes"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.new_geometry_modifier"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.group_input"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.half_tile_line"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.tile_length"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.trail_resolution"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.points_per_trail"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.trail_rows"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.trail_count"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.trail_spacing"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.trail_instances"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.realize_trails"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.trail_position"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.terrain_noise"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.noise_scale"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.noise_detail"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.noise_roughness"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.noise_seed"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.center_noise"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.scale_height"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.height"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.z_offset"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.displace_trails"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.mirror_half_tile"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.mirrored_tile"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.trail_profile"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.profile_sides"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.profile_radius"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.curve_to_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.loop_tiles"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.light_trails.tile_repeat_count"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.tile_instances"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.realize_tiles"
+                },
+                {
+                  "type": "string",
+                  "const": "node.light_trails.group_output"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.half_line_to_resolution"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.rows_to_instances"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.resolution_to_instances"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.instances_to_realize"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.position_to_noise"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.noise_to_center"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.center_to_height"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.height_to_offset"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.realize_to_displace"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.offset_to_displace"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.displace_to_mirror"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.displace_to_join"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.mirror_to_join"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.join_to_curve_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.profile_to_curve_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.tiles_to_instances"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.mesh_to_instances"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.instances_to_final_realize"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.connect_light_trails.realize_to_output"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.verify_no_bake"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 54,
+              "maxItems": 54
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.animation"
+                },
+                {
+                  "type": "string",
+                  "const": "editor.action"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.pose"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.create_pose_action"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.pose_animation.action_name"
+                },
+                {
+                  "type": "string",
+                  "const": "operator.insert_keyframe"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.pose_animation.keyframes"
+                },
+                {
+                  "type": "string",
+                  "const": "control.pose_interpolation"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.pose_animation.interpolation"
+                },
+                {
+                  "type": "string",
+                  "const": "control.pose_extrapolation"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.pose_animation.extrapolation"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.verify_pose_animation"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 12,
+              "maxItems": 12
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "menu.add_armature"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.armature.object_name"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.armature.data_name"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.edit_bones"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.armature.bones"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.rigid_parent"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.armature.bindings"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.verify_armature"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 9,
+              "maxItems": 9
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "panel.object_data"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.weight_paint"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.normalized_weights"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.skin_weights.weights"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.armature_modifier"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.skin_weights.preserve_volume"
+                },
+                {
+                  "type": "string",
+                  "const": "projection.semantic.skin_weights.modifier_name"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.verify_skin_weights"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 9,
+              "maxItems": 9
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "panel.modifier_properties"
+                },
+                {
+                  "type": "string",
+                  "const": "control.add_modifier"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.solidify_parameters"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 4,
+              "maxItems": 4
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "panel.modifier_properties"
+                },
+                {
+                  "type": "string",
+                  "const": "control.add_modifier"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.bevel_parameters"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 4,
+              "maxItems": 4
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.shading"
+                },
+                {
+                  "type": "string",
+                  "const": "panel.material_properties"
+                },
+                {
+                  "type": "string",
+                  "const": "control.new_material"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.principled_surface"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 4,
+              "maxItems": 4
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.shading"
+                },
+                {
+                  "type": "string",
+                  "const": "panel.material_properties"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.palette_entries"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.assign_targets"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 4,
+              "maxItems": 4
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_owned_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "panel.modifier_properties"
+                },
+                {
+                  "type": "string",
+                  "const": "control.add_modifier"
+                },
+                {
+                  "type": "string",
+                  "const": "category.generate"
+                },
+                {
+                  "type": "string",
+                  "const": "modifier.mirror"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.mirror_contract"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 7,
+              "maxItems": 7
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_owned_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "operator.subdivision_set"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.subdivision_surface_contract"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 4,
+              "maxItems": 4
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_owned_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.edit_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "menu.edge"
+                },
+                {
+                  "type": "string",
+                  "const": "operator.bevel_edges"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.managed_bevel_edges_contract"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 6,
+              "maxItems": 6
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_owned_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.edit_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "menu.face"
+                },
+                {
+                  "type": "string",
+                  "const": "operator.inset_faces"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.managed_inset_faces_contract"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 6,
+              "maxItems": 6
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_owned_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.edit_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "menu.face"
+                },
+                {
+                  "type": "string",
+                  "const": "operator.triangulate_faces"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.managed_triangulate_contract"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 6,
+              "maxItems": 6
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_owned_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.edit_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_face_region"
+                },
+                {
+                  "type": "string",
+                  "const": "operator.extrude_region_move"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.managed_extrude_region_contract"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 6,
+              "maxItems": 6
+            },
+            {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "workspace.layout"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.select_owned_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "mode.edit_mesh"
+                },
+                {
+                  "type": "string",
+                  "const": "menu.face"
+                },
+                {
+                  "type": "string",
+                  "const": "operator.poke_faces"
+                },
+                {
+                  "type": "string",
+                  "const": "semantic.managed_poke_faces_contract"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 6,
+              "maxItems": 6
+            }
+          ]
+        },
+        "operationOrdinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 54
+        },
+        "sourceOperationId": {
+          "type": "string",
+          "enum": [
+            "semantic.preflight_transform_geometry_resources",
+            "semantic.new_geometry_modifier",
+            "node.group_input",
+            "node.transform_geometry",
+            "projection.semantic.transform_geometry.translation",
+            "projection.semantic.transform_geometry.rotation",
+            "projection.semantic.transform_geometry.scale",
+            "node.group_output",
+            "semantic.connect_group_input_geometry_to_transform",
+            "semantic.connect_transform_geometry_to_group_output",
+            "semantic.verify_node_links",
+            "workspace.geometry_nodes",
+            "node.light_trails.group_input",
+            "node.light_trails.half_tile_line",
+            "projection.semantic.light_trails.tile_length",
+            "node.light_trails.trail_resolution",
+            "projection.semantic.light_trails.points_per_trail",
+            "node.light_trails.trail_rows",
+            "projection.semantic.light_trails.trail_count",
+            "projection.semantic.light_trails.trail_spacing",
+            "node.light_trails.trail_instances",
+            "node.light_trails.realize_trails",
+            "node.light_trails.trail_position",
+            "node.light_trails.terrain_noise",
+            "projection.semantic.light_trails.noise_scale",
+            "projection.semantic.light_trails.noise_detail",
+            "projection.semantic.light_trails.noise_roughness",
+            "projection.semantic.light_trails.noise_seed",
+            "node.light_trails.center_noise",
+            "node.light_trails.scale_height",
+            "projection.semantic.light_trails.height",
+            "node.light_trails.z_offset",
+            "node.light_trails.displace_trails",
+            "node.light_trails.mirror_half_tile",
+            "node.light_trails.mirrored_tile",
+            "node.light_trails.trail_profile",
+            "projection.semantic.light_trails.profile_sides",
+            "projection.semantic.light_trails.profile_radius",
+            "node.light_trails.curve_to_mesh",
+            "node.light_trails.loop_tiles",
+            "projection.semantic.light_trails.tile_repeat_count",
+            "node.light_trails.tile_instances",
+            "node.light_trails.realize_tiles",
+            "node.light_trails.group_output",
+            "semantic.connect_light_trails.half_line_to_resolution",
+            "semantic.connect_light_trails.rows_to_instances",
+            "semantic.connect_light_trails.resolution_to_instances",
+            "semantic.connect_light_trails.instances_to_realize",
+            "semantic.connect_light_trails.position_to_noise",
+            "semantic.connect_light_trails.noise_to_center",
+            "semantic.connect_light_trails.center_to_height",
+            "semantic.connect_light_trails.height_to_offset",
+            "semantic.connect_light_trails.realize_to_displace",
+            "semantic.connect_light_trails.offset_to_displace",
+            "semantic.connect_light_trails.displace_to_mirror",
+            "semantic.connect_light_trails.displace_to_join",
+            "semantic.connect_light_trails.mirror_to_join",
+            "semantic.connect_light_trails.join_to_curve_mesh",
+            "semantic.connect_light_trails.profile_to_curve_mesh",
+            "semantic.connect_light_trails.tiles_to_instances",
+            "semantic.connect_light_trails.mesh_to_instances",
+            "semantic.connect_light_trails.instances_to_final_realize",
+            "semantic.connect_light_trails.realize_to_output",
+            "semantic.verify_no_bake",
+            "workspace.animation",
+            "editor.action",
+            "mode.pose",
+            "semantic.create_pose_action",
+            "projection.semantic.pose_animation.action_name",
+            "operator.insert_keyframe",
+            "projection.semantic.pose_animation.keyframes",
+            "control.pose_interpolation",
+            "projection.semantic.pose_animation.interpolation",
+            "control.pose_extrapolation",
+            "projection.semantic.pose_animation.extrapolation",
+            "semantic.verify_pose_animation",
+            "workspace.layout",
+            "menu.add_armature",
+            "projection.semantic.armature.object_name",
+            "projection.semantic.armature.data_name",
+            "mode.edit_bones",
+            "projection.semantic.armature.bones",
+            "semantic.rigid_parent",
+            "projection.semantic.armature.bindings",
+            "semantic.verify_armature",
+            "panel.object_data",
+            "mode.weight_paint",
+            "semantic.normalized_weights",
+            "projection.semantic.skin_weights.weights",
+            "semantic.armature_modifier",
+            "projection.semantic.skin_weights.preserve_volume",
+            "projection.semantic.skin_weights.modifier_name",
+            "semantic.verify_skin_weights",
+            "panel.modifier_properties",
+            "control.add_modifier",
+            "semantic.solidify_parameters",
+            "semantic.bevel_parameters",
+            "workspace.shading",
+            "panel.material_properties",
+            "control.new_material",
+            "semantic.principled_surface",
+            "semantic.palette_entries",
+            "semantic.assign_targets",
+            "semantic.select_owned_mesh",
+            "category.generate",
+            "modifier.mirror",
+            "semantic.mirror_contract",
+            "operator.subdivision_set",
+            "semantic.subdivision_surface_contract",
+            "mode.edit_mesh",
+            "menu.edge",
+            "operator.bevel_edges",
+            "semantic.managed_bevel_edges_contract",
+            "menu.face",
+            "operator.inset_faces",
+            "semantic.managed_inset_faces_contract",
+            "operator.triangulate_faces",
+            "semantic.managed_triangulate_contract",
+            "semantic.select_face_region",
+            "operator.extrude_region_move",
+            "semantic.managed_extrude_region_contract",
+            "operator.poke_faces",
+            "semantic.managed_poke_faces_contract"
+          ]
+        },
+        "operationParameters": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        "operationBindingSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "deliveryId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "requestedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "dispatchedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed",
+            "rejected",
+            "recovery_required"
+          ]
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "bindingSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "stepId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "actionName": {
+                  "type": "string",
+                  "enum": [
+                    "blender.geometry_nodes.create_transform",
+                    "blender.geometry_nodes.create_light_trails",
+                    "blender.animation.create_pose_keyframes",
+                    "blender.rig.create_armature",
+                    "blender.rig.bind_skin_weights",
+                    "blender.modifier.add_solidify",
+                    "blender.modifier.add_bevel",
+                    "blender.material.create_and_assign",
+                    "blender.material.create_palette_and_assign",
+                    "blender.modifier.add_mirror",
+                    "blender.modifier.add_subdivision_surface",
+                    "blender.mesh.edit_bevel_edges",
+                    "blender.mesh.edit_inset_faces",
+                    "blender.mesh.edit_triangulate",
+                    "blender.mesh.edit_extrude_region",
+                    "blender.mesh.edit_poke_faces"
+                  ]
+                },
+                "recipeId": {
+                  "type": "string",
+                  "enum": [
+                    "blender.geometry_nodes.create_transform.semantic",
+                    "blender.geometry_nodes.create_light_trails.semantic",
+                    "blender.animation.create_pose_keyframes.semantic",
+                    "blender.rig.create_armature.semantic",
+                    "blender.rig.bind_skin_weights.semantic",
+                    "blender.modifier.add_solidify.semantic",
+                    "blender.modifier.add_bevel.semantic",
+                    "blender.material.create_and_assign.semantic",
+                    "blender.material.create_palette_and_assign.semantic",
+                    "blender.modifier.add_mirror.semantic",
+                    "blender.modifier.add_subdivision_surface.semantic",
+                    "blender.mesh.edit_bevel_edges.semantic",
+                    "blender.mesh.edit_inset_faces.semantic",
+                    "blender.mesh.edit_triangulate.semantic",
+                    "blender.mesh.edit_extrude_region.semantic",
+                    "blender.mesh.edit_poke_faces.semantic"
+                  ]
+                },
+                "catalogVersion": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+                },
+                "operationIds": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "semantic.preflight_transform_geometry_resources"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.new_geometry_modifier"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.group_input"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.transform_geometry"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.transform_geometry.translation"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.transform_geometry.rotation"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.transform_geometry.scale"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.group_output"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_group_input_geometry_to_transform"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_transform_geometry_to_group_output"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.verify_node_links"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 11,
+                      "maxItems": 11
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.geometry_nodes"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.new_geometry_modifier"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.group_input"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.half_tile_line"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.tile_length"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.trail_resolution"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.points_per_trail"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.trail_rows"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.trail_count"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.trail_spacing"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.trail_instances"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.realize_trails"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.trail_position"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.terrain_noise"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.noise_scale"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.noise_detail"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.noise_roughness"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.noise_seed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.center_noise"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.scale_height"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.height"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.z_offset"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.displace_trails"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.mirror_half_tile"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.mirrored_tile"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.trail_profile"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.profile_sides"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.profile_radius"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.curve_to_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.loop_tiles"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.light_trails.tile_repeat_count"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.tile_instances"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.realize_tiles"
+                        },
+                        {
+                          "type": "string",
+                          "const": "node.light_trails.group_output"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.half_line_to_resolution"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.rows_to_instances"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.resolution_to_instances"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.instances_to_realize"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.position_to_noise"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.noise_to_center"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.center_to_height"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.height_to_offset"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.realize_to_displace"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.offset_to_displace"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.displace_to_mirror"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.displace_to_join"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.mirror_to_join"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.join_to_curve_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.profile_to_curve_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.tiles_to_instances"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.mesh_to_instances"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.instances_to_final_realize"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.connect_light_trails.realize_to_output"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.verify_no_bake"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 54,
+                      "maxItems": 54
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.animation"
+                        },
+                        {
+                          "type": "string",
+                          "const": "editor.action"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.pose"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.create_pose_action"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.pose_animation.action_name"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.insert_keyframe"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.pose_animation.keyframes"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.pose_interpolation"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.pose_animation.interpolation"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.pose_extrapolation"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.pose_animation.extrapolation"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.verify_pose_animation"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 12,
+                      "maxItems": 12
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.add_armature"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.armature.object_name"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.armature.data_name"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.edit_bones"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.armature.bones"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.rigid_parent"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.armature.bindings"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.verify_armature"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 9,
+                      "maxItems": 9
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "panel.object_data"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.weight_paint"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.normalized_weights"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.skin_weights.weights"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.armature_modifier"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.skin_weights.preserve_volume"
+                        },
+                        {
+                          "type": "string",
+                          "const": "projection.semantic.skin_weights.modifier_name"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.verify_skin_weights"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 9,
+                      "maxItems": 9
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "panel.modifier_properties"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.add_modifier"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.solidify_parameters"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 4,
+                      "maxItems": 4
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "panel.modifier_properties"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.add_modifier"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.bevel_parameters"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 4,
+                      "maxItems": 4
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.shading"
+                        },
+                        {
+                          "type": "string",
+                          "const": "panel.material_properties"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.new_material"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.principled_surface"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 4,
+                      "maxItems": 4
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.shading"
+                        },
+                        {
+                          "type": "string",
+                          "const": "panel.material_properties"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.palette_entries"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.assign_targets"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 4,
+                      "maxItems": 4
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_owned_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "panel.modifier_properties"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.add_modifier"
+                        },
+                        {
+                          "type": "string",
+                          "const": "category.generate"
+                        },
+                        {
+                          "type": "string",
+                          "const": "modifier.mirror"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.mirror_contract"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 7,
+                      "maxItems": 7
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_owned_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.subdivision_set"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.subdivision_surface_contract"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 4,
+                      "maxItems": 4
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_owned_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.edit_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.edge"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.bevel_edges"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.managed_bevel_edges_contract"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 6,
+                      "maxItems": 6
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_owned_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.edit_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.face"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.inset_faces"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.managed_inset_faces_contract"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 6,
+                      "maxItems": 6
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_owned_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.edit_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.face"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.triangulate_faces"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.managed_triangulate_contract"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 6,
+                      "maxItems": 6
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_owned_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.edit_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_face_region"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.extrude_region_move"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.managed_extrude_region_contract"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 6,
+                      "maxItems": 6
+                    },
+                    {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.select_owned_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mode.edit_mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.face"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.poke_faces"
+                        },
+                        {
+                          "type": "string",
+                          "const": "semantic.managed_poke_faces_contract"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 6,
+                      "maxItems": 6
+                    }
+                  ]
+                },
+                "completedOperationIds": {
+                  "minItems": 1,
+                  "maxItems": 54,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "semantic.preflight_transform_geometry_resources",
+                      "semantic.new_geometry_modifier",
+                      "node.group_input",
+                      "node.transform_geometry",
+                      "projection.semantic.transform_geometry.translation",
+                      "projection.semantic.transform_geometry.rotation",
+                      "projection.semantic.transform_geometry.scale",
+                      "node.group_output",
+                      "semantic.connect_group_input_geometry_to_transform",
+                      "semantic.connect_transform_geometry_to_group_output",
+                      "semantic.verify_node_links",
+                      "workspace.geometry_nodes",
+                      "node.light_trails.group_input",
+                      "node.light_trails.half_tile_line",
+                      "projection.semantic.light_trails.tile_length",
+                      "node.light_trails.trail_resolution",
+                      "projection.semantic.light_trails.points_per_trail",
+                      "node.light_trails.trail_rows",
+                      "projection.semantic.light_trails.trail_count",
+                      "projection.semantic.light_trails.trail_spacing",
+                      "node.light_trails.trail_instances",
+                      "node.light_trails.realize_trails",
+                      "node.light_trails.trail_position",
+                      "node.light_trails.terrain_noise",
+                      "projection.semantic.light_trails.noise_scale",
+                      "projection.semantic.light_trails.noise_detail",
+                      "projection.semantic.light_trails.noise_roughness",
+                      "projection.semantic.light_trails.noise_seed",
+                      "node.light_trails.center_noise",
+                      "node.light_trails.scale_height",
+                      "projection.semantic.light_trails.height",
+                      "node.light_trails.z_offset",
+                      "node.light_trails.displace_trails",
+                      "node.light_trails.mirror_half_tile",
+                      "node.light_trails.mirrored_tile",
+                      "node.light_trails.trail_profile",
+                      "projection.semantic.light_trails.profile_sides",
+                      "projection.semantic.light_trails.profile_radius",
+                      "node.light_trails.curve_to_mesh",
+                      "node.light_trails.loop_tiles",
+                      "projection.semantic.light_trails.tile_repeat_count",
+                      "node.light_trails.tile_instances",
+                      "node.light_trails.realize_tiles",
+                      "node.light_trails.group_output",
+                      "semantic.connect_light_trails.half_line_to_resolution",
+                      "semantic.connect_light_trails.rows_to_instances",
+                      "semantic.connect_light_trails.resolution_to_instances",
+                      "semantic.connect_light_trails.instances_to_realize",
+                      "semantic.connect_light_trails.position_to_noise",
+                      "semantic.connect_light_trails.noise_to_center",
+                      "semantic.connect_light_trails.center_to_height",
+                      "semantic.connect_light_trails.height_to_offset",
+                      "semantic.connect_light_trails.realize_to_displace",
+                      "semantic.connect_light_trails.offset_to_displace",
+                      "semantic.connect_light_trails.displace_to_mirror",
+                      "semantic.connect_light_trails.displace_to_join",
+                      "semantic.connect_light_trails.mirror_to_join",
+                      "semantic.connect_light_trails.join_to_curve_mesh",
+                      "semantic.connect_light_trails.profile_to_curve_mesh",
+                      "semantic.connect_light_trails.tiles_to_instances",
+                      "semantic.connect_light_trails.mesh_to_instances",
+                      "semantic.connect_light_trails.instances_to_final_realize",
+                      "semantic.connect_light_trails.realize_to_output",
+                      "semantic.verify_no_bake",
+                      "workspace.animation",
+                      "editor.action",
+                      "mode.pose",
+                      "semantic.create_pose_action",
+                      "projection.semantic.pose_animation.action_name",
+                      "operator.insert_keyframe",
+                      "projection.semantic.pose_animation.keyframes",
+                      "control.pose_interpolation",
+                      "projection.semantic.pose_animation.interpolation",
+                      "control.pose_extrapolation",
+                      "projection.semantic.pose_animation.extrapolation",
+                      "semantic.verify_pose_animation",
+                      "workspace.layout",
+                      "menu.add_armature",
+                      "projection.semantic.armature.object_name",
+                      "projection.semantic.armature.data_name",
+                      "mode.edit_bones",
+                      "projection.semantic.armature.bones",
+                      "semantic.rigid_parent",
+                      "projection.semantic.armature.bindings",
+                      "semantic.verify_armature",
+                      "panel.object_data",
+                      "mode.weight_paint",
+                      "semantic.normalized_weights",
+                      "projection.semantic.skin_weights.weights",
+                      "semantic.armature_modifier",
+                      "projection.semantic.skin_weights.preserve_volume",
+                      "projection.semantic.skin_weights.modifier_name",
+                      "semantic.verify_skin_weights",
+                      "panel.modifier_properties",
+                      "control.add_modifier",
+                      "semantic.solidify_parameters",
+                      "semantic.bevel_parameters",
+                      "workspace.shading",
+                      "panel.material_properties",
+                      "control.new_material",
+                      "semantic.principled_surface",
+                      "semantic.palette_entries",
+                      "semantic.assign_targets",
+                      "semantic.select_owned_mesh",
+                      "category.generate",
+                      "modifier.mirror",
+                      "semantic.mirror_contract",
+                      "operator.subdivision_set",
+                      "semantic.subdivision_surface_contract",
+                      "mode.edit_mesh",
+                      "menu.edge",
+                      "operator.bevel_edges",
+                      "semantic.managed_bevel_edges_contract",
+                      "menu.face",
+                      "operator.inset_faces",
+                      "semantic.managed_inset_faces_contract",
+                      "operator.triangulate_faces",
+                      "semantic.managed_triangulate_contract",
+                      "semantic.select_face_region",
+                      "operator.extrude_region_move",
+                      "semantic.managed_extrude_region_contract",
+                      "operator.poke_faces",
+                      "semantic.managed_poke_faces_contract"
+                    ]
+                  }
+                },
+                "nextOrdinal": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 55
+                },
+                "latestObservation": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "guided_geometry_operation",
+                        "guided_pose_operation",
+                        "guided_armature_operation",
+                        "guided_skin_weights_operation",
+                        "guided_modifier_operation",
+                        "guided_material_operation",
+                        "guided_edit_mesh_operation"
+                      ]
+                    },
+                    "satisfied": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "details": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "passed"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "const": "forward"
+                        },
+                        "operationOrdinal": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 54
+                        },
+                        "operationId": {
+                          "type": "string",
+                          "enum": [
+                            "semantic.preflight_transform_geometry_resources",
+                            "semantic.new_geometry_modifier",
+                            "node.group_input",
+                            "node.transform_geometry",
+                            "projection.semantic.transform_geometry.translation",
+                            "projection.semantic.transform_geometry.rotation",
+                            "projection.semantic.transform_geometry.scale",
+                            "node.group_output",
+                            "semantic.connect_group_input_geometry_to_transform",
+                            "semantic.connect_transform_geometry_to_group_output",
+                            "semantic.verify_node_links",
+                            "workspace.geometry_nodes",
+                            "node.light_trails.group_input",
+                            "node.light_trails.half_tile_line",
+                            "projection.semantic.light_trails.tile_length",
+                            "node.light_trails.trail_resolution",
+                            "projection.semantic.light_trails.points_per_trail",
+                            "node.light_trails.trail_rows",
+                            "projection.semantic.light_trails.trail_count",
+                            "projection.semantic.light_trails.trail_spacing",
+                            "node.light_trails.trail_instances",
+                            "node.light_trails.realize_trails",
+                            "node.light_trails.trail_position",
+                            "node.light_trails.terrain_noise",
+                            "projection.semantic.light_trails.noise_scale",
+                            "projection.semantic.light_trails.noise_detail",
+                            "projection.semantic.light_trails.noise_roughness",
+                            "projection.semantic.light_trails.noise_seed",
+                            "node.light_trails.center_noise",
+                            "node.light_trails.scale_height",
+                            "projection.semantic.light_trails.height",
+                            "node.light_trails.z_offset",
+                            "node.light_trails.displace_trails",
+                            "node.light_trails.mirror_half_tile",
+                            "node.light_trails.mirrored_tile",
+                            "node.light_trails.trail_profile",
+                            "projection.semantic.light_trails.profile_sides",
+                            "projection.semantic.light_trails.profile_radius",
+                            "node.light_trails.curve_to_mesh",
+                            "node.light_trails.loop_tiles",
+                            "projection.semantic.light_trails.tile_repeat_count",
+                            "node.light_trails.tile_instances",
+                            "node.light_trails.realize_tiles",
+                            "node.light_trails.group_output",
+                            "semantic.connect_light_trails.half_line_to_resolution",
+                            "semantic.connect_light_trails.rows_to_instances",
+                            "semantic.connect_light_trails.resolution_to_instances",
+                            "semantic.connect_light_trails.instances_to_realize",
+                            "semantic.connect_light_trails.position_to_noise",
+                            "semantic.connect_light_trails.noise_to_center",
+                            "semantic.connect_light_trails.center_to_height",
+                            "semantic.connect_light_trails.height_to_offset",
+                            "semantic.connect_light_trails.realize_to_displace",
+                            "semantic.connect_light_trails.offset_to_displace",
+                            "semantic.connect_light_trails.displace_to_mirror",
+                            "semantic.connect_light_trails.displace_to_join",
+                            "semantic.connect_light_trails.mirror_to_join",
+                            "semantic.connect_light_trails.join_to_curve_mesh",
+                            "semantic.connect_light_trails.profile_to_curve_mesh",
+                            "semantic.connect_light_trails.tiles_to_instances",
+                            "semantic.connect_light_trails.mesh_to_instances",
+                            "semantic.connect_light_trails.instances_to_final_realize",
+                            "semantic.connect_light_trails.realize_to_output",
+                            "semantic.verify_no_bake",
+                            "workspace.animation",
+                            "editor.action",
+                            "mode.pose",
+                            "semantic.create_pose_action",
+                            "projection.semantic.pose_animation.action_name",
+                            "operator.insert_keyframe",
+                            "projection.semantic.pose_animation.keyframes",
+                            "control.pose_interpolation",
+                            "projection.semantic.pose_animation.interpolation",
+                            "control.pose_extrapolation",
+                            "projection.semantic.pose_animation.extrapolation",
+                            "semantic.verify_pose_animation",
+                            "workspace.layout",
+                            "menu.add_armature",
+                            "projection.semantic.armature.object_name",
+                            "projection.semantic.armature.data_name",
+                            "mode.edit_bones",
+                            "projection.semantic.armature.bones",
+                            "semantic.rigid_parent",
+                            "projection.semantic.armature.bindings",
+                            "semantic.verify_armature",
+                            "panel.object_data",
+                            "mode.weight_paint",
+                            "semantic.normalized_weights",
+                            "projection.semantic.skin_weights.weights",
+                            "semantic.armature_modifier",
+                            "projection.semantic.skin_weights.preserve_volume",
+                            "projection.semantic.skin_weights.modifier_name",
+                            "semantic.verify_skin_weights",
+                            "panel.modifier_properties",
+                            "control.add_modifier",
+                            "semantic.solidify_parameters",
+                            "semantic.bevel_parameters",
+                            "workspace.shading",
+                            "panel.material_properties",
+                            "control.new_material",
+                            "semantic.principled_surface",
+                            "semantic.palette_entries",
+                            "semantic.assign_targets",
+                            "semantic.select_owned_mesh",
+                            "category.generate",
+                            "modifier.mirror",
+                            "semantic.mirror_contract",
+                            "operator.subdivision_set",
+                            "semantic.subdivision_surface_contract",
+                            "mode.edit_mesh",
+                            "menu.edge",
+                            "operator.bevel_edges",
+                            "semantic.managed_bevel_edges_contract",
+                            "menu.face",
+                            "operator.inset_faces",
+                            "semantic.managed_inset_faces_contract",
+                            "operator.triangulate_faces",
+                            "semantic.managed_triangulate_contract",
+                            "semantic.select_face_region",
+                            "operator.extrude_region_move",
+                            "semantic.managed_extrude_region_contract",
+                            "operator.poke_faces",
+                            "semantic.managed_poke_faces_contract"
+                          ]
+                        },
+                        "mutating": {
+                          "type": "boolean"
+                        },
+                        "receiptId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "runId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "stepId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "actionName": {
+                          "type": "string",
+                          "enum": [
+                            "blender.geometry_nodes.create_transform",
+                            "blender.geometry_nodes.create_light_trails",
+                            "blender.animation.create_pose_keyframes",
+                            "blender.rig.create_armature",
+                            "blender.rig.bind_skin_weights",
+                            "blender.modifier.add_solidify",
+                            "blender.modifier.add_bevel",
+                            "blender.material.create_and_assign",
+                            "blender.material.create_palette_and_assign",
+                            "blender.modifier.add_mirror",
+                            "blender.modifier.add_subdivision_surface",
+                            "blender.mesh.edit_bevel_edges",
+                            "blender.mesh.edit_inset_faces",
+                            "blender.mesh.edit_triangulate",
+                            "blender.mesh.edit_extrude_region",
+                            "blender.mesh.edit_poke_faces"
+                          ]
+                        },
+                        "recipeId": {
+                          "type": "string",
+                          "enum": [
+                            "blender.geometry_nodes.create_transform.semantic",
+                            "blender.geometry_nodes.create_light_trails.semantic",
+                            "blender.animation.create_pose_keyframes.semantic",
+                            "blender.rig.create_armature.semantic",
+                            "blender.rig.bind_skin_weights.semantic",
+                            "blender.modifier.add_solidify.semantic",
+                            "blender.modifier.add_bevel.semantic",
+                            "blender.material.create_and_assign.semantic",
+                            "blender.material.create_palette_and_assign.semantic",
+                            "blender.modifier.add_mirror.semantic",
+                            "blender.modifier.add_subdivision_surface.semantic",
+                            "blender.mesh.edit_bevel_edges.semantic",
+                            "blender.mesh.edit_inset_faces.semantic",
+                            "blender.mesh.edit_triangulate.semantic",
+                            "blender.mesh.edit_extrude_region.semantic",
+                            "blender.mesh.edit_poke_faces.semantic"
+                          ]
+                        },
+                        "catalogVersion": {
+                          "type": "string",
+                          "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+                        },
+                        "beforeFingerprintSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "afterFingerprintSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "evidence": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "additionalProperties": {
+                            "$ref": "#/definitions/__schema1"
+                          }
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "direction",
+                        "operationOrdinal",
+                        "operationId",
+                        "mutating",
+                        "receiptId",
+                        "runId",
+                        "stepId",
+                        "actionName",
+                        "recipeId",
+                        "catalogVersion",
+                        "beforeFingerprintSha256",
+                        "afterFingerprintSha256",
+                        "evidence"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "satisfied",
+                    "details"
+                  ],
+                  "additionalProperties": false
+                },
+                "leafCompleted": {
+                  "type": "boolean"
+                },
+                "finalReport": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reportId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "reportId",
+                        "sequence"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "runId",
+                "bindingSha256",
+                "stepId",
+                "actionName",
+                "recipeId",
+                "catalogVersion",
+                "operationIds",
+                "completedOperationIds",
+                "nextOrdinal",
+                "latestObservation",
+                "leafCompleted",
+                "finalReport"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recoveryReason": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "operation_outcome_indeterminate",
+                "native_undo_outcome_indeterminate",
+                "observation_outcome_indeterminate"
+              ]
+            },
+            "nativeUndoGuard": {
+              "type": "object",
+              "properties": {
+                "expectedRestoredCheckpointId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "recoveryTokenSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "expectedRestoredCheckpointId",
+                "recoveryTokenSha256"
+              ],
+              "additionalProperties": false
+            },
+            "requiresExplicitRecovery": {
+              "type": "boolean",
+              "const": true
+            },
+            "automaticReplay": {
+              "type": "boolean",
+              "const": false
+            }
+          },
+          "required": [
+            "kind",
+            "requiresExplicitRecovery",
+            "automaticReplay"
+          ],
+          "additionalProperties": false
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "requestId",
+        "replayId",
+        "target",
+        "proposalId",
+        "plan",
+        "planContentSha256",
+        "executionId",
+        "leafId",
+        "stepId",
+        "actionName",
+        "recipeId",
+        "catalogVersion",
+        "interactionCatalogContentSha256",
+        "materializationContentSha256",
+        "mcpTrackContentSha256",
+        "expectedState",
+        "operationIds",
+        "operationOrdinal",
+        "sourceOperationId",
+        "operationParameters",
+        "operationBindingSha256",
+        "deliveryId",
+        "requestedAt",
+        "dispatchedAt",
+        "status",
+        "progress",
+        "error",
+        "occurredAt"
+      ],
+      "additionalProperties": false
+    },
+    "preDispatchAuthorityExpirationEvidence": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "const": "document_authority_drift"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "operationBindingSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "adapterId",
+            "instanceId"
+          ],
+          "additionalProperties": false
+        },
+        "priorStatus": {
+          "type": "string",
+          "const": "queued"
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "resolution": {
+          "type": "string",
+          "const": "pre_dispatch_authority_expired"
+        },
+        "retainsTargetLock": {
+          "type": "boolean",
+          "const": false
+        },
+        "automaticReplay": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "source",
+        "requestId",
+        "operationBindingSha256",
+        "target",
+        "priorStatus",
+        "detectedAt",
+        "resolution",
+        "retainsTargetLock",
+        "automaticReplay"
+      ],
+      "additionalProperties": false
+    },
+    "recoveryEvidence": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "companion_reported",
+            "coordinator_restart",
+            "document_authority_drift",
+            "session_authority_drift"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "operation_outcome_indeterminate",
+            "native_undo_outcome_indeterminate",
+            "observation_outcome_indeterminate",
+            "runtime_restart_after_delivery",
+            "document_authority_changed_after_delivery",
+            "companion_session_changed_after_delivery"
+          ]
+        },
+        "priorStatus": {
+          "type": "string",
+          "const": "dispatched"
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "requiresExplicitRecovery": {
+          "type": "boolean",
+          "const": true
+        },
+        "automaticReplay": {
+          "type": "boolean",
+          "const": false
+        },
+        "retainsTargetLock": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "source",
+        "reason",
+        "priorStatus",
+        "detectedAt",
+        "requiresExplicitRecovery",
+        "automaticReplay",
+        "retainsTargetLock"
+      ],
+      "additionalProperties": false
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "formatVersion",
+    "requestId",
+    "replayId",
+    "target",
+    "proposalId",
+    "plan",
+    "planContentSha256",
+    "executionId",
+    "leafId",
+    "stepId",
+    "actionName",
+    "recipeId",
+    "catalogVersion",
+    "interactionCatalogContentSha256",
+    "materializationContentSha256",
+    "mcpTrackContentSha256",
+    "expectedState",
+    "operationIds",
+    "operationOrdinal",
+    "sourceOperationId",
+    "operationParameters",
+    "operationBindingSha256",
+    "requestedAt",
+    "status",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    },
+    "__schema1": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema1"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema1"
+          }
+        }
+      ]
+    }
+  },
+  "$comment": "Canonical operation-binding integrity, exact ordinal/source-operation agreement, completed-operation prefixes, run/receipt/fingerprint continuity, partial-versus-final report rules, chronology, recovery outcome/challenge agreement, document-incarnation retirement guards, and terminal identity agreement require the exported Zod/coordinator semantic gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-status.json"
+}

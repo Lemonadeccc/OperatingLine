@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 64,
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "order": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 64
+      },
+      "bindingOrder": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 64
+      },
+      "executionMethod": {
+        "type": "string",
+        "const": "blender_rna_object_bone_parent_write"
+      },
+      "mcpTool": {
+        "type": "string",
+        "const": "operatingline.blender.rig.armature.execute-next"
+      },
+      "sourceOperationId": {
+        "type": "string",
+        "const": "projection.semantic.armature.bindings"
+      },
+      "semanticAction": {
+        "type": "string",
+        "const": "projection.semantic.armature.bindings"
+      },
+      "valueSource": {
+        "type": "string",
+        "const": "accepted_action_argument"
+      },
+      "actionArgument": {
+        "type": "string",
+        "const": "bindings"
+      },
+      "mutationKind": {
+        "type": "string",
+        "const": "object_bone_parent_write"
+      },
+      "targetId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "armatureId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "boneName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "acceptedParentType": {
+        "type": "string",
+        "const": "BONE"
+      },
+      "observedParentType": {
+        "type": "string",
+        "const": "BONE"
+      },
+      "acceptedParentBone": {
+        "type": "string",
+        "minLength": 1
+      },
+      "observedParentBone": {
+        "type": "string",
+        "minLength": 1
+      },
+      "observedParent": {
+        "type": "boolean",
+        "const": true
+      },
+      "observedWorldMatrixPreserved": {
+        "type": "boolean",
+        "const": true
+      },
+      "uiPath": {
+        "type": "array",
+        "items": [
+          {
+            "type": "string",
+            "const": "Layout"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "const": "Parent"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "const": "Bone"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          }
+        ],
+        "additionalItems": false,
+        "minItems": 6,
+        "maxItems": 6
+      }
+    },
+    "required": [
+      "order",
+      "bindingOrder",
+      "executionMethod",
+      "mcpTool",
+      "sourceOperationId",
+      "semanticAction",
+      "valueSource",
+      "actionArgument",
+      "mutationKind",
+      "targetId",
+      "armatureId",
+      "boneName",
+      "acceptedParentType",
+      "observedParentType",
+      "acceptedParentBone",
+      "observedParentBone",
+      "observedParent",
+      "observedWorldMatrixPreserved",
+      "uiPath"
+    ],
+    "additionalProperties": false
+  },
+  "$comment": "Exact Armature target/bone binding array order, accepted-to-observed parent state, transform preservation, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-armature-rna-binding-mutations.json"
+}

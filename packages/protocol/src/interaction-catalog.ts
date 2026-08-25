@@ -1,10 +1,46 @@
 import { z } from 'zod';
 
 import type { ActionCatalog } from './catalog.js';
+import {
+  armatureLeafOperationActionName,
+  armatureLeafOperationIds,
+  bevelModifierLeafOperationActionName,
+  bevelModifierLeafOperationIds,
+  editBevelLeafOperationActionName,
+  editBevelLeafOperationIds,
+  editInsetLeafOperationActionName,
+  editInsetLeafOperationIds,
+  editTriangulateLeafOperationActionName,
+  editTriangulateLeafOperationIds,
+  editExtrudeRegionLeafOperationActionName,
+  editExtrudeRegionLeafOperationIds,
+  editPokeLeafOperationActionName,
+  editPokeLeafOperationIds,
+  lightTrailsLeafOperationActionName,
+  lightTrailsLeafOperationIds,
+  materialPaletteLeafOperationActionName,
+  materialPaletteLeafOperationIds,
+  mirrorLeafOperationActionName,
+  mirrorLeafOperationIds,
+  poseAnimationLeafOperationActionName,
+  poseAnimationLeafOperationIds,
+  singleMaterialLeafOperationActionName,
+  singleMaterialLeafOperationIds,
+  skinWeightsLeafOperationActionName,
+  skinWeightsLeafOperationIds,
+  solidifyLeafOperationActionName,
+  solidifyLeafOperationIds,
+  subdivisionSurfaceLeafOperationActionName,
+  subdivisionSurfaceLeafOperationIds,
+  transformGeometryLeafOperationActionName,
+  transformGeometryLeafOperationIds,
+} from './companion-leaf-operation.js';
 import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
 import {
   actionLevelMcpActionNameSchema,
   actionLevelMcpRecipeIdByAction,
+  operationLevelMcpActionNameSchema,
+  operationLevelMcpRecipeIdByAction,
 } from './managed-primitive-action.js';
 import {
   procedureParameterPathSegmentSchema,
@@ -12,6 +48,89 @@ import {
   type ProcedureParameterTransform,
 } from './procedure-parameter-projection.js';
 import { catalogVersionSchema, stableVersionRangeSchema } from './version.js';
+
+const operationLevelMcpContracts = {
+  [transformGeometryLeafOperationActionName]: {
+    operationIds: transformGeometryLeafOperationIds,
+    toolName: 'operatingline.blender.geometry-nodes.transform.execute-next',
+    contractName: 'exact ordered Transform Geometry operation contract',
+  },
+  [lightTrailsLeafOperationActionName]: {
+    operationIds: lightTrailsLeafOperationIds,
+    toolName: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+    contractName: 'exact ordered Light Trails operation contract',
+  },
+  [poseAnimationLeafOperationActionName]: {
+    operationIds: poseAnimationLeafOperationIds,
+    toolName: 'operatingline.blender.animation.pose-keyframes.execute-next',
+    contractName: 'exact ordered Pose Animation operation contract',
+  },
+  [armatureLeafOperationActionName]: {
+    operationIds: armatureLeafOperationIds,
+    toolName: 'operatingline.blender.rig.armature.execute-next',
+    contractName: 'exact ordered Armature operation contract',
+  },
+  [skinWeightsLeafOperationActionName]: {
+    operationIds: skinWeightsLeafOperationIds,
+    toolName: 'operatingline.blender.rig.skin-weights.execute-next',
+    contractName: 'exact ordered Skin Weights operation contract',
+  },
+  [solidifyLeafOperationActionName]: {
+    operationIds: solidifyLeafOperationIds,
+    toolName: 'operatingline.blender.modifier.solidify.execute-next',
+    contractName: 'exact ordered Solidify operation contract',
+  },
+  [bevelModifierLeafOperationActionName]: {
+    operationIds: bevelModifierLeafOperationIds,
+    toolName: 'operatingline.blender.modifier.bevel.execute-next',
+    contractName: 'exact ordered Bevel Modifier operation contract',
+  },
+  [singleMaterialLeafOperationActionName]: {
+    operationIds: singleMaterialLeafOperationIds,
+    toolName: 'operatingline.blender.material.single.execute-next',
+    contractName: 'exact ordered Single Material operation contract',
+  },
+  [materialPaletteLeafOperationActionName]: {
+    operationIds: materialPaletteLeafOperationIds,
+    toolName: 'operatingline.blender.material.palette.execute-next',
+    contractName: 'exact ordered Material Palette operation contract',
+  },
+  [mirrorLeafOperationActionName]: {
+    operationIds: mirrorLeafOperationIds,
+    toolName: 'operatingline.blender.modifier.mirror.execute-next',
+    contractName: 'exact ordered Mirror operation contract',
+  },
+  [subdivisionSurfaceLeafOperationActionName]: {
+    operationIds: subdivisionSurfaceLeafOperationIds,
+    toolName: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+    contractName: 'exact ordered Subdivision Surface operation contract',
+  },
+  [editBevelLeafOperationActionName]: {
+    operationIds: editBevelLeafOperationIds,
+    toolName: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+    contractName: 'exact ordered Edit Bevel operation contract',
+  },
+  [editInsetLeafOperationActionName]: {
+    operationIds: editInsetLeafOperationIds,
+    toolName: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+    contractName: 'exact ordered Edit Inset operation contract',
+  },
+  [editTriangulateLeafOperationActionName]: {
+    operationIds: editTriangulateLeafOperationIds,
+    toolName: 'operatingline.blender.mesh.edit-triangulate.execute-next',
+    contractName: 'exact ordered Edit Triangulate operation contract',
+  },
+  [editExtrudeRegionLeafOperationActionName]: {
+    operationIds: editExtrudeRegionLeafOperationIds,
+    toolName: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+    contractName: 'exact ordered Extrude Region operation contract',
+  },
+  [editPokeLeafOperationActionName]: {
+    operationIds: editPokeLeafOperationIds,
+    toolName: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+    contractName: 'exact ordered Edit Poke operation contract',
+  },
+} as const;
 
 export const interactionTargetKindSchema = z.enum([
   'workspace',
@@ -32,10 +151,29 @@ export type InteractionTargetKind = z.infer<typeof interactionTargetKindSchema>;
 export const interactionStepIntentSchema = z.enum(['navigate', 'configure', 'execute', 'verify']);
 export type InteractionStepIntent = z.infer<typeof interactionStepIntentSchema>;
 
-export const interactionTargetSchema = z.strictObject({
-  kind: interactionTargetKindSchema,
-  hostId: z.string().min(1),
+export const nodeSocketConnectionSchema = z.strictObject({
+  fromNode: z.string().min(1),
+  fromSocket: z.string().min(1),
+  toNode: z.string().min(1),
+  toSocket: z.string().min(1),
 });
+export type NodeSocketConnection = z.infer<typeof nodeSocketConnectionSchema>;
+
+export const interactionTargetSchema = z
+  .strictObject({
+    kind: interactionTargetKindSchema,
+    hostId: z.string().min(1),
+    connection: nodeSocketConnectionSchema.optional(),
+  })
+  .superRefine((target, context) => {
+    if (target.connection !== undefined && target.kind !== 'semantic') {
+      context.addIssue({
+        code: 'custom',
+        path: ['connection'],
+        message: 'Machine-readable node connections require a semantic target',
+      });
+    }
+  });
 export type InteractionTarget = z.infer<typeof interactionTargetSchema>;
 
 export const interactionStepSchema = z.strictObject({
@@ -100,6 +238,7 @@ export const parameterAssignmentSourceSchema = z.discriminatedUnion('kind', [
     argumentName: z.string().min(1),
     transform: z.enum([
       'identity',
+      'json_identity',
       'divide_by_two',
       'uniform_vector3',
       'vector3_x',
@@ -305,7 +444,7 @@ export const menuProofExecutionSchema = z.strictObject({
 });
 export type MenuProofExecution = z.infer<typeof menuProofExecutionSchema>;
 
-const orderedMenuProcedureMaterializationSchema = z
+export const orderedMenuProcedureMaterializationSchema = z
   .strictObject({
     availability: z.literal('available'),
     source: z.literal('guidance.native_path'),
@@ -343,21 +482,83 @@ const orderedMenuProcedureMaterializationSchema = z
     ],
   });
 
-const availableMenuProcedureMaterializationSchema = z.discriminatedUnion('parameterBinding', [
-  z.strictObject({
-    availability: z.literal('available'),
-    source: z.literal('guidance.native_path'),
-    semanticBinding: z.literal('all_leaf_operations'),
-    parameterBinding: z.literal('accepted_action_arguments'),
-  }),
-  orderedMenuProcedureMaterializationSchema,
-]);
+export const acceptedActionArgumentsMenuProcedureMaterializationSchema = z.strictObject({
+  availability: z.literal('available'),
+  source: z.literal('guidance.native_path'),
+  semanticBinding: z.literal('all_leaf_operations'),
+  parameterBinding: z.literal('accepted_action_arguments'),
+});
+
+export const availableMenuProcedureMaterializationSchema = z.discriminatedUnion(
+  'parameterBinding',
+  [
+    acceptedActionArgumentsMenuProcedureMaterializationSchema,
+    orderedMenuProcedureMaterializationSchema,
+  ],
+);
 
 export const menuProcedureMaterializationSchema = z.union([
   unavailableProcedureMaterializationSchema,
   availableMenuProcedureMaterializationSchema,
 ]);
 export type MenuProcedureMaterialization = z.infer<typeof menuProcedureMaterializationSchema>;
+
+export const candidateInteractionPreconditionSchema = z.strictObject({
+  kind: z.enum([
+    'workspace',
+    'editor',
+    'mode',
+    'selection',
+    'keymap',
+    'modal_state',
+    'scene_state',
+  ]),
+  label: z.string().min(1),
+  value: z.string().min(1),
+});
+export type CandidateInteractionPrecondition = z.infer<
+  typeof candidateInteractionPreconditionSchema
+>;
+
+export const orderedMenuCandidateOperationSchema = z.strictObject({
+  id: guideStepIdSchema,
+  label: z.string().min(1),
+  intent: interactionStepIntentSchema,
+  target: interactionTargetSchema,
+  path: z.array(z.string().min(1)).min(1),
+  parameters: z.array(parameterAssignmentSchema),
+});
+export type OrderedMenuCandidateOperation = z.infer<typeof orderedMenuCandidateOperationSchema>;
+
+export const nativeMenuCandidateEvidenceSchema = z.strictObject({
+  kind: z.literal('bounded_blender_ui_probe'),
+  executorId: z.string().min(1),
+  hostVersions: z.array(z.string().min(1)).min(1),
+  managedActionExecuted: z.literal(false),
+  managedReceiptCreated: z.literal(false),
+  managedReplacementMeshCreated: z.literal(false),
+  nativeMutationKind: z.string().min(1),
+  operationIds: z.array(guideStepIdSchema).min(1),
+  nativeUndoCheckpointRequired: z.literal(true),
+  nativeUndoDepth: z.number().int().positive(),
+  nativeRedoDepth: z.number().int().positive(),
+});
+export type NativeMenuCandidateEvidence = z.infer<typeof nativeMenuCandidateEvidenceSchema>;
+
+export const menuCandidateProcedureMaterializationSchema = z.strictObject({
+  source: z.literal('catalog.ordered_menu_candidate_operations'),
+  projection: z.literal('candidate_only'),
+  equivalence: z.literal('not_equivalent_to_managed_action'),
+  executionAuthority: z.literal('none'),
+  reason: z.string().min(1),
+  preconditions: z.array(candidateInteractionPreconditionSchema).min(1),
+  operations: z.array(orderedMenuCandidateOperationSchema).min(1),
+  omittedActionArguments: z.array(omittedActionArgumentSchema),
+  nativeEvidence: nativeMenuCandidateEvidenceSchema.optional(),
+});
+export type MenuCandidateProcedureMaterialization = z.infer<
+  typeof menuCandidateProcedureMaterializationSchema
+>;
 
 export const orderedShortcutOperationSchema = z.strictObject({
   id: guideStepIdSchema,
@@ -521,21 +722,7 @@ export const availableShortcutProcedureMaterializationSchema = z.strictObject({
   semanticBinding: z.literal('all_leaf_operations'),
   parameterBinding: z.literal('ordered_parameter_operations'),
   projection: z.literal('candidate_only'),
-  preconditions: z.array(
-    z.strictObject({
-      kind: z.enum([
-        'workspace',
-        'editor',
-        'mode',
-        'selection',
-        'keymap',
-        'modal_state',
-        'scene_state',
-      ]),
-      label: z.string().min(1),
-      value: z.string().min(1),
-    }),
-  ),
+  preconditions: z.array(candidateInteractionPreconditionSchema),
   operations: z.array(shortcutLedOperationSchema).min(1),
   omittedActionArguments: z.array(omittedActionArgumentSchema),
   proofExecution: shortcutProofExecutionSchema.optional(),
@@ -566,9 +753,49 @@ export type AvailableMcpProcedureMaterialization = z.infer<
   typeof availableMcpProcedureMaterializationSchema
 >;
 
+export const operationLevelMcpProcedureMaterializationSchema = z.strictObject({
+  availability: z.literal('available'),
+  source: z.literal('catalog.operation_level_mcp'),
+  semanticBinding: z.literal('ordered_leaf_operations'),
+  parameterBinding: z.literal('ordered_parameter_operations'),
+  serverName: z.literal('operating-line'),
+  toolName: z.enum([
+    'operatingline.blender.geometry-nodes.transform.execute-next',
+    'operatingline.blender.geometry-nodes.light-trails.execute-next',
+    'operatingline.blender.animation.pose-keyframes.execute-next',
+    'operatingline.blender.rig.armature.execute-next',
+    'operatingline.blender.rig.skin-weights.execute-next',
+    'operatingline.blender.modifier.solidify.execute-next',
+    'operatingline.blender.modifier.bevel.execute-next',
+    'operatingline.blender.material.single.execute-next',
+    'operatingline.blender.material.palette.execute-next',
+    'operatingline.blender.modifier.mirror.execute-next',
+    'operatingline.blender.modifier.subdivision-surface.execute-next',
+    'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+    'operatingline.blender.mesh.edit-inset-faces.execute-next',
+    'operatingline.blender.mesh.edit-triangulate.execute-next',
+    'operatingline.blender.mesh.edit-extrude-region.execute-next',
+    'operatingline.blender.mesh.edit-poke-faces.execute-next',
+  ]),
+  authorization: z.literal('accepted_replay_next_step'),
+  resultBinding: z.literal('companion_leaf_operation_progress'),
+  operations: z
+    .array(
+      z.strictObject({
+        sourceOperationId: guideStepIdSchema,
+        parameters: z.array(parameterAssignmentSchema),
+      }),
+    )
+    .min(1),
+});
+export type OperationLevelMcpProcedureMaterialization = z.infer<
+  typeof operationLevelMcpProcedureMaterializationSchema
+>;
+
 export const mcpProcedureMaterializationSchema = z.union([
   unavailableProcedureMaterializationSchema,
   availableMcpProcedureMaterializationSchema,
+  operationLevelMcpProcedureMaterializationSchema,
 ]);
 export type McpProcedureMaterialization = z.infer<typeof mcpProcedureMaterializationSchema>;
 
@@ -593,6 +820,7 @@ export type SemanticProcedureMaterialization = z.infer<
 export const procedureMaterializationSchema = z.strictObject({
   semantic: semanticProcedureMaterializationSchema.optional(),
   menu: menuProcedureMaterializationSchema,
+  menuCandidate: menuCandidateProcedureMaterializationSchema.optional(),
   shortcut: shortcutProcedureMaterializationSchema,
   mcp: mcpProcedureMaterializationSchema,
 });
@@ -734,7 +962,14 @@ function isFixedNumericVector3Schema(schema: unknown): boolean {
 }
 
 function isIdentityProjectionSchema(schema: unknown): boolean {
-  if (typeof schema !== 'object' || schema === null || !('type' in schema)) return false;
+  if (typeof schema !== 'object' || schema === null) return false;
+  const scalar = (value: unknown): boolean =>
+    typeof value === 'boolean' ||
+    typeof value === 'string' ||
+    (typeof value === 'number' && Number.isFinite(value));
+  if ('enum' in schema && Array.isArray(schema.enum) && schema.enum.every(scalar)) return true;
+  if ('const' in schema && scalar(schema.const)) return true;
+  if (!('type' in schema)) return false;
   if (
     schema.type === 'boolean' ||
     schema.type === 'string' ||
@@ -758,11 +993,12 @@ function isIdentityProjectionSchema(schema: unknown): boolean {
 
 function validateIdentityProjectionSchema(
   recipe: InteractionRecipe,
-  modality: 'semantic' | 'menu' | 'shortcut',
+  modality: 'semantic' | 'menu' | 'menu candidate' | 'shortcut' | 'mcp',
   argumentSchemas: Readonly<Record<string, unknown>>,
   argumentName: string,
   transform: ProcedureParameterTransform,
 ): void {
+  if (transform === 'json_identity' && Object.hasOwn(argumentSchemas, argumentName)) return;
   if (
     transform !== 'identity' ||
     !Object.hasOwn(argumentSchemas, argumentName) ||
@@ -780,7 +1016,7 @@ function validateActionArgumentCoverage(
   argumentSchemas: Record<string, unknown>,
   assignments: readonly ParameterAssignment[],
   omittedActionArguments: readonly OmittedActionArgument[],
-  modality: 'semantic' | 'menu' | 'shortcut',
+  modality: 'semantic' | 'menu' | 'menu candidate' | 'shortcut' | 'mcp',
 ): void {
   const coverage = new Map<string, { whole: boolean; components: Set<'x' | 'y' | 'z'> }>();
   const segmentFrameOutputs = ['distance', 'midpoint', 'rotation_euler_xyz_align_z'] as const;
@@ -1157,6 +1393,64 @@ function validateRecipe(recipe: InteractionRecipe): void {
     }
   }
 
+  const menuCandidate = recipe.procedureMaterialization?.menuCandidate;
+  if (menuCandidate !== undefined) {
+    const preconditionKeys = new Set<string>();
+    for (const precondition of menuCandidate.preconditions) {
+      const key = `${precondition.kind}\u0000${precondition.label}`;
+      if (preconditionKeys.has(key)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} menu candidate contains duplicate precondition ${precondition.kind}:${precondition.label}`,
+        );
+      }
+      preconditionKeys.add(key);
+    }
+
+    const operationIds = new Set<string>();
+    const operationLabels = new Set<string>();
+    for (const operation of menuCandidate.operations) {
+      if (operationIds.has(operation.id)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} menu candidate contains duplicate operation id ${operation.id}`,
+        );
+      }
+      if (operationLabels.has(operation.label)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} menu candidate contains duplicate operation label ${operation.label}`,
+        );
+      }
+      operationIds.add(operation.id);
+      operationLabels.add(operation.label);
+      validateParameterNames(
+        recipe,
+        `menu candidate operation ${operation.id}`,
+        operation.parameters,
+      );
+    }
+
+    if (menuCandidate.nativeEvidence !== undefined) {
+      const actualOperationIds = menuCandidate.operations.map((operation) => operation.id);
+      if (
+        actualOperationIds.length !== menuCandidate.nativeEvidence.operationIds.length ||
+        actualOperationIds.some(
+          (operationId, index) => operationId !== menuCandidate.nativeEvidence?.operationIds[index],
+        )
+      ) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} menu candidate native evidence must bind every ordered operation exactly`,
+        );
+      }
+      if (
+        new Set(menuCandidate.nativeEvidence.hostVersions).size !==
+        menuCandidate.nativeEvidence.hostVersions.length
+      ) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} menu candidate native evidence repeats a host version`,
+        );
+      }
+    }
+  }
+
   const shortcut = recipe.procedureMaterialization?.shortcut;
   if (shortcut?.availability === 'available') {
     const shortcutSurfaceOperatorId =
@@ -1402,17 +1696,49 @@ function validateRecipe(recipe: InteractionRecipe): void {
   }
 
   const mcp = recipe.procedureMaterialization?.mcp;
-  const parsedActionLevelMcpActionName = actionLevelMcpActionNameSchema.safeParse(
-    recipe.actionName,
-  );
-  if (
-    mcp?.availability === 'available' &&
-    (!parsedActionLevelMcpActionName.success ||
-      recipe.id !== actionLevelMcpRecipeIdByAction[parsedActionLevelMcpActionName.data])
-  ) {
-    throw new Error(
-      `Interaction recipe ${recipe.id} action-level MCP is restricted to exact approved Blender recipes`,
-    );
+  if (mcp?.availability === 'available') {
+    if (mcp.source === 'catalog.action_level_mcp') {
+      const parsedActionLevelMcpActionName = actionLevelMcpActionNameSchema.safeParse(
+        recipe.actionName,
+      );
+      if (
+        !parsedActionLevelMcpActionName.success ||
+        recipe.id !== actionLevelMcpRecipeIdByAction[parsedActionLevelMcpActionName.data]
+      ) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} action-level MCP is restricted to exact approved Blender recipes`,
+        );
+      }
+    } else {
+      const parsedOperationActionName = operationLevelMcpActionNameSchema.safeParse(
+        recipe.actionName,
+      );
+      const operationContract = parsedOperationActionName.success
+        ? operationLevelMcpContracts[parsedOperationActionName.data]
+        : undefined;
+      const actualOperationIds = mcp.operations.map((operation) => operation.sourceOperationId);
+      if (
+        !parsedOperationActionName.success ||
+        operationContract === undefined ||
+        recipe.id !== operationLevelMcpRecipeIdByAction[parsedOperationActionName.data] ||
+        mcp.toolName !== operationContract.toolName ||
+        actualOperationIds.length !== operationContract.operationIds.length ||
+        actualOperationIds.some(
+          (operationId, index) => operationId !== operationContract.operationIds[index],
+        )
+      ) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} operation-level MCP requires the ${operationContract?.contractName ?? 'approved operation contract'}`,
+        );
+      }
+      for (const operation of mcp.operations) {
+        validateParameterNames(
+          recipe,
+          `MCP operation ${operation.sourceOperationId}`,
+          operation.parameters,
+        );
+      }
+    }
   }
 
   const stepIds = new Set<string>();
@@ -1435,6 +1761,32 @@ function validateRecipe(recipe: InteractionRecipe): void {
     stepIds.add(step.id);
     stepOrders.add(step.order);
     stepLabels.add(step.label);
+  }
+
+  const nodeTargetCounts = new Map<string, number>();
+  for (const step of recipe.guidance.steps) {
+    if (step.target.kind === 'node') {
+      nodeTargetCounts.set(step.target.hostId, (nodeTargetCounts.get(step.target.hostId) ?? 0) + 1);
+    }
+  }
+  for (const step of recipe.guidance.steps) {
+    const connection = step.target.connection;
+    if (connection === undefined) continue;
+    if (step.intent !== 'execute') {
+      throw new Error(
+        `Interaction recipe ${recipe.id} node connection ${step.id} must use execute intent`,
+      );
+    }
+    for (const [endpoint, nodeId] of [
+      ['fromNode', connection.fromNode],
+      ['toNode', connection.toNode],
+    ] as const) {
+      if (nodeTargetCounts.get(nodeId) !== 1) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} node connection ${step.id} ${endpoint} ${nodeId} must reference exactly one declared node target`,
+        );
+      }
+    }
   }
 
   const expectedOrders = recipe.guidance.steps.map((_step, index) => index + 1);
@@ -1599,6 +1951,28 @@ export function validateInteractionCatalog(
       );
     }
 
+    const menuCandidate = recipe.procedureMaterialization?.menuCandidate;
+    if (menuCandidate !== undefined) {
+      const assignments = menuCandidate.operations.flatMap((operation) => operation.parameters);
+      validateActionArgumentCoverage(
+        recipe,
+        argumentSchemas,
+        assignments,
+        menuCandidate.omittedActionArguments,
+        'menu candidate',
+      );
+      for (const assignment of assignments) {
+        if (assignment.source.kind !== 'action_argument') continue;
+        validateIdentityProjectionSchema(
+          recipe,
+          'menu candidate',
+          argumentSchemas,
+          assignment.source.argumentName,
+          assignment.source.transform,
+        );
+      }
+    }
+
     const shortcut = recipe.procedureMaterialization?.shortcut;
     if (shortcut?.availability === 'available') {
       validateActionArgumentCoverage(
@@ -1608,6 +1982,22 @@ export function validateInteractionCatalog(
         shortcut.omittedActionArguments,
         'shortcut',
       );
+    }
+
+    const mcp = recipe.procedureMaterialization?.mcp;
+    if (mcp?.availability === 'available' && mcp.source === 'catalog.operation_level_mcp') {
+      const assignments = mcp.operations.flatMap((operation) => operation.parameters);
+      validateActionArgumentCoverage(recipe, argumentSchemas, assignments, [], 'mcp');
+      for (const assignment of assignments) {
+        if (assignment.source.kind !== 'action_argument') continue;
+        validateIdentityProjectionSchema(
+          recipe,
+          'mcp',
+          argumentSchemas,
+          assignment.source.argumentName,
+          assignment.source.transform,
+        );
+      }
     }
   }
 }

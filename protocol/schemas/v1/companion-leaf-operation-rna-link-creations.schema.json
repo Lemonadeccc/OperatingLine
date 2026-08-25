@@ -1,0 +1,168 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 1,
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "order": {
+        "type": "number",
+        "const": 1
+      },
+      "executionMethod": {
+        "type": "string",
+        "const": "blender_rna_node_link_create"
+      },
+      "mcpTool": {
+        "type": "string",
+        "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+      },
+      "sourceOperationId": {
+        "type": "string",
+        "enum": [
+          "semantic.connect_light_trails.half_line_to_resolution",
+          "semantic.connect_light_trails.rows_to_instances",
+          "semantic.connect_light_trails.resolution_to_instances",
+          "semantic.connect_light_trails.instances_to_realize",
+          "semantic.connect_light_trails.position_to_noise",
+          "semantic.connect_light_trails.noise_to_center",
+          "semantic.connect_light_trails.center_to_height",
+          "semantic.connect_light_trails.height_to_offset",
+          "semantic.connect_light_trails.realize_to_displace",
+          "semantic.connect_light_trails.offset_to_displace",
+          "semantic.connect_light_trails.displace_to_mirror",
+          "semantic.connect_light_trails.displace_to_join",
+          "semantic.connect_light_trails.mirror_to_join",
+          "semantic.connect_light_trails.join_to_curve_mesh",
+          "semantic.connect_light_trails.profile_to_curve_mesh",
+          "semantic.connect_light_trails.tiles_to_instances",
+          "semantic.connect_light_trails.mesh_to_instances",
+          "semantic.connect_light_trails.instances_to_final_realize",
+          "semantic.connect_light_trails.realize_to_output"
+        ]
+      },
+      "semanticAction": {
+        "type": "string",
+        "enum": [
+          "semantic.connect_light_trails.half_line_to_resolution",
+          "semantic.connect_light_trails.rows_to_instances",
+          "semantic.connect_light_trails.resolution_to_instances",
+          "semantic.connect_light_trails.instances_to_realize",
+          "semantic.connect_light_trails.position_to_noise",
+          "semantic.connect_light_trails.noise_to_center",
+          "semantic.connect_light_trails.center_to_height",
+          "semantic.connect_light_trails.height_to_offset",
+          "semantic.connect_light_trails.realize_to_displace",
+          "semantic.connect_light_trails.offset_to_displace",
+          "semantic.connect_light_trails.displace_to_mirror",
+          "semantic.connect_light_trails.displace_to_join",
+          "semantic.connect_light_trails.mirror_to_join",
+          "semantic.connect_light_trails.join_to_curve_mesh",
+          "semantic.connect_light_trails.profile_to_curve_mesh",
+          "semantic.connect_light_trails.tiles_to_instances",
+          "semantic.connect_light_trails.mesh_to_instances",
+          "semantic.connect_light_trails.instances_to_final_realize",
+          "semantic.connect_light_trails.realize_to_output"
+        ]
+      },
+      "nodeGroupId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "nodeGroupName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "fromNodeName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "fromNodeType": {
+        "type": "string",
+        "minLength": 1
+      },
+      "fromSocketIdentifier": {
+        "type": "string",
+        "minLength": 1
+      },
+      "fromSocketDirection": {
+        "type": "string",
+        "const": "OUTPUT"
+      },
+      "toNodeName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "toNodeType": {
+        "type": "string",
+        "minLength": 1
+      },
+      "toSocketIdentifier": {
+        "type": "string",
+        "minLength": 1
+      },
+      "toSocketDirection": {
+        "type": "string",
+        "const": "INPUT"
+      },
+      "observedLink": {
+        "type": "boolean",
+        "const": true
+      },
+      "uiPath": {
+        "type": "array",
+        "items": [
+          {
+            "type": "string",
+            "const": "Geometry Nodes"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          }
+        ],
+        "additionalItems": false,
+        "minItems": 6,
+        "maxItems": 6
+      }
+    },
+    "required": [
+      "order",
+      "executionMethod",
+      "mcpTool",
+      "sourceOperationId",
+      "semanticAction",
+      "nodeGroupId",
+      "nodeGroupName",
+      "fromNodeName",
+      "fromNodeType",
+      "fromSocketIdentifier",
+      "fromSocketDirection",
+      "toNodeName",
+      "toNodeType",
+      "toSocketIdentifier",
+      "toSocketDirection",
+      "observedLink",
+      "uiPath"
+    ],
+    "additionalProperties": false
+  },
+  "$comment": "Exact Light Trails source/target node types, socket identifiers, source operations, and UI paths require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-rna-link-creations.json"
+}

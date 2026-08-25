@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
     "status": {
@@ -38,7 +38,8 @@
                 "1.3.0",
                 "1.4.0",
                 "1.5.0",
-                "1.6.0"
+                "1.6.0",
+                "1.7.0"
               ]
             },
             "decisionId": {
@@ -187,7 +188,8 @@
                 "1.3.0",
                 "1.4.0",
                 "1.5.0",
-                "1.6.0"
+                "1.6.0",
+                "1.7.0"
               ]
             },
             "reportId": {
@@ -275,7 +277,7 @@
             },
             "observations": {
               "minItems": 1,
-              "maxItems": 1,
+              "maxItems": 8,
               "type": "array",
               "items": {
                 "oneOf": [
@@ -2109,6 +2111,26 @@
                           "allTriangles": {
                             "type": "boolean",
                             "const": true
+                          },
+                          "sourceLoopCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 32768
+                          },
+                          "expectedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "expectedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "expectedFaceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
                           }
                         },
                         "required": [
@@ -2137,7 +2159,11 @@
                           "topologyMatches",
                           "attestationContentSha256",
                           "nonempty",
-                          "allTriangles"
+                          "allTriangles",
+                          "sourceLoopCount",
+                          "expectedVertexCount",
+                          "expectedEdgeCount",
+                          "expectedFaceCount"
                         ],
                         "additionalProperties": false
                       }
@@ -2319,6 +2345,41 @@
                           "topologyGrew": {
                             "type": "boolean",
                             "const": true
+                          },
+                          "selectedFaceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 256
+                          },
+                          "selectedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "selectedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "boundaryEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "expectedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "expectedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "expectedFaceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
                           }
                         },
                         "required": [
@@ -2346,7 +2407,14 @@
                           "actionArgumentsSha256",
                           "topologyMatches",
                           "attestationContentSha256",
-                          "topologyGrew"
+                          "topologyGrew",
+                          "selectedFaceCount",
+                          "selectedEdgeCount",
+                          "selectedVertexCount",
+                          "boundaryEdgeCount",
+                          "expectedVertexCount",
+                          "expectedEdgeCount",
+                          "expectedFaceCount"
                         ],
                         "additionalProperties": false
                       }
@@ -3042,6 +3110,167 @@
                                   },
                                   "modifierType": {
                                     "type": "string",
+                                    "const": "SUBSURF"
+                                  },
+                                  "levels": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 3
+                                  },
+                                  "renderLevels": {
+                                    "type": "number",
+                                    "const": 2
+                                  },
+                                  "subdivisionType": {
+                                    "type": "string",
+                                    "const": "CATMULL_CLARK"
+                                  },
+                                  "quality": {
+                                    "type": "number",
+                                    "const": 3
+                                  },
+                                  "showOnlyControlEdges": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "useCreases": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "useLimitSurface": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "boundarySmooth": {
+                                    "type": "string",
+                                    "const": "ALL"
+                                  },
+                                  "uvSmooth": {
+                                    "type": "string",
+                                    "const": "PRESERVE_BOUNDARIES"
+                                  },
+                                  "useCustomNormals": {
+                                    "type": "boolean",
+                                    "const": false
+                                  },
+                                  "showViewport": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "showRender": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "showInEditMode": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "showOnCage": {
+                                    "type": "boolean",
+                                    "const": false
+                                  }
+                                },
+                                "required": [
+                                  "targetId",
+                                  "modifierId",
+                                  "modifierType",
+                                  "levels",
+                                  "renderLevels",
+                                  "subdivisionType",
+                                  "quality",
+                                  "showOnlyControlEdges",
+                                  "useCreases",
+                                  "useLimitSurface",
+                                  "boundarySmooth",
+                                  "uvSmooth",
+                                  "useCustomNormals",
+                                  "showViewport",
+                                  "showRender",
+                                  "showInEditMode",
+                                  "showOnCage"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "targetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierType": {
+                                "type": "string",
+                                "const": "SUBSURF"
+                              },
+                              "propertiesMatch": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "sourceContentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedVertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedEdgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 16384
+                              },
+                              "evaluatedFaceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedFinite": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedWithinLimits": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "targetId",
+                              "modifierId",
+                              "modifierType",
+                              "propertiesMatch",
+                              "sourceContentIntact",
+                              "evaluatedVertexCount",
+                              "evaluatedEdgeCount",
+                              "evaluatedFaceCount",
+                              "evaluatedFinite",
+                              "evaluatedWithinLimits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "targetId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierType": {
+                                    "type": "string",
                                     "const": "SOLIDIFY"
                                   },
                                   "thickness": {
@@ -3201,6 +3430,142 @@
                                   },
                                   "modifierType": {
                                     "type": "string",
+                                    "const": "BEVEL"
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "minimum": 0.0001,
+                                    "maximum": 100
+                                  },
+                                  "segments": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 16
+                                  },
+                                  "angleLimit": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 3.141592653589793
+                                  }
+                                },
+                                "required": [
+                                  "targetId",
+                                  "modifierId",
+                                  "modifierType",
+                                  "width",
+                                  "segments",
+                                  "angleLimit"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "targetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierType": {
+                                "type": "string",
+                                "const": "BEVEL"
+                              },
+                              "propertiesMatch": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "width": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 100
+                              },
+                              "segments": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 16
+                              },
+                              "angleLimit": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 3.141592653589793
+                              },
+                              "limitMethod": {
+                                "type": "string",
+                                "const": "ANGLE"
+                              },
+                              "bevelFixedStateMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "sourceContentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedVertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedEdgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 16384
+                              },
+                              "evaluatedFaceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedFinite": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedWithinLimits": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "targetId",
+                              "modifierId",
+                              "modifierType",
+                              "propertiesMatch",
+                              "width",
+                              "segments",
+                              "angleLimit",
+                              "limitMethod",
+                              "bevelFixedStateMatches",
+                              "sourceContentIntact",
+                              "evaluatedVertexCount",
+                              "evaluatedEdgeCount",
+                              "evaluatedFaceCount",
+                              "evaluatedFinite",
+                              "evaluatedWithinLimits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "targetId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierType": {
+                                    "type": "string",
                                     "const": "MIRROR"
                                   },
                                   "axis": {
@@ -3313,6 +3678,167 @@
                             "additionalProperties": false
                           }
                         ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "material_assigned"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "materialId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "targets": {
+                                "minItems": 1,
+                                "maxItems": 64,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "materialId",
+                              "targets"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "materialName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "targetIds": {
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            }
+                          },
+                          "assignedTargetIds": {
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            }
+                          },
+                          "useNodes": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "principledNodeCount": {
+                            "type": "number",
+                            "const": 1
+                          },
+                          "outputNodeCount": {
+                            "type": "number",
+                            "const": 1
+                          },
+                          "baseColor": {
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "type": "array",
+                            "items": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "roughness": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "metallic": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "receiptMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "ownershipMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialSurfaceMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "assignmentsMatch": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "sourceContentIntact": {
+                            "type": "boolean",
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "materialId",
+                          "materialName",
+                          "targetIds",
+                          "assignedTargetIds",
+                          "useNodes",
+                          "principledNodeCount",
+                          "outputNodeCount",
+                          "baseColor",
+                          "roughness",
+                          "metallic",
+                          "receiptMatches",
+                          "ownershipMatches",
+                          "materialSurfaceMatches",
+                          "assignmentsMatch",
+                          "sourceContentIntact"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -3845,50 +4371,146 @@
                                       "maxItems": 32,
                                       "type": "array",
                                       "items": {
-                                        "type": "object",
-                                        "properties": {
-                                          "boneName": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 180,
-                                            "pattern": "^OperatingLine\\..*"
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "boneName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 180,
+                                                "pattern": "^OperatingLine\\..*"
+                                              },
+                                              "rotationEuler": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -6.283185307179586,
+                                                  "maximum": 6.283185307179586
+                                                }
+                                              },
+                                              "location": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1000,
+                                                  "maximum": 1000
+                                                }
+                                              },
+                                              "scale": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": 0.0001,
+                                                  "maximum": 1000
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "boneName",
+                                              "rotationEuler"
+                                            ],
+                                            "additionalProperties": false
                                           },
-                                          "rotationEuler": {
-                                            "minItems": 3,
-                                            "maxItems": 3,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "number",
-                                              "minimum": -6.283185307179586,
-                                              "maximum": 6.283185307179586
-                                            }
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "boneName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 180,
+                                                "pattern": "^OperatingLine\\..*"
+                                              },
+                                              "rotationQuaternion": {
+                                                "minItems": 4,
+                                                "maxItems": 4,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1,
+                                                  "maximum": 1
+                                                }
+                                              },
+                                              "location": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1000,
+                                                  "maximum": 1000
+                                                }
+                                              },
+                                              "scale": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": 0.0001,
+                                                  "maximum": 1000
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "boneName",
+                                              "rotationQuaternion"
+                                            ],
+                                            "additionalProperties": false
                                           },
-                                          "location": {
-                                            "minItems": 3,
-                                            "maxItems": 3,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "number",
-                                              "minimum": -1000,
-                                              "maximum": 1000
-                                            }
-                                          },
-                                          "scale": {
-                                            "minItems": 3,
-                                            "maxItems": 3,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "number",
-                                              "minimum": 0.0001,
-                                              "maximum": 1000
-                                            }
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "boneName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 180,
+                                                "pattern": "^OperatingLine\\..*"
+                                              },
+                                              "rotationAxisAngle": {
+                                                "minItems": 4,
+                                                "maxItems": 4,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -6.283185307179586,
+                                                  "maximum": 6.283185307179586
+                                                }
+                                              },
+                                              "location": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1000,
+                                                  "maximum": 1000
+                                                }
+                                              },
+                                              "scale": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": 0.0001,
+                                                  "maximum": 1000
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "boneName",
+                                              "rotationAxisAngle"
+                                            ],
+                                            "additionalProperties": false
                                           }
-                                        },
-                                        "required": [
-                                          "boneName",
-                                          "rotationEuler"
-                                        ],
-                                        "additionalProperties": false
+                                        ]
                                       }
                                     }
                                   },
@@ -3980,12 +4602,12 @@
                           "curveCount": {
                             "type": "integer",
                             "exclusiveMinimum": 0,
-                            "maximum": 288
+                            "maximum": 320
                           },
                           "expectedCurveCount": {
                             "type": "integer",
                             "exclusiveMinimum": 0,
-                            "maximum": 288
+                            "maximum": 320
                           },
                           "curvesMatch": {
                             "type": "boolean",
@@ -4046,6 +4668,1153 @@
                           "actionContentSha256",
                           "receiptContentSha256",
                           "attestationContentSha256"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "geometry_nodes_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "targetId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "nodeGroupId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "nodeTypes": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string",
+                                    "const": "GeometryNodeTransform"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "NodeGroupInput"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "NodeGroupOutput"
+                                  }
+                                ],
+                                "additionalItems": false,
+                                "minItems": 3,
+                                "maxItems": 3
+                              }
+                            },
+                            "required": [
+                              "targetId",
+                              "modifierId",
+                              "nodeGroupId",
+                              "nodeTypes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "nodeGroupId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "nodeTypes": {
+                            "type": "array",
+                            "items": [
+                              {
+                                "type": "string",
+                                "const": "GeometryNodeTransform"
+                              },
+                              {
+                                "type": "string",
+                                "const": "NodeGroupInput"
+                              },
+                              {
+                                "type": "string",
+                                "const": "NodeGroupOutput"
+                              }
+                            ],
+                            "additionalItems": false,
+                            "minItems": 3,
+                            "maxItems": 3
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "targetId",
+                          "modifierId",
+                          "nodeGroupId",
+                          "nodeTypes"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "light_trails_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "targetId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modifierName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "nodeGroupId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "nodeGroupName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "trailCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 128
+                              },
+                              "pointsPerTrail": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 512
+                              },
+                              "tileLength": {
+                                "type": "number",
+                                "minimum": 0.1,
+                                "maximum": 1000
+                              },
+                              "trailSpacing": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 100
+                              },
+                              "noiseScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "noiseDetail": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 15
+                              },
+                              "noiseRoughness": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "noiseSeed": {
+                                "type": "number",
+                                "minimum": -10000,
+                                "maximum": 10000
+                              },
+                              "height": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "profileSides": {
+                                "type": "integer",
+                                "minimum": 3,
+                                "maximum": 8
+                              },
+                              "profileRadius": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 10
+                              },
+                              "tileRepeatCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
+                              },
+                              "nodeTypes": {
+                                "minItems": 20,
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "targetId",
+                              "modifierId",
+                              "modifierName",
+                              "nodeGroupId",
+                              "nodeGroupName",
+                              "trailCount",
+                              "pointsPerTrail",
+                              "tileLength",
+                              "trailSpacing",
+                              "noiseScale",
+                              "noiseDetail",
+                              "noiseRoughness",
+                              "noiseSeed",
+                              "height",
+                              "profileSides",
+                              "profileRadius",
+                              "tileRepeatCount",
+                              "nodeTypes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "nodeGroupId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "nodeGroupName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "nodeTypes": {
+                            "minItems": 20,
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          },
+                          "interfaceSignature": {
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "type": "array",
+                            "items": {
+                              "minItems": 3,
+                              "maxItems": 3,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180
+                              }
+                            }
+                          },
+                          "interfaceMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "linkTopology": {
+                            "minItems": 19,
+                            "maxItems": 19,
+                            "type": "array",
+                            "items": {
+                              "minItems": 4,
+                              "maxItems": 4,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180
+                              }
+                            }
+                          },
+                          "linkTopologyMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "forbiddenNodeTypes": {
+                            "minItems": 0,
+                            "maxItems": 0,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "GeometryNodeBake",
+                                "GeometryNodeSimulationInput",
+                                "GeometryNodeSimulationOutput"
+                              ]
+                            }
+                          },
+                          "bakeCount": {
+                            "type": "number",
+                            "const": 0
+                          },
+                          "bakeDirectory": {
+                            "type": "string",
+                            "const": ""
+                          },
+                          "semanticSignatureMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "fixedSemanticsMatch": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "resolvedParameters": {
+                            "type": "object",
+                            "properties": {
+                              "trailCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 128
+                              },
+                              "pointsPerTrail": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 512
+                              },
+                              "tileLength": {
+                                "type": "number",
+                                "minimum": 0.1,
+                                "maximum": 1000
+                              },
+                              "trailSpacing": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 100
+                              },
+                              "noiseScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "noiseDetail": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 15
+                              },
+                              "noiseRoughness": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "noiseSeed": {
+                                "type": "number",
+                                "minimum": -10000,
+                                "maximum": 10000
+                              },
+                              "height": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "profileSides": {
+                                "type": "integer",
+                                "minimum": 3,
+                                "maximum": 8
+                              },
+                              "profileRadius": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 10
+                              },
+                              "tileRepeatCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
+                              }
+                            },
+                            "required": [
+                              "trailCount",
+                              "pointsPerTrail",
+                              "tileLength",
+                              "trailSpacing",
+                              "noiseScale",
+                              "noiseDetail",
+                              "noiseRoughness",
+                              "noiseSeed",
+                              "height",
+                              "profileSides",
+                              "profileRadius",
+                              "tileRepeatCount"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "semanticParametersMatch": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "evaluatedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 3000000
+                          },
+                          "expectedEvaluatedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 3000000
+                          },
+                          "evaluatedVertexCountMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "evaluatedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 12000000
+                          },
+                          "evaluatedPolygonCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 12000000
+                          },
+                          "evaluatedFinite": {
+                            "type": "boolean",
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "targetId",
+                          "modifierId",
+                          "modifierName",
+                          "nodeGroupId",
+                          "nodeGroupName",
+                          "nodeTypes",
+                          "interfaceSignature",
+                          "interfaceMatches",
+                          "linkTopology",
+                          "linkTopologyMatches",
+                          "forbiddenNodeTypes",
+                          "bakeCount",
+                          "bakeDirectory",
+                          "semanticSignatureMatches",
+                          "fixedSemanticsMatch",
+                          "resolvedParameters",
+                          "semanticParametersMatch",
+                          "evaluatedVertexCount",
+                          "expectedEvaluatedVertexCount",
+                          "evaluatedVertexCountMatches",
+                          "evaluatedEdgeCount",
+                          "evaluatedPolygonCount",
+                          "evaluatedFinite"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "light_trails_scene_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "trailTargetId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "floorTargetId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "sceneId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "sceneName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "worldId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "worldName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "cameraId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "cameraObjectName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "cameraDataName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "controllerId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "controllerObjectName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "trailMaterialId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "trailMaterialName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "floorMaterialId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "floorMaterialName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "cameraActionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "cameraActionName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "frameStart": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 99999
+                              },
+                              "frameEnd": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100000
+                              },
+                              "cameraStart": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": -1000,
+                                  "maximum": 1000
+                                }
+                              },
+                              "cameraEnd": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": -1000,
+                                  "maximum": 1000
+                                }
+                              },
+                              "cameraTarget": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": -1000,
+                                  "maximum": 1000
+                                }
+                              },
+                              "lens": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 1000
+                              },
+                              "fStop": {
+                                "type": "number",
+                                "minimum": 0.1,
+                                "maximum": 64
+                              },
+                              "focusDistance": {
+                                "type": "number",
+                                "minimum": 0.001,
+                                "maximum": 1000
+                              },
+                              "trailBaseColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "trailGlowColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "trailEmissionStrength": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 10000
+                              },
+                              "gradientRotationDegrees": {
+                                "type": "number",
+                                "minimum": -360,
+                                "maximum": 360
+                              },
+                              "gradientStart": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "glowBandStart": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "glowBandEnd": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "gradientEnd": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "waveScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "floorBaseColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "floorEmissionColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "floorEmissionStrength": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 10000
+                              },
+                              "floorMetallic": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "floorVoronoiScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "floorRoughnessMinimum": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "floorRoughnessMaximum": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "floorBumpStrength": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "floorBumpDistance": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "trailMaterialNodeTypes": {
+                                "minItems": 9,
+                                "maxItems": 9,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              },
+                              "floorMaterialNodeTypes": {
+                                "minItems": 8,
+                                "maxItems": 8,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              },
+                              "compositorNodeTypes": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "collectionId",
+                              "trailTargetId",
+                              "floorTargetId",
+                              "sceneId",
+                              "sceneName",
+                              "worldId",
+                              "worldName",
+                              "cameraId",
+                              "cameraObjectName",
+                              "cameraDataName",
+                              "controllerId",
+                              "controllerObjectName",
+                              "trailMaterialId",
+                              "trailMaterialName",
+                              "floorMaterialId",
+                              "floorMaterialName",
+                              "cameraActionId",
+                              "cameraActionName",
+                              "frameStart",
+                              "frameEnd",
+                              "cameraStart",
+                              "cameraEnd",
+                              "cameraTarget",
+                              "lens",
+                              "fStop",
+                              "focusDistance",
+                              "trailBaseColor",
+                              "trailGlowColor",
+                              "trailEmissionStrength",
+                              "gradientRotationDegrees",
+                              "gradientStart",
+                              "glowBandStart",
+                              "glowBandEnd",
+                              "gradientEnd",
+                              "waveScale",
+                              "floorBaseColor",
+                              "floorEmissionColor",
+                              "floorEmissionStrength",
+                              "floorMetallic",
+                              "floorVoronoiScale",
+                              "floorRoughnessMinimum",
+                              "floorRoughnessMaximum",
+                              "floorBumpStrength",
+                              "floorBumpDistance",
+                              "trailMaterialNodeTypes",
+                              "floorMaterialNodeTypes",
+                              "compositorNodeTypes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "shape": {
+                            "type": "string",
+                            "const": "managed_light_trails_scene"
+                          },
+                          "collectionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "trailTargetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "floorTargetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "sceneId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "sceneName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "worldId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "worldName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cameraId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "cameraObjectName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cameraDataName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "controllerId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "controllerObjectName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "trailMaterialId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "trailMaterialName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "floorMaterialId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "floorMaterialName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cameraActionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "cameraActionName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "sceneMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "worldMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "cameraMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "controllerMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "animationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "trailMaterialMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "floorMaterialMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "compositorMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "noBakeNodes": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "noRenderArtifacts": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "frameStart": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 99999
+                          },
+                          "frameEnd": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100000
+                          },
+                          "cameraKeyframeCount": {
+                            "type": "number",
+                            "const": 6
+                          },
+                          "trailMaterialNodeTypes": {
+                            "minItems": 9,
+                            "maxItems": 9,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          },
+                          "floorMaterialNodeTypes": {
+                            "minItems": 8,
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          },
+                          "compositorNodeTypes": {
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "shape",
+                          "collectionId",
+                          "trailTargetId",
+                          "floorTargetId",
+                          "sceneId",
+                          "sceneName",
+                          "worldId",
+                          "worldName",
+                          "cameraId",
+                          "cameraObjectName",
+                          "cameraDataName",
+                          "controllerId",
+                          "controllerObjectName",
+                          "trailMaterialId",
+                          "trailMaterialName",
+                          "floorMaterialId",
+                          "floorMaterialName",
+                          "cameraActionId",
+                          "cameraActionName",
+                          "sceneMatches",
+                          "collectionMatches",
+                          "worldMatches",
+                          "cameraMatches",
+                          "controllerMatches",
+                          "animationMatches",
+                          "trailMaterialMatches",
+                          "floorMaterialMatches",
+                          "compositorMatches",
+                          "noBakeNodes",
+                          "noRenderArtifacts",
+                          "frameStart",
+                          "frameEnd",
+                          "cameraKeyframeCount",
+                          "trailMaterialNodeTypes",
+                          "floorMaterialNodeTypes",
+                          "compositorNodeTypes"
                         ],
                         "additionalProperties": false
                       }
@@ -4170,6 +5939,16 @@
                     "artifactsBackedUp": {
                       "type": "boolean",
                       "const": true
+                    },
+                    "lineageCheckpointIds": {
+                      "minItems": 2,
+                      "maxItems": 512,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      }
                     }
                   },
                   "required": [
@@ -4693,11 +6472,18 @@
                     "blender.mesh.edit_bevel_edges",
                     "blender.mesh.edit_inset_faces",
                     "blender.mesh.edit_poke_faces",
+                    "blender.modifier.add_subdivision_surface",
                     "blender.modifier.add_mirror",
                     "blender.modifier.add_solidify",
+                    "blender.geometry_nodes.create_light_trails",
+                    "blender.lookdev.create_light_trails_scene",
                     "blender.rig.create_armature",
                     "blender.rig.bind_skin_weights",
-                    "blender.animation.create_pose_keyframes"
+                    "blender.animation.create_pose_keyframes",
+                    "blender.geometry_nodes.create_transform",
+                    "blender.modifier.add_bevel",
+                    "blender.material.create_and_assign",
+                    "blender.material.create_palette_and_assign"
                   ]
                 }
               },
@@ -4729,7 +6515,7 @@
           "properties": {
             "observations": {
               "minItems": 1,
-              "maxItems": 1,
+              "maxItems": 8,
               "type": "array",
               "items": {
                 "oneOf": [
@@ -6563,6 +8349,26 @@
                           "allTriangles": {
                             "type": "boolean",
                             "const": true
+                          },
+                          "sourceLoopCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 32768
+                          },
+                          "expectedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "expectedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "expectedFaceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
                           }
                         },
                         "required": [
@@ -6591,7 +8397,11 @@
                           "topologyMatches",
                           "attestationContentSha256",
                           "nonempty",
-                          "allTriangles"
+                          "allTriangles",
+                          "sourceLoopCount",
+                          "expectedVertexCount",
+                          "expectedEdgeCount",
+                          "expectedFaceCount"
                         ],
                         "additionalProperties": false
                       }
@@ -6773,6 +8583,41 @@
                           "topologyGrew": {
                             "type": "boolean",
                             "const": true
+                          },
+                          "selectedFaceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 256
+                          },
+                          "selectedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "selectedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "boundaryEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "expectedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "expectedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "expectedFaceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
                           }
                         },
                         "required": [
@@ -6800,7 +8645,14 @@
                           "actionArgumentsSha256",
                           "topologyMatches",
                           "attestationContentSha256",
-                          "topologyGrew"
+                          "topologyGrew",
+                          "selectedFaceCount",
+                          "selectedEdgeCount",
+                          "selectedVertexCount",
+                          "boundaryEdgeCount",
+                          "expectedVertexCount",
+                          "expectedEdgeCount",
+                          "expectedFaceCount"
                         ],
                         "additionalProperties": false
                       }
@@ -7496,6 +9348,167 @@
                                   },
                                   "modifierType": {
                                     "type": "string",
+                                    "const": "SUBSURF"
+                                  },
+                                  "levels": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 3
+                                  },
+                                  "renderLevels": {
+                                    "type": "number",
+                                    "const": 2
+                                  },
+                                  "subdivisionType": {
+                                    "type": "string",
+                                    "const": "CATMULL_CLARK"
+                                  },
+                                  "quality": {
+                                    "type": "number",
+                                    "const": 3
+                                  },
+                                  "showOnlyControlEdges": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "useCreases": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "useLimitSurface": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "boundarySmooth": {
+                                    "type": "string",
+                                    "const": "ALL"
+                                  },
+                                  "uvSmooth": {
+                                    "type": "string",
+                                    "const": "PRESERVE_BOUNDARIES"
+                                  },
+                                  "useCustomNormals": {
+                                    "type": "boolean",
+                                    "const": false
+                                  },
+                                  "showViewport": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "showRender": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "showInEditMode": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "showOnCage": {
+                                    "type": "boolean",
+                                    "const": false
+                                  }
+                                },
+                                "required": [
+                                  "targetId",
+                                  "modifierId",
+                                  "modifierType",
+                                  "levels",
+                                  "renderLevels",
+                                  "subdivisionType",
+                                  "quality",
+                                  "showOnlyControlEdges",
+                                  "useCreases",
+                                  "useLimitSurface",
+                                  "boundarySmooth",
+                                  "uvSmooth",
+                                  "useCustomNormals",
+                                  "showViewport",
+                                  "showRender",
+                                  "showInEditMode",
+                                  "showOnCage"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "targetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierType": {
+                                "type": "string",
+                                "const": "SUBSURF"
+                              },
+                              "propertiesMatch": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "sourceContentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedVertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedEdgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 16384
+                              },
+                              "evaluatedFaceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedFinite": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedWithinLimits": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "targetId",
+                              "modifierId",
+                              "modifierType",
+                              "propertiesMatch",
+                              "sourceContentIntact",
+                              "evaluatedVertexCount",
+                              "evaluatedEdgeCount",
+                              "evaluatedFaceCount",
+                              "evaluatedFinite",
+                              "evaluatedWithinLimits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "targetId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierType": {
+                                    "type": "string",
                                     "const": "SOLIDIFY"
                                   },
                                   "thickness": {
@@ -7655,6 +9668,142 @@
                                   },
                                   "modifierType": {
                                     "type": "string",
+                                    "const": "BEVEL"
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "minimum": 0.0001,
+                                    "maximum": 100
+                                  },
+                                  "segments": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 16
+                                  },
+                                  "angleLimit": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 3.141592653589793
+                                  }
+                                },
+                                "required": [
+                                  "targetId",
+                                  "modifierId",
+                                  "modifierType",
+                                  "width",
+                                  "segments",
+                                  "angleLimit"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "targetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierType": {
+                                "type": "string",
+                                "const": "BEVEL"
+                              },
+                              "propertiesMatch": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "width": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 100
+                              },
+                              "segments": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 16
+                              },
+                              "angleLimit": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 3.141592653589793
+                              },
+                              "limitMethod": {
+                                "type": "string",
+                                "const": "ANGLE"
+                              },
+                              "bevelFixedStateMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "sourceContentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedVertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedEdgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 16384
+                              },
+                              "evaluatedFaceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 8192
+                              },
+                              "evaluatedFinite": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "evaluatedWithinLimits": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "targetId",
+                              "modifierId",
+                              "modifierType",
+                              "propertiesMatch",
+                              "width",
+                              "segments",
+                              "angleLimit",
+                              "limitMethod",
+                              "bevelFixedStateMatches",
+                              "sourceContentIntact",
+                              "evaluatedVertexCount",
+                              "evaluatedEdgeCount",
+                              "evaluatedFaceCount",
+                              "evaluatedFinite",
+                              "evaluatedWithinLimits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "targetId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "modifierType": {
+                                    "type": "string",
                                     "const": "MIRROR"
                                   },
                                   "axis": {
@@ -7767,6 +9916,167 @@
                             "additionalProperties": false
                           }
                         ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "material_assigned"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "materialId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "targets": {
+                                "minItems": 1,
+                                "maxItems": 64,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "materialId",
+                              "targets"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "materialName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "targetIds": {
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            }
+                          },
+                          "assignedTargetIds": {
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            }
+                          },
+                          "useNodes": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "principledNodeCount": {
+                            "type": "number",
+                            "const": 1
+                          },
+                          "outputNodeCount": {
+                            "type": "number",
+                            "const": 1
+                          },
+                          "baseColor": {
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "type": "array",
+                            "items": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "roughness": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "metallic": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "receiptMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "ownershipMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialSurfaceMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "assignmentsMatch": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "sourceContentIntact": {
+                            "type": "boolean",
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "materialId",
+                          "materialName",
+                          "targetIds",
+                          "assignedTargetIds",
+                          "useNodes",
+                          "principledNodeCount",
+                          "outputNodeCount",
+                          "baseColor",
+                          "roughness",
+                          "metallic",
+                          "receiptMatches",
+                          "ownershipMatches",
+                          "materialSurfaceMatches",
+                          "assignmentsMatch",
+                          "sourceContentIntact"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -8299,50 +10609,146 @@
                                       "maxItems": 32,
                                       "type": "array",
                                       "items": {
-                                        "type": "object",
-                                        "properties": {
-                                          "boneName": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 180,
-                                            "pattern": "^OperatingLine\\..*"
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "boneName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 180,
+                                                "pattern": "^OperatingLine\\..*"
+                                              },
+                                              "rotationEuler": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -6.283185307179586,
+                                                  "maximum": 6.283185307179586
+                                                }
+                                              },
+                                              "location": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1000,
+                                                  "maximum": 1000
+                                                }
+                                              },
+                                              "scale": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": 0.0001,
+                                                  "maximum": 1000
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "boneName",
+                                              "rotationEuler"
+                                            ],
+                                            "additionalProperties": false
                                           },
-                                          "rotationEuler": {
-                                            "minItems": 3,
-                                            "maxItems": 3,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "number",
-                                              "minimum": -6.283185307179586,
-                                              "maximum": 6.283185307179586
-                                            }
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "boneName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 180,
+                                                "pattern": "^OperatingLine\\..*"
+                                              },
+                                              "rotationQuaternion": {
+                                                "minItems": 4,
+                                                "maxItems": 4,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1,
+                                                  "maximum": 1
+                                                }
+                                              },
+                                              "location": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1000,
+                                                  "maximum": 1000
+                                                }
+                                              },
+                                              "scale": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": 0.0001,
+                                                  "maximum": 1000
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "boneName",
+                                              "rotationQuaternion"
+                                            ],
+                                            "additionalProperties": false
                                           },
-                                          "location": {
-                                            "minItems": 3,
-                                            "maxItems": 3,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "number",
-                                              "minimum": -1000,
-                                              "maximum": 1000
-                                            }
-                                          },
-                                          "scale": {
-                                            "minItems": 3,
-                                            "maxItems": 3,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "number",
-                                              "minimum": 0.0001,
-                                              "maximum": 1000
-                                            }
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "boneName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 180,
+                                                "pattern": "^OperatingLine\\..*"
+                                              },
+                                              "rotationAxisAngle": {
+                                                "minItems": 4,
+                                                "maxItems": 4,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -6.283185307179586,
+                                                  "maximum": 6.283185307179586
+                                                }
+                                              },
+                                              "location": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": -1000,
+                                                  "maximum": 1000
+                                                }
+                                              },
+                                              "scale": {
+                                                "minItems": 3,
+                                                "maxItems": 3,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "minimum": 0.0001,
+                                                  "maximum": 1000
+                                                }
+                                              }
+                                            },
+                                            "required": [
+                                              "boneName",
+                                              "rotationAxisAngle"
+                                            ],
+                                            "additionalProperties": false
                                           }
-                                        },
-                                        "required": [
-                                          "boneName",
-                                          "rotationEuler"
-                                        ],
-                                        "additionalProperties": false
+                                        ]
                                       }
                                     }
                                   },
@@ -8434,12 +10840,12 @@
                           "curveCount": {
                             "type": "integer",
                             "exclusiveMinimum": 0,
-                            "maximum": 288
+                            "maximum": 320
                           },
                           "expectedCurveCount": {
                             "type": "integer",
                             "exclusiveMinimum": 0,
-                            "maximum": 288
+                            "maximum": 320
                           },
                           "curvesMatch": {
                             "type": "boolean",
@@ -8500,6 +10906,1153 @@
                           "actionContentSha256",
                           "receiptContentSha256",
                           "attestationContentSha256"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "geometry_nodes_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "targetId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "nodeGroupId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "nodeTypes": {
+                                "type": "array",
+                                "items": [
+                                  {
+                                    "type": "string",
+                                    "const": "GeometryNodeTransform"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "NodeGroupInput"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "NodeGroupOutput"
+                                  }
+                                ],
+                                "additionalItems": false,
+                                "minItems": 3,
+                                "maxItems": 3
+                              }
+                            },
+                            "required": [
+                              "targetId",
+                              "modifierId",
+                              "nodeGroupId",
+                              "nodeTypes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "nodeGroupId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "nodeTypes": {
+                            "type": "array",
+                            "items": [
+                              {
+                                "type": "string",
+                                "const": "GeometryNodeTransform"
+                              },
+                              {
+                                "type": "string",
+                                "const": "NodeGroupInput"
+                              },
+                              {
+                                "type": "string",
+                                "const": "NodeGroupOutput"
+                              }
+                            ],
+                            "additionalItems": false,
+                            "minItems": 3,
+                            "maxItems": 3
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "targetId",
+                          "modifierId",
+                          "nodeGroupId",
+                          "nodeTypes"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "light_trails_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "targetId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modifierName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "nodeGroupId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "nodeGroupName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "trailCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 128
+                              },
+                              "pointsPerTrail": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 512
+                              },
+                              "tileLength": {
+                                "type": "number",
+                                "minimum": 0.1,
+                                "maximum": 1000
+                              },
+                              "trailSpacing": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 100
+                              },
+                              "noiseScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "noiseDetail": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 15
+                              },
+                              "noiseRoughness": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "noiseSeed": {
+                                "type": "number",
+                                "minimum": -10000,
+                                "maximum": 10000
+                              },
+                              "height": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "profileSides": {
+                                "type": "integer",
+                                "minimum": 3,
+                                "maximum": 8
+                              },
+                              "profileRadius": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 10
+                              },
+                              "tileRepeatCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
+                              },
+                              "nodeTypes": {
+                                "minItems": 20,
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "targetId",
+                              "modifierId",
+                              "modifierName",
+                              "nodeGroupId",
+                              "nodeGroupName",
+                              "trailCount",
+                              "pointsPerTrail",
+                              "tileLength",
+                              "trailSpacing",
+                              "noiseScale",
+                              "noiseDetail",
+                              "noiseRoughness",
+                              "noiseSeed",
+                              "height",
+                              "profileSides",
+                              "profileRadius",
+                              "tileRepeatCount",
+                              "nodeTypes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "modifierName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "nodeGroupId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "nodeGroupName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "nodeTypes": {
+                            "minItems": 20,
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          },
+                          "interfaceSignature": {
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "type": "array",
+                            "items": {
+                              "minItems": 3,
+                              "maxItems": 3,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180
+                              }
+                            }
+                          },
+                          "interfaceMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "linkTopology": {
+                            "minItems": 19,
+                            "maxItems": 19,
+                            "type": "array",
+                            "items": {
+                              "minItems": 4,
+                              "maxItems": 4,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180
+                              }
+                            }
+                          },
+                          "linkTopologyMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "forbiddenNodeTypes": {
+                            "minItems": 0,
+                            "maxItems": 0,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "GeometryNodeBake",
+                                "GeometryNodeSimulationInput",
+                                "GeometryNodeSimulationOutput"
+                              ]
+                            }
+                          },
+                          "bakeCount": {
+                            "type": "number",
+                            "const": 0
+                          },
+                          "bakeDirectory": {
+                            "type": "string",
+                            "const": ""
+                          },
+                          "semanticSignatureMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "fixedSemanticsMatch": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "resolvedParameters": {
+                            "type": "object",
+                            "properties": {
+                              "trailCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 128
+                              },
+                              "pointsPerTrail": {
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 512
+                              },
+                              "tileLength": {
+                                "type": "number",
+                                "minimum": 0.1,
+                                "maximum": 1000
+                              },
+                              "trailSpacing": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 100
+                              },
+                              "noiseScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "noiseDetail": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 15
+                              },
+                              "noiseRoughness": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "noiseSeed": {
+                                "type": "number",
+                                "minimum": -10000,
+                                "maximum": 10000
+                              },
+                              "height": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "profileSides": {
+                                "type": "integer",
+                                "minimum": 3,
+                                "maximum": 8
+                              },
+                              "profileRadius": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 10
+                              },
+                              "tileRepeatCount": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
+                              }
+                            },
+                            "required": [
+                              "trailCount",
+                              "pointsPerTrail",
+                              "tileLength",
+                              "trailSpacing",
+                              "noiseScale",
+                              "noiseDetail",
+                              "noiseRoughness",
+                              "noiseSeed",
+                              "height",
+                              "profileSides",
+                              "profileRadius",
+                              "tileRepeatCount"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "semanticParametersMatch": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "evaluatedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 3000000
+                          },
+                          "expectedEvaluatedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 3000000
+                          },
+                          "evaluatedVertexCountMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "evaluatedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 12000000
+                          },
+                          "evaluatedPolygonCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 12000000
+                          },
+                          "evaluatedFinite": {
+                            "type": "boolean",
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "targetId",
+                          "modifierId",
+                          "modifierName",
+                          "nodeGroupId",
+                          "nodeGroupName",
+                          "nodeTypes",
+                          "interfaceSignature",
+                          "interfaceMatches",
+                          "linkTopology",
+                          "linkTopologyMatches",
+                          "forbiddenNodeTypes",
+                          "bakeCount",
+                          "bakeDirectory",
+                          "semanticSignatureMatches",
+                          "fixedSemanticsMatch",
+                          "resolvedParameters",
+                          "semanticParametersMatch",
+                          "evaluatedVertexCount",
+                          "expectedEvaluatedVertexCount",
+                          "evaluatedVertexCountMatches",
+                          "evaluatedEdgeCount",
+                          "evaluatedPolygonCount",
+                          "evaluatedFinite"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "light_trails_scene_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "trailTargetId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "floorTargetId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "sceneId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "sceneName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "worldId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "worldName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "cameraId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "cameraObjectName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "cameraDataName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "controllerId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "controllerObjectName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "trailMaterialId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "trailMaterialName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "floorMaterialId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "floorMaterialName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "cameraActionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "cameraActionName": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 180,
+                                "pattern": "^OperatingLine\\..*"
+                              },
+                              "frameStart": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 99999
+                              },
+                              "frameEnd": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100000
+                              },
+                              "cameraStart": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": -1000,
+                                  "maximum": 1000
+                                }
+                              },
+                              "cameraEnd": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": -1000,
+                                  "maximum": 1000
+                                }
+                              },
+                              "cameraTarget": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": -1000,
+                                  "maximum": 1000
+                                }
+                              },
+                              "lens": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 1000
+                              },
+                              "fStop": {
+                                "type": "number",
+                                "minimum": 0.1,
+                                "maximum": 64
+                              },
+                              "focusDistance": {
+                                "type": "number",
+                                "minimum": 0.001,
+                                "maximum": 1000
+                              },
+                              "trailBaseColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "trailGlowColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "trailEmissionStrength": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 10000
+                              },
+                              "gradientRotationDegrees": {
+                                "type": "number",
+                                "minimum": -360,
+                                "maximum": 360
+                              },
+                              "gradientStart": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "glowBandStart": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "glowBandEnd": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "gradientEnd": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "waveScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "floorBaseColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "floorEmissionColor": {
+                                "minItems": 4,
+                                "maxItems": 4,
+                                "type": "array",
+                                "items": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              },
+                              "floorEmissionStrength": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 10000
+                              },
+                              "floorMetallic": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "floorVoronoiScale": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "floorRoughnessMinimum": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "floorRoughnessMaximum": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              "floorBumpStrength": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "floorBumpDistance": {
+                                "type": "number",
+                                "minimum": 0.0001,
+                                "maximum": 1000
+                              },
+                              "trailMaterialNodeTypes": {
+                                "minItems": 9,
+                                "maxItems": 9,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              },
+                              "floorMaterialNodeTypes": {
+                                "minItems": 8,
+                                "maxItems": 8,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              },
+                              "compositorNodeTypes": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "collectionId",
+                              "trailTargetId",
+                              "floorTargetId",
+                              "sceneId",
+                              "sceneName",
+                              "worldId",
+                              "worldName",
+                              "cameraId",
+                              "cameraObjectName",
+                              "cameraDataName",
+                              "controllerId",
+                              "controllerObjectName",
+                              "trailMaterialId",
+                              "trailMaterialName",
+                              "floorMaterialId",
+                              "floorMaterialName",
+                              "cameraActionId",
+                              "cameraActionName",
+                              "frameStart",
+                              "frameEnd",
+                              "cameraStart",
+                              "cameraEnd",
+                              "cameraTarget",
+                              "lens",
+                              "fStop",
+                              "focusDistance",
+                              "trailBaseColor",
+                              "trailGlowColor",
+                              "trailEmissionStrength",
+                              "gradientRotationDegrees",
+                              "gradientStart",
+                              "glowBandStart",
+                              "glowBandEnd",
+                              "gradientEnd",
+                              "waveScale",
+                              "floorBaseColor",
+                              "floorEmissionColor",
+                              "floorEmissionStrength",
+                              "floorMetallic",
+                              "floorVoronoiScale",
+                              "floorRoughnessMinimum",
+                              "floorRoughnessMaximum",
+                              "floorBumpStrength",
+                              "floorBumpDistance",
+                              "trailMaterialNodeTypes",
+                              "floorMaterialNodeTypes",
+                              "compositorNodeTypes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "shape": {
+                            "type": "string",
+                            "const": "managed_light_trails_scene"
+                          },
+                          "collectionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "trailTargetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "floorTargetId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "sceneId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "sceneName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "worldId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "worldName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cameraId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "cameraObjectName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cameraDataName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "controllerId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "controllerObjectName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "trailMaterialId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "trailMaterialName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "floorMaterialId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "floorMaterialName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "cameraActionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "cameraActionName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 180,
+                            "pattern": "^OperatingLine\\..*"
+                          },
+                          "sceneMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "worldMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "cameraMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "controllerMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "animationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "trailMaterialMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "floorMaterialMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "compositorMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "noBakeNodes": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "noRenderArtifacts": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "frameStart": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 99999
+                          },
+                          "frameEnd": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100000
+                          },
+                          "cameraKeyframeCount": {
+                            "type": "number",
+                            "const": 6
+                          },
+                          "trailMaterialNodeTypes": {
+                            "minItems": 9,
+                            "maxItems": 9,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          },
+                          "floorMaterialNodeTypes": {
+                            "minItems": 8,
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          },
+                          "compositorNodeTypes": {
+                            "minItems": 3,
+                            "maxItems": 3,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                            }
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "shape",
+                          "collectionId",
+                          "trailTargetId",
+                          "floorTargetId",
+                          "sceneId",
+                          "sceneName",
+                          "worldId",
+                          "worldName",
+                          "cameraId",
+                          "cameraObjectName",
+                          "cameraDataName",
+                          "controllerId",
+                          "controllerObjectName",
+                          "trailMaterialId",
+                          "trailMaterialName",
+                          "floorMaterialId",
+                          "floorMaterialName",
+                          "cameraActionId",
+                          "cameraActionName",
+                          "sceneMatches",
+                          "collectionMatches",
+                          "worldMatches",
+                          "cameraMatches",
+                          "controllerMatches",
+                          "animationMatches",
+                          "trailMaterialMatches",
+                          "floorMaterialMatches",
+                          "compositorMatches",
+                          "noBakeNodes",
+                          "noRenderArtifacts",
+                          "frameStart",
+                          "frameEnd",
+                          "cameraKeyframeCount",
+                          "trailMaterialNodeTypes",
+                          "floorMaterialNodeTypes",
+                          "compositorNodeTypes"
                         ],
                         "additionalProperties": false
                       }

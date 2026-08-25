@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-import { guidePlanSchema, guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
+import {
+  guidePlanSchema,
+  guideProtocolVersionSchema,
+  guideStepIdSchema,
+  guideStepSchema,
+  type GuidePlan,
+} from './guide.js';
 import { catalogVersionSchema, planningQualityBaselineVersionSchema } from './version.js';
 
 const uniquePhaseIdsSchema = z
@@ -66,11 +72,128 @@ export const planningIntentSchema = z.strictObject({
 });
 export type PlanningIntent = z.infer<typeof planningIntentSchema>;
 
+const {
+  candidateMenuProjection: _providerOmittedCandidateMenuProjection,
+  ...providerGuideStepShape
+} = guideStepSchema.shape;
+void _providerOmittedCandidateMenuProjection;
+const providerGuideStepJsonSchemaMetadata = {
+  allOf: [
+    {
+      if: { required: ['observationPolicy'] },
+      then: { properties: { action: { type: 'object' } } },
+    },
+    {
+      if: { required: ['executionTrackOverride'] },
+      then: { properties: { action: { type: 'object' } } },
+    },
+    {
+      if: {
+        properties: {
+          observationPolicy: {
+            properties: { mode: { const: 'success_gate' } },
+            required: ['mode'],
+          },
+        },
+        required: ['observationPolicy'],
+      },
+      then: { properties: { expectedObservations: { minItems: 1 } } },
+    },
+  ],
+} as const;
+const providerGuidePlanJsonSchemaMetadata = {
+  allOf: [
+    {
+      if: {
+        properties: {
+          protocolVersion: {
+            enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0'],
+          },
+        },
+        required: ['protocolVersion'],
+      },
+      else: {
+        properties: {
+          steps: { items: { not: { required: ['observationPolicy'] } } },
+        },
+      },
+    },
+    {
+      if: {
+        properties: { protocolVersion: { enum: ['1.6.0', '1.7.0'] } },
+        required: ['protocolVersion'],
+      },
+      else: {
+        properties: {
+          steps: { items: { not: { required: ['executionTrackOverride'] } } },
+        },
+      },
+    },
+    {
+      if: {
+        properties: {
+          protocolVersion: { enum: ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0'] },
+        },
+        required: ['protocolVersion'],
+      },
+      then: {
+        properties: {
+          steps: {
+            items: {
+              properties: {
+                observationPolicy: { not: { required: ['retryPolicy'] } },
+              },
+            },
+          },
+        },
+      },
+    },
+  ],
+} as const;
+
+export const providerGuideStepSchema = z
+  .strictObject(providerGuideStepShape)
+  .superRefine((step, context) => {
+    const result = guideStepSchema.safeParse(step);
+    if (result.success) return;
+    for (const issue of result.error.issues) {
+      context.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+    }
+  })
+  .meta(providerGuideStepJsonSchemaMetadata);
+
+export const providerGuidePlanSchema = z
+  .strictObject({
+    ...guidePlanSchema.shape,
+    steps: z.array(providerGuideStepSchema).min(1),
+  })
+  .superRefine((plan, context) => {
+    const result = guidePlanSchema.safeParse(plan);
+    if (result.success) return;
+    for (const issue of result.error.issues) {
+      context.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+    }
+  })
+  .meta(providerGuidePlanJsonSchemaMetadata);
+export type ProviderGuidePlan = z.infer<typeof providerGuidePlanSchema>;
+
+export function projectGuidePlanForProvider(planInput: GuidePlan): ProviderGuidePlan {
+  const plan = guidePlanSchema.parse(planInput);
+  return providerGuidePlanSchema.parse({
+    ...plan,
+    steps: plan.steps.map((step) => {
+      const { candidateMenuProjection, ...providerStep } = step;
+      void candidateMenuProjection;
+      return providerStep;
+    }),
+  });
+}
+
 export const planningProposalDraftSchema = z.strictObject({
   targetAdapterId: z.string().trim().min(1).max(180),
   catalogVersion: catalogVersionSchema,
   planning: planningIntentSchema,
-  plan: guidePlanSchema,
+  plan: providerGuidePlanSchema,
 });
 export type PlanningProposalDraft = z.infer<typeof planningProposalDraftSchema>;
 

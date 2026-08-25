@@ -9,6 +9,23 @@ import {
   blenderInteractionCatalog,
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
+import {
+  armatureLeafOperationIds,
+  bevelModifierLeafOperationIds,
+  editBevelLeafOperationIds,
+  editExtrudeRegionLeafOperationIds,
+  editInsetLeafOperationIds,
+  editTriangulateLeafOperationIds,
+  editPokeLeafOperationIds,
+  lightTrailsLeafOperationIds,
+  materialPaletteLeafOperationIds,
+  mirrorLeafOperationIds,
+  poseAnimationLeafOperationIds,
+  singleMaterialLeafOperationIds,
+  skinWeightsLeafOperationIds,
+  solidifyLeafOperationIds,
+  subdivisionSurfaceLeafOperationIds,
+} from '@operatingline/protocol';
 
 import { createActionCatalogRegistry } from '../../../services/orchestrator/src/action-catalogs.js';
 import { createInteractionCatalogRegistry } from '../../../services/orchestrator/src/interaction-catalogs.js';
@@ -310,7 +327,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.44.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.69.0');
     const uvSphereMenu = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
     )?.procedureMaterialization?.menu;
@@ -337,7 +354,9 @@ describe('interaction catalog registry', () => {
       path: ['Properties', 'Object', 'Name'],
     });
     const availableMcpRecipes = blenderInteractionCatalog.recipes.filter(
-      (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
+      (recipe) =>
+        recipe.procedureMaterialization?.mcp.availability === 'available' &&
+        recipe.procedureMaterialization.mcp.source === 'catalog.action_level_mcp',
     );
     expect(availableMcpRecipes.map((recipe) => recipe.actionName)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -348,16 +367,7 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
       'blender.mesh.edit_subdivide',
-      'blender.mesh.edit_triangulate',
-      'blender.mesh.edit_extrude_region',
-      'blender.mesh.edit_bevel_edges',
-      'blender.mesh.edit_inset_faces',
-      'blender.mesh.edit_poke_faces',
-      'blender.modifier.add_solidify',
-      'blender.modifier.add_mirror',
-      'blender.rig.create_armature',
-      'blender.rig.bind_skin_weights',
-      'blender.animation.create_pose_keyframes',
+      'blender.lookdev.create_light_trails_scene',
     ]);
     const uvSphereMcp = availableMcpRecipes[0]?.procedureMaterialization?.mcp;
     for (const recipe of availableMcpRecipes) {
@@ -385,8 +395,23 @@ describe('interaction catalog registry', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: {
+        availability: 'available',
+        source: 'catalog.operation_level_mcp',
+        semanticBinding: 'ordered_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+        authorization: 'accepted_replay_next_step',
+        resultBinding: 'companion_leaf_operation_progress',
+        operations: expect.any(Array),
+      },
     });
+    expect(
+      subdivisionSurface?.procedureMaterialization?.mcp.operations.map(
+        (operation) => operation.sourceOperationId,
+      ),
+    ).toEqual(subdivisionSurfaceLeafOperationIds);
     expect(subdivisionSurface?.guidance).toMatchObject({
       kind: 'semantic_path',
       steps: [
@@ -1608,7 +1633,11 @@ describe('interaction catalog registry', () => {
     ).toEqual(['blender.mesh.create_uv_sphere']);
     expect(
       blenderInteractionCatalog.recipes
-        .filter((recipe) => recipe.procedureMaterialization?.mcp.availability === 'available')
+        .filter(
+          (recipe) =>
+            recipe.procedureMaterialization?.mcp.availability === 'available' &&
+            recipe.procedureMaterialization.mcp.source === 'catalog.action_level_mcp',
+        )
         .map((recipe) => recipe.actionName),
     ).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -1619,16 +1648,7 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
       'blender.mesh.edit_subdivide',
-      'blender.mesh.edit_triangulate',
-      'blender.mesh.edit_extrude_region',
-      'blender.mesh.edit_bevel_edges',
-      'blender.mesh.edit_inset_faces',
-      'blender.mesh.edit_poke_faces',
-      'blender.modifier.add_solidify',
-      'blender.modifier.add_mirror',
-      'blender.rig.create_armature',
-      'blender.rig.bind_skin_weights',
-      'blender.animation.create_pose_keyframes',
+      'blender.lookdev.create_light_trails_scene',
     ]);
   });
 
@@ -2032,7 +2052,9 @@ describe('interaction catalog registry', () => {
       '9dbf1a507b6bb2dc3f5b13fbc7fbe53acf3fdd8756908d5de6d2643f40964a72',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.44.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     const frozenShortcut = frozen.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
     )?.procedureMaterialization?.shortcut;
@@ -2111,6 +2133,1349 @@ describe('interaction catalog registry', () => {
       activeShortcut.preconditions.length,
       ...structuredClone(frozenShortcut.preconditions),
     );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.44.0 and adds only the light trails recipe in 1.45.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.44.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'fee9f3d2ec26f97c368f9fdb4df13f51fbe88855c759797f847fb5609831079f',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.45.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    const lightTrails = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_light_trails',
+    );
+    if (lightTrails === undefined) throw new Error('Expected light trails interaction recipe');
+
+    expect(lightTrails.guidance).toMatchObject({
+      kind: 'semantic_path',
+      steps: [
+        { order: 1, intent: 'navigate' },
+        { order: 2, intent: 'execute' },
+        { order: 3, intent: 'configure' },
+        { order: 4, intent: 'verify' },
+      ],
+    });
+    expect(lightTrails.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'unavailable' },
+      mcp: {
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        parameterBinding: 'accepted_action_arguments',
+      },
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes = active.recipes.filter(
+      (recipe) => recipe.actionName !== lightTrails.actionName,
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.45.0 and adds only the light-trails look-development recipe in 1.46.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.45.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '921e66d86da823a2b18c8787baec5dd0948dec8f4969de55185987675f2876ea',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.46.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    const lookdev = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.lookdev.create_light_trails_scene',
+    );
+    if (lookdev === undefined) throw new Error('Expected light-trails look-development recipe');
+
+    expect(lookdev.guidance).toMatchObject({
+      kind: 'semantic_path',
+      steps: [
+        { order: 1, intent: 'navigate' },
+        { order: 2, intent: 'configure' },
+        { order: 3, intent: 'configure' },
+        { order: 4, intent: 'configure' },
+        { order: 5, intent: 'configure' },
+        { order: 6, intent: 'configure' },
+        { order: 7, intent: 'verify' },
+      ],
+    });
+    expect(lookdev.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'unavailable' },
+      mcp: {
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        parameterBinding: 'accepted_action_arguments',
+      },
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes = active.recipes.filter((recipe) => recipe.actionName !== lookdev.actionName);
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.46.0 and only expands Transform Geometry guidance in 1.47.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.46.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '02623483bbdb0d68cfbd4cf3d47f95fbcada5a8175c9a4f32ca98cb7a923b98a',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.47.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    const transformIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_transform',
+    );
+    if (transformIndex < 0) throw new Error('Expected Transform Geometry recipe');
+    const transform = active.recipes[transformIndex]!;
+
+    expect(transform.guidance).toMatchObject({
+      kind: 'semantic_path',
+      steps: [
+        {
+          id: 'semantic.preflight_transform_geometry_resources',
+          order: 1,
+          label: 'Validate Transform Geometry Preconditions',
+          intent: 'verify',
+          target: {
+            kind: 'semantic',
+            hostId: 'operatingline.blender.transform_geometry_resource_preflight',
+          },
+        },
+        { id: 'semantic.new_geometry_modifier', order: 2, intent: 'execute' },
+        { id: 'node.group_input', order: 3, intent: 'execute' },
+        { id: 'node.transform_geometry', order: 4, intent: 'execute' },
+        { id: 'node.group_output', order: 5, intent: 'execute' },
+        {
+          id: 'semantic.connect_group_input_geometry_to_transform',
+          order: 6,
+          intent: 'execute',
+          target: {
+            connection: {
+              fromNode: 'NodeGroupInput',
+              fromSocket: 'Geometry',
+              toNode: 'GeometryNodeTransform',
+              toSocket: 'Geometry',
+            },
+          },
+        },
+        {
+          id: 'semantic.connect_transform_geometry_to_group_output',
+          order: 7,
+          intent: 'execute',
+          target: {
+            connection: {
+              fromNode: 'GeometryNodeTransform',
+              fromSocket: 'Geometry',
+              toNode: 'NodeGroupOutput',
+              toSocket: 'Geometry',
+            },
+          },
+        },
+        { id: 'semantic.verify_node_links', order: 8, intent: 'verify' },
+      ],
+    });
+    expect(transform.procedureMaterialization).toMatchObject({
+      semantic: {
+        source: 'catalog.semantic_parameter_projections',
+        projections: [
+          {
+            semanticAction: 'node.transform_geometry',
+            actionArgument: 'translation',
+            transform: 'identity',
+          },
+          {
+            semanticAction: 'node.transform_geometry',
+            actionArgument: 'rotation',
+            transform: 'identity',
+          },
+          {
+            semanticAction: 'node.transform_geometry',
+            actionArgument: 'scale',
+            transform: 'identity',
+          },
+        ],
+        omittedActionArguments: [
+          { argumentName: 'targetId' },
+          { argumentName: 'modifierId' },
+          { argumentName: 'modifierName' },
+          { argumentName: 'nodeGroupId' },
+          { argumentName: 'nodeGroupName' },
+        ],
+      },
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'unavailable' },
+      mcp: { availability: 'unavailable' },
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[transformIndex] = frozen.recipes[transformIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.47.0 and only enables Subdivision Surface action-level MCP in 1.48.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.47.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '9a2c9ff9e641f07bf4e44572e92f4a4783062872868e90bc434e27f9b44a65d2',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.48.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    const frozenSubdivision = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    );
+    const activeSubdivision = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    );
+    if (
+      frozenSubdivision?.procedureMaterialization === undefined ||
+      activeSubdivision?.procedureMaterialization === undefined
+    ) {
+      throw new Error('Expected Subdivision Surface procedure materialization');
+    }
+
+    expect(frozenSubdivision.procedureMaterialization.mcp).toEqual({
+      availability: 'unavailable',
+      reason: 'No approved action-level MCP tool is available.',
+    });
+    expect(activeSubdivision.procedureMaterialization.mcp).toEqual({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      semanticBinding: 'all_leaf_operations',
+      parameterBinding: 'accepted_action_arguments',
+      serverName: 'operating-line',
+      toolName: 'operatingline.blender.action.execute',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_state_report',
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    activeSubdivision.procedureMaterialization.mcp = frozenSubdivision.procedureMaterialization.mcp;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.48.0 and only enables exact Transform Geometry operation-level MCP in 1.49.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.48.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '2503b21804352dda57f71ca144288276eca21ff2c6925b4b930b0292234e3b61',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.49.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      'a306bc09ece08e06368f234265577f445e07b37179ac41d1a66e9440571d1fca',
+    );
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const transformIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_transform',
+    );
+    if (transformIndex < 0) throw new Error('Expected Transform Geometry recipe');
+    const transform = active.recipes[transformIndex]!;
+    const mcp = transform.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected operation-level Transform Geometry MCP materialization');
+    }
+
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual([
+      'semantic.preflight_transform_geometry_resources',
+      'semantic.new_geometry_modifier',
+      'node.group_input',
+      'node.transform_geometry',
+      'projection.semantic.transform_geometry.translation',
+      'projection.semantic.transform_geometry.rotation',
+      'projection.semantic.transform_geometry.scale',
+      'node.group_output',
+      'semantic.connect_group_input_geometry_to_transform',
+      'semantic.connect_transform_geometry_to_group_output',
+      'semantic.verify_node_links',
+    ]);
+    expect(mcp.operations.flatMap((operation) => operation.parameters)).toHaveLength(8);
+    expect(mcp.toolName).toBe('operatingline.blender.geometry-nodes.transform.execute-next');
+    expect(transform.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'unavailable' },
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[transformIndex] = frozen.recipes[transformIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.49.0 and adds only the Subdivide menu candidate in 1.50.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.49.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'a306bc09ece08e06368f234265577f445e07b37179ac41d1a66e9440571d1fca',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.50.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '2b2fa8821ce7cdf20c5e7f67dfc488818ca4c29558998fe9a1bd5df9fdc01f03',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
+    );
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Subdivide recipe');
+
+    expect(frozen.recipes[frozenIndex]?.procedureMaterialization?.menuCandidate).toBeUndefined();
+    expect(active.recipes[activeIndex]?.procedureMaterialization?.menuCandidate).toMatchObject({
+      projection: 'candidate_only',
+      equivalence: 'not_equivalent_to_managed_action',
+      executionAuthority: 'none',
+      nativeEvidence: {
+        kind: 'bounded_blender_ui_probe',
+        executorId: 'blender.mesh_edit_subdivide_candidate_menu_f9.event_simulate.v1',
+        hostVersions: ['4.5.3', '5.1.1'],
+        managedActionExecuted: false,
+        managedReceiptCreated: false,
+        managedReplacementMeshCreated: false,
+        nativeMutationKind: 'in_place_edit_mesh_subdivide',
+        nativeUndoCheckpointRequired: true,
+        nativeUndoDepth: 4,
+        nativeRedoDepth: 4,
+      },
+      operations: expect.arrayContaining([
+        expect.objectContaining({ id: 'candidate.set_number_of_cuts' }),
+        expect.objectContaining({ id: 'candidate.set_smoothness' }),
+      ]),
+    });
+    expect(active.description).toBe(
+      'Version-tested host interaction recipes, non-executable menu candidates, and explicit semantic fallbacks for every Blender ActionCatalog 1.24.0 action.',
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.description = frozen.description;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.50.0 and expands only named-node Light Trails guidance in 1.51.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.50.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '2b2fa8821ce7cdf20c5e7f67dfc488818ca4c29558998fe9a1bd5df9fdc01f03',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.51.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '1085553ae473a5c4287b2cf0bdb86bda113db794bdb13e5894898aab8f36c547',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_light_trails',
+    );
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_light_trails',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Light Trails recipe');
+
+    const lightTrails = active.recipes[activeIndex]!;
+    expect(lightTrails.guidance.steps).toHaveLength(23);
+    expect(
+      lightTrails.guidance.steps
+        .filter((step) => step.target.kind === 'node')
+        .map((step) => step.target.hostId),
+    ).toHaveLength(20);
+    expect(
+      lightTrails.guidance.steps
+        .filter((step) => step.target.kind === 'node')
+        .every((step) => step.target.hostId.startsWith('node-name:OperatingLine ')),
+    ).toBe(true);
+    expect(lightTrails.procedureMaterialization?.semantic?.projections).toHaveLength(12);
+    expect(lightTrails.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'unavailable' },
+      mcp: { availability: 'available', source: 'catalog.action_level_mcp' },
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.51.0 and expands only pose values in 1.52.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.51.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '1085553ae473a5c4287b2cf0bdb86bda113db794bdb13e5894898aab8f36c547',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.52.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '132225dd95006d790a6725fe54710a3b8ac435077a4a3838e67358889b67594c',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.animation.create_pose_keyframes',
+    );
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.animation.create_pose_keyframes',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected pose recipe');
+
+    const pose = active.recipes[activeIndex]!;
+    expect(pose.guidance.steps).toHaveLength(8);
+    expect(pose.procedureMaterialization?.semantic?.projections).toEqual([
+      expect.objectContaining({
+        semanticAction: 'semantic.create_pose_action',
+        actionArgument: 'actionName',
+        transform: 'identity',
+      }),
+      expect.objectContaining({
+        semanticAction: 'operator.insert_keyframe',
+        actionArgument: 'keyframes',
+        transform: 'json_identity',
+      }),
+      expect.objectContaining({
+        semanticAction: 'control.pose_interpolation',
+        actionArgument: 'interpolation',
+        transform: 'identity',
+      }),
+      expect.objectContaining({
+        semanticAction: 'control.pose_extrapolation',
+        actionArgument: 'extrapolation',
+        transform: 'identity',
+      }),
+    ]);
+    expect(pose.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'unavailable' },
+      mcp: { availability: 'available', source: 'catalog.action_level_mcp' },
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.52.0 and adds the complete Light Trails link/control rail in 1.53.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.52.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '132225dd95006d790a6725fe54710a3b8ac435077a4a3838e67358889b67594c',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.53.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '6e94b150caf3c71bcd6033445ca7ae6e74378ef60e05bd9e83c608474814a342',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_light_trails',
+    );
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_light_trails',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Light Trails recipe');
+
+    const lightTrails = active.recipes[activeIndex]!;
+    expect(lightTrails.guidance.steps).toHaveLength(42);
+    expect(
+      lightTrails.guidance.steps.filter((step) => step.target.connection !== undefined),
+    ).toHaveLength(19);
+    expect(lightTrails.procedureMaterialization?.semantic?.projections).toHaveLength(12);
+    expect(lightTrails.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'unavailable' },
+      mcp: { availability: 'available', source: 'catalog.action_level_mcp' },
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.53.0 and binds axis-angle pose guidance in 1.54.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.53.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '6e94b150caf3c71bcd6033445ca7ae6e74378ef60e05bd9e83c608474814a342',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.54.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '85e0ffab9c4ed2cd5aed31926cfa19ac7dc65b1119960b85572f04571b890261',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.animation.create_pose_keyframes',
+    );
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.animation.create_pose_keyframes',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected pose recipe');
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.54.0 and binds Light Trails to the exact 54-step MCP rail in 1.55.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.54.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '85e0ffab9c4ed2cd5aed31926cfa19ac7dc65b1119960b85572f04571b890261',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.55.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '90257a71462f58dd6bac5d6b898d7cb553f8fac8c682d8f39797a9a883d5879c',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_light_trails',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.geometry_nodes.create_light_trails',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Light Trails recipe');
+
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Light Trails operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.geometry-nodes.light-trails.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      lightTrailsLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      lightTrailsLeafOperationIds.map((_, index) => {
+        const parameters: Record<number, string[]> = {
+          0: ['targetId', 'modifierId', 'modifierName', 'nodeGroupId', 'nodeGroupName'],
+          4: ['tileLength'],
+          6: ['pointsPerTrail'],
+          8: ['trailCount'],
+          9: ['trailSpacing'],
+          14: ['noiseScale'],
+          15: ['noiseDetail'],
+          16: ['noiseRoughness'],
+          17: ['noiseSeed'],
+          20: ['height'],
+          26: ['profileSides'],
+          27: ['profileRadius'],
+          30: ['tileRepeatCount'],
+        };
+        return parameters[index] ?? [];
+      }),
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.55.0 and binds Pose Animation to the exact 12-step MCP rail in 1.56.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.55.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '90257a71462f58dd6bac5d6b898d7cb553f8fac8c682d8f39797a9a883d5879c',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.56.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '6cddec2ab02e0ba37a584fcc1e428f967ab0f3c7ce60e57bab1c63154356140a',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.animation.create_pose_keyframes',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.animation.create_pose_keyframes',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Pose Animation recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Pose Animation operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.animation.pose-keyframes.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      poseAnimationLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      poseAnimationLeafOperationIds.map((_, index) => {
+        const parameters: Record<number, string[]> = {
+          0: ['actionId', 'armatureId'],
+          4: ['actionName'],
+          6: ['keyframes'],
+          8: ['interpolation'],
+          10: ['extrapolation'],
+        };
+        return parameters[index] ?? [];
+      }),
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.56.0 and binds Armature to the exact nine-step MCP rail in 1.57.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.56.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '6cddec2ab02e0ba37a584fcc1e428f967ab0f3c7ce60e57bab1c63154356140a',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.57.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      'fa5eb0e2998c5a6d319ad263d47438500a052f0818681297c9cfb1e9ccd4ace2',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.rig.create_armature',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.rig.create_armature',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Armature recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Armature operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.rig.armature.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      armatureLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [
+        ['armatureId', 'collectionId'],
+        [],
+        ['objectName'],
+        ['dataName'],
+        [],
+        ['bones'],
+        [],
+        ['bindings'],
+        [],
+      ],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.57.0 and binds Skin Weights to the exact nine-step MCP rail in 1.58.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.57.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'fa5eb0e2998c5a6d319ad263d47438500a052f0818681297c9cfb1e9ccd4ace2',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.58.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '7540e60b068d93c4a29c6d9457dc742b1584cbbd4fd887c4822750a48ff57bc0',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.rig.bind_skin_weights',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.rig.bind_skin_weights',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Skin Weights recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Skin Weights operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.rig.skin-weights.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      skinWeightsLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [
+        ['targetId', 'armatureId', 'modifierId'],
+        [],
+        [],
+        [],
+        ['weights'],
+        [],
+        ['preserveVolume'],
+        ['modifierName'],
+        [],
+      ],
+    );
+    expect(active.recipes[activeIndex]!.guidance.steps.at(-1)).toMatchObject({
+      id: 'semantic.verify_skin_weights',
+      order: 6,
+      intent: 'verify',
+    });
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.58.0 and binds Solidify to the exact four-step MCP rail in 1.59.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.58.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '7540e60b068d93c4a29c6d9457dc742b1584cbbd4fd887c4822750a48ff57bc0',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.59.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '27a047e645650e6e08c03a54f2ae90aa9a3a9ca5fcf6e7db76b28510932839fe',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_solidify',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_solidify',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Solidify recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Solidify operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.modifier.solidify.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      solidifyLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['targetId', 'modifierId'], [], [], ['modifierName', 'thickness', 'offset']],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.59.0 and binds Mirror to the exact seven-step MCP rail in 1.60.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.59.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '27a047e645650e6e08c03a54f2ae90aa9a3a9ca5fcf6e7db76b28510932839fe',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.60.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '41cc0159fa1452f5c0726f7a8dfc75d3c8ed0a5de3ff270110cc509632948f05',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Mirror recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Mirror operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.modifier.mirror.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      mirrorLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['targetId', 'modifierId'], [], [], [], [], [], ['modifierName', 'axis']],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.60.0 and binds Subdivision Surface to the exact four-step MCP rail in 1.61.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.60.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '41cc0159fa1452f5c0726f7a8dfc75d3c8ed0a5de3ff270110cc509632948f05',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.61.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '4798ecc7d1943e23d1daa514d2ad952d3e64bdca034e80b0367fc98b439b7e89',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) {
+      throw new Error('Expected Subdivision Surface recipe');
+    }
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Subdivision Surface operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.modifier.subdivision-surface.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      subdivisionSurfaceLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['targetId', 'modifierId'], [], [], ['modifierName', 'viewportLevel']],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.61.0 and binds Edit Bevel to the exact six-step MCP rail in 1.62.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.61.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '4798ecc7d1943e23d1daa514d2ad952d3e64bdca034e80b0367fc98b439b7e89',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.62.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      'd2b9cc77ac455c07aafc03855c24e19e9c346bbc81cff27ff44cade9162d4318',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_bevel_edges',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_bevel_edges',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Edit Bevel recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Edit Bevel operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.mesh.edit-bevel-edges.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editBevelLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [
+        ['targetId', 'resultMeshId'],
+        [],
+        [],
+        [],
+        ['width', 'segments', 'profile'],
+        ['resultMeshName'],
+      ],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.62.0 and binds Edit Inset to the exact six-step MCP rail in 1.63.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.62.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'd2b9cc77ac455c07aafc03855c24e19e9c346bbc81cff27ff44cade9162d4318',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.63.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '2b134289684480886c8c2ea1c46075895540f06611768f122a91c250cd5e2b3e',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_inset_faces',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_inset_faces',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Edit Inset recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Edit Inset operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.mesh.edit-inset-faces.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editInsetLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['targetId', 'resultMeshId'], [], [], [], ['thickness', 'depth'], ['resultMeshName']],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.63.0 and binds Edit Poke to the exact six-step MCP rail in 1.64.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.63.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '2b134289684480886c8c2ea1c46075895540f06611768f122a91c250cd5e2b3e',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.64.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '3876ef634380c67831cc841bb0f89e5ef9be0ab1f6e135b69f53770ccf72996b',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_poke_faces',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_poke_faces',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Edit Poke recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Edit Poke operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.mesh.edit-poke-faces.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editPokeLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['targetId', 'resultMeshId'], [], [], [], ['offset'], ['resultMeshName']],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.64.0 and binds Edit Triangulate to the exact six-step MCP rail in 1.65.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.64.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '3876ef634380c67831cc841bb0f89e5ef9be0ab1f6e135b69f53770ccf72996b',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.65.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      'cc94229cf1b1fe62ae024de6f9e08bcb2ff48077c309da38391772979c2803cb',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_triangulate',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_triangulate',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Edit Triangulate recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Edit Triangulate operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.mesh.edit-triangulate.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editTriangulateLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['targetId', 'resultMeshId'], [], [], [], [], ['resultMeshName']],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.65.0 and binds Extrude Region to the exact six-step MCP rail in 1.66.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.65.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'cc94229cf1b1fe62ae024de6f9e08bcb2ff48077c309da38391772979c2803cb',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.66.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '40cf1b6e1818afe9517b33b6184b21f059dd61260e93d0fbe30f46859debaa18',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_extrude_region',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_extrude_region',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Extrude Region recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      toolName: 'operatingline.blender.action.execute',
+    });
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Extrude Region operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.mesh.edit-extrude-region.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      editExtrudeRegionLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [
+        ['targetId', 'resultMeshId'],
+        [],
+        [],
+        ['polygonIndices'],
+        ['translation'],
+        ['resultMeshName'],
+      ],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.66.0 and binds Bevel Modifier to the exact four-step MCP rail in 1.67.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.66.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '40cf1b6e1818afe9517b33b6184b21f059dd61260e93d0fbe30f46859debaa18',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.67.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      'a52420815a7ff61e442674301542326bc9e7c41d3b6dc1f0481db8ca4e7b4024',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_bevel',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.modifier.add_bevel',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Bevel Modifier recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toBeUndefined();
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Bevel Modifier operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.modifier.bevel.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      bevelModifierLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['targetId', 'modifierId'], [], [], ['modifierName', 'width', 'segments', 'angleLimit']],
+    );
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.67.0 and binds Single Material to the exact four-step MCP rail in 1.68.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.67.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'a52420815a7ff61e442674301542326bc9e7c41d3b6dc1f0481db8ca4e7b4024',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.68.0.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '688b8a3e0fd6942b3372559a61a99ce037fa9e73acc1e8c2af0fdd0733ee3313',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.material.create_and_assign',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.material.create_and_assign',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Single Material recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toBeUndefined();
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Single Material operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.material.single.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      singleMaterialLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [['materialId'], [], [], ['materialName', 'baseColor', 'roughness', 'metallic', 'targets']],
+    );
+    expect(mcp.operations[3]!.parameters.map((parameter) => parameter.source.transform)).toEqual([
+      'identity',
+      'json_identity',
+      'identity',
+      'identity',
+      'json_identity',
+    ]);
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.68.0 and binds Material Palette to the exact four-step MCP rail in 1.69.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.68.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '688b8a3e0fd6942b3372559a61a99ce037fa9e73acc1e8c2af0fdd0733ee3313',
+    );
+    const activeBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog.json'),
+    );
+    expect(createHash('sha256').update(activeBytes).digest('hex')).toBe(
+      '7a61ec921f1a61c884f515e3bba5e164a6e9d8686226031fd373f928574d4107',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(activeBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenIndex = frozen.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.material.create_palette_and_assign',
+    );
+    const activeIndex = active.recipes.findIndex(
+      (recipe) => recipe.actionName === 'blender.material.create_palette_and_assign',
+    );
+    if (activeIndex < 0 || frozenIndex < 0) throw new Error('Expected Material Palette recipe');
+
+    expect(frozen.recipes[frozenIndex]!.procedureMaterialization?.mcp).toBeUndefined();
+    const mcp = active.recipes[activeIndex]!.procedureMaterialization?.mcp;
+    if (mcp?.availability !== 'available' || mcp.source !== 'catalog.operation_level_mcp') {
+      throw new Error('Expected Material Palette operation-level MCP');
+    }
+    expect(mcp).toMatchObject({
+      semanticBinding: 'ordered_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      toolName: 'operatingline.blender.material.palette.execute-next',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_leaf_operation_progress',
+    });
+    expect(mcp.operations.map((operation) => operation.sourceOperationId)).toEqual(
+      materialPaletteLeafOperationIds,
+    );
+    expect(mcp.operations.map((operation) => operation.parameters.map(({ name }) => name))).toEqual(
+      [[], [], ['materials'], []],
+    );
+    expect(mcp.operations[2]!.parameters.map((parameter) => parameter.source.transform)).toEqual([
+      'json_identity',
+    ]);
+
+    active.catalogVersion = frozen.catalogVersion;
+    active.recipes[activeIndex] = frozen.recipes[frozenIndex]!;
     expect(active).toEqual(frozen);
   });
 

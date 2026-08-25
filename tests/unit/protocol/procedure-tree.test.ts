@@ -398,7 +398,7 @@ describe('procedure tree protocol', () => {
     const leaf = plan.steps.find((step) => step.id === 'snowman.head.eyes.left');
 
     expect(plan).toMatchObject({
-      protocolVersion: '1.6.0',
+      protocolVersion: '1.7.0',
       id: 'snowman.eye.left.procedure',
       rootStepId: 'snowman',
     });
@@ -415,6 +415,141 @@ describe('procedure tree protocol', () => {
       observationPolicy: { mode: 'success_gate', failureStrategy: 'rollback_step' },
       rollback: { mode: 'compensating_action', checkpointRequired: false },
     });
+    expect(leaf?.candidateMenuProjection).toBeUndefined();
+    expect(leaf?.executionTrackOverride).toBeUndefined();
+  });
+
+  it('compiles exactly one non-executable menu candidate with concrete ordered values', () => {
+    const tree = structuredClone(readFixture());
+    const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('Expected procedure leaf');
+    const sourceTrack = leaf.menuTracks[0];
+    if (sourceTrack?.availability !== 'available') throw new Error('Expected available menu track');
+    const candidate = {
+      id: 'candidate.create-eye.menu',
+      modality: 'menu' as const,
+      projection: 'candidate_only' as const,
+      equivalence: 'not_equivalent_to_managed_action' as const,
+      executionAuthority: 'none' as const,
+      title: sourceTrack.title,
+      reason: 'This native menu path is display-only until equivalent execution is proven.',
+      preconditions: structuredClone(sourceTrack.preconditions),
+      operations: structuredClone(sourceTrack.operations),
+      omittedActionArguments: [
+        { argumentName: 'objectName', reason: 'The candidate does not prove object naming.' },
+      ],
+      nativeEvidence: {
+        kind: 'bounded_blender_ui_probe' as const,
+        executorId: 'blender.native-ui',
+        hostVersions: ['4.5.0'],
+        managedActionExecuted: false as const,
+        managedReceiptCreated: false as const,
+        managedReplacementMeshCreated: false as const,
+        nativeMutationKind: 'native_operator',
+        operationIds: sourceTrack.operations.map((operation) => operation.id),
+        nativeUndoCheckpointRequired: true as const,
+        nativeUndoDepth: 1,
+        nativeRedoDepth: 1,
+      },
+    };
+    leaf.menuCandidates = [candidate];
+
+    const plan = compileProcedureTreeToGuidePlan(tree);
+    const compiled = plan.steps.find((step) => step.id === leaf.id);
+
+    expect(compiled?.candidateMenuProjection).toMatchObject({
+      projection: 'candidate_only',
+      interactionCatalogVersion: tree.interactionCatalogVersion,
+      id: candidate.id,
+      modality: 'menu',
+      equivalence: 'not_equivalent_to_managed_action',
+      executionAuthority: 'none',
+      reason: candidate.reason,
+      omittedActionArguments: candidate.omittedActionArguments,
+      nativeEvidence: candidate.nativeEvidence,
+    });
+    expect(
+      compiled?.candidateMenuProjection?.operations.map((operation) => operation.order),
+    ).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(compiled?.candidateMenuProjection?.operations[3]).toMatchObject({
+      path: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+      parameters: { radius: 1, location: [0, 0, 0] },
+    });
+    expect(compiled?.candidateMenuProjection?.operations[4]).toMatchObject({
+      path: ['Sidebar', 'Item', 'Transform', 'Location'],
+      parameters: { value: [0.32, -0.86, 2.14] },
+    });
+    expect(compiled?.executionTrackOverride).toBeUndefined();
+  });
+
+  it('omits ambiguous candidates and rejects executable or non-leaf candidate forgery', () => {
+    const ambiguous = structuredClone(readFixture());
+    const leaf = ambiguous.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('Expected procedure leaf');
+    const sourceTrack = leaf.menuTracks[0];
+    if (sourceTrack?.availability !== 'available') throw new Error('Expected available menu track');
+    const candidate = {
+      id: 'candidate.create-eye.menu',
+      modality: 'menu' as const,
+      projection: 'candidate_only' as const,
+      equivalence: 'not_equivalent_to_managed_action' as const,
+      executionAuthority: 'none' as const,
+      title: sourceTrack.title,
+      reason: 'Display only.',
+      preconditions: structuredClone(sourceTrack.preconditions),
+      operations: structuredClone(sourceTrack.operations),
+      omittedActionArguments: [],
+    };
+    leaf.menuCandidates = [candidate, { ...structuredClone(candidate), id: 'candidate.second' }];
+    expect(
+      compileProcedureTreeToGuidePlan(ambiguous).steps.find((step) => step.id === leaf.id)
+        ?.candidateMenuProjection,
+    ).toBeUndefined();
+
+    for (const mutate of [
+      (tree: Record<string, unknown>) => {
+        const nodes = tree['nodes'] as Array<Record<string, unknown>>;
+        const candidateLeaf = nodes.find((node) => node['kind'] === 'leaf')!;
+        const candidate = structuredClone(
+          (candidateLeaf['menuCandidates'] as Array<Record<string, unknown>>)[0]!,
+        );
+        candidate['executionAuthority'] = 'managed_action';
+        candidateLeaf['menuCandidates'] = [candidate];
+      },
+      (tree: Record<string, unknown>) => {
+        const nodes = tree['nodes'] as Array<Record<string, unknown>>;
+        const candidateLeaf = nodes.find((node) => node['kind'] === 'leaf')!;
+        const candidate = structuredClone(
+          (candidateLeaf['menuCandidates'] as Array<Record<string, unknown>>)[0]!,
+        );
+        candidate['availability'] = 'available';
+        candidateLeaf['menuCandidates'] = [candidate];
+      },
+      (tree: Record<string, unknown>) => {
+        const nodes = tree['nodes'] as Array<Record<string, unknown>>;
+        const candidateLeaf = nodes.find((node) => node['kind'] === 'leaf')!;
+        const candidate = structuredClone(
+          (candidateLeaf['menuCandidates'] as Array<Record<string, unknown>>)[0]!,
+        );
+        candidate['equivalence'] = 'equivalent_to_managed_action';
+        candidateLeaf['menuCandidates'] = [candidate];
+      },
+      (tree: Record<string, unknown>) => {
+        const nodes = tree['nodes'] as Array<Record<string, unknown>>;
+        const group = nodes.find((node) => node['kind'] === 'group')!;
+        const candidateLeaf = nodes.find((node) => node['kind'] === 'leaf')!;
+        group['menuCandidates'] = structuredClone(candidateLeaf['menuCandidates']);
+      },
+    ]) {
+      const unsafe = structuredClone(ambiguous) as unknown as Record<string, unknown>;
+      const nodes = unsafe['nodes'] as Array<Record<string, unknown>>;
+      const candidateLeaf = nodes.find((node) => node['kind'] === 'leaf')!;
+      candidateLeaf['menuCandidates'] = [
+        structuredClone((leaf.menuCandidates ?? [])[0]) as unknown as Record<string, unknown>,
+      ];
+      mutate(unsafe);
+      expect(procedureTreeSchema.safeParse(unsafe).success).toBe(false);
+    }
   });
 
   it('materializes one explicit track per leaf with stable global operation order', () => {

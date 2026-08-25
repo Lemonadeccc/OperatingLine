@@ -11,7 +11,10 @@ import {
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
   actionLevelMcpActionNames,
+  actionLevelMcpRecipeIdByAction,
   managedPrimitiveActionNames,
+  operationLevelMcpActionNames,
+  procedureLeafReplayActionNameSchema,
   procedureLeafReplayObservationSchema,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
@@ -168,14 +171,44 @@ describe('companion action execution protocol', () => {
       'blender.mesh.edit_bevel_edges',
       'blender.mesh.edit_inset_faces',
       'blender.mesh.edit_poke_faces',
+      'blender.modifier.add_subdivision_surface',
       'blender.modifier.add_mirror',
       'blender.modifier.add_solidify',
+      'blender.geometry_nodes.create_light_trails',
+      'blender.lookdev.create_light_trails_scene',
       'blender.rig.create_armature',
       'blender.rig.bind_skin_weights',
       'blender.animation.create_pose_keyframes',
     ]);
     expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_solidify');
     expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_mirror');
+    expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_subdivision_surface');
+    expect(actionLevelMcpActionNames).not.toContain('blender.geometry_nodes.create_transform');
+    expect(operationLevelMcpActionNames).toEqual([
+      'blender.geometry_nodes.create_transform',
+      'blender.geometry_nodes.create_light_trails',
+      'blender.animation.create_pose_keyframes',
+      'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
+      'blender.modifier.add_bevel',
+      'blender.material.create_and_assign',
+      'blender.material.create_palette_and_assign',
+      'blender.modifier.add_solidify',
+      'blender.modifier.add_mirror',
+      'blender.modifier.add_subdivision_surface',
+      'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
+    ]);
+    expect(
+      procedureLeafReplayActionNameSchema.safeParse('blender.geometry_nodes.create_transform')
+        .success,
+    ).toBe(true);
+    expect(actionLevelMcpRecipeIdByAction['blender.modifier.add_subdivision_surface']).toBe(
+      'blender.modifier.add_subdivision_surface.semantic',
+    );
     for (const actionName of actionLevelMcpActionNames) {
       const request = delivery(actionName);
       expect(companionActionExecutionDeliverySchema.parse(request)).toEqual(request);
@@ -189,6 +222,7 @@ describe('companion action execution protocol', () => {
       'blender.mesh.create_primitive_batch',
       'blender.mesh.create_monkey',
       'blender.geometry_nodes.create_node_group',
+      'blender.geometry_nodes.create_transform',
     ]) {
       expect(
         companionActionExecutionDeliverySchema.safeParse({

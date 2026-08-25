@@ -33,6 +33,7 @@ import {
 } from '@operatingline/protocol';
 
 import { materializeProcedureAuthoringCandidate } from '../../services/orchestrator/src/procedure-authoring-materialization.js';
+import { projectInteractionCatalogForProvider } from '../../services/orchestrator/src/procedure-authoring-prompt.js';
 import { validatePublicJsonSchemaCases } from '../../services/orchestrator/test-support/public-json-schema-validator.js';
 
 function publicSchema(filename: string): object {
@@ -85,10 +86,7 @@ function fixtures() {
   const leaf = tree.nodes.find((node) => node.kind === 'leaf');
   if (leaf?.kind !== 'leaf' || leaf.action === null) throw new Error('Expected managed leaf');
   const promptActionCatalog = withoutKey(blenderActionCatalog, 'adapterId');
-  const promptInteractionCatalog = withoutKey(
-    withoutKey(blenderInteractionCatalog, 'adapterId'),
-    'actionCatalogVersion',
-  );
+  const promptInteractionCatalog = projectInteractionCatalogForProvider(blenderInteractionCatalog);
   const source = tree.sources[0]!;
   const evidence = tree.evidence[0]!;
   const packet = {

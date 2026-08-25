@@ -1,0 +1,4047 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "recoveryId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "originalDelivery": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "deliveryId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "adapterId",
+            "instanceId"
+          ],
+          "additionalProperties": false
+        },
+        "replayId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "compoundId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "compoundContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "historyLockTokenSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "replay": {
+          "type": "object",
+          "properties": {
+            "formatVersion": {
+              "type": "string",
+              "const": "1.0.0"
+            },
+            "planContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "target": {
+              "type": "object",
+              "properties": {
+                "adapterId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "instanceId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              },
+              "required": [
+                "adapterId",
+                "instanceId"
+              ],
+              "additionalProperties": false
+            },
+            "actionCatalogVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "interactionCatalogVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "recipe": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionReceiptId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "decisionReceiptSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionSingleUseKeySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionStartStateProjectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateChainSha256s": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      ]
+                    },
+                    "orderedLeafBindingSha256s": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      ]
+                    },
+                    "objectModeUndoRedoTransactionProven": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "recordedObjectBaseline": {
+                      "type": "object",
+                      "properties": {
+                        "blenderProcessIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "blenderSessionUid": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "documentFingerprintSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "nativeHistoryMarkerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "historyHeadSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "objectIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "objectPointerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshPointerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshDatablockSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "topologySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "selectionSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "stateSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "blenderProcessIdentitySha256",
+                        "blenderSessionUid",
+                        "documentFingerprintSha256",
+                        "nativeHistoryMarkerSha256",
+                        "historyHeadSha256",
+                        "objectIdentitySha256",
+                        "meshIdentitySha256",
+                        "objectPointerSha256",
+                        "meshPointerSha256",
+                        "meshDatablockSha256",
+                        "topologySha256",
+                        "selectionSha256",
+                        "stateSha256",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "forward"
+                    },
+                    "decisionKind": {
+                      "type": "string",
+                      "const": "BlenderExecutionDecisionReceipt"
+                    },
+                    "expectedStartStatus": {
+                      "type": "string",
+                      "const": "intent_recorded"
+                    },
+                    "expectedTerminalStatus": {
+                      "type": "string",
+                      "const": "forward_applied_locked"
+                    },
+                    "decisionCurrentStateIntegritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "leaves": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "enter_edit"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "OBJECT"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 0
+                            },
+                            "historyObligation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 2
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "poke"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": true
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 0
+                            },
+                            "historyObligation": {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "poke_native_checkpoint"
+                                },
+                                "modeScope": {
+                                  "type": "string",
+                                  "const": "edit_middle_only"
+                                },
+                                "objectModeUndoRedoClaim": {
+                                  "type": "boolean",
+                                  "const": false
+                                },
+                                "expectedHistoryHeadBeforeSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "expectedCheckpointSha256": {
+                                  "type": "null"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "modeScope",
+                                "objectModeUndoRedoClaim",
+                                "expectedHistoryHeadBeforeSha256",
+                                "expectedCheckpointSha256"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 3
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "exit_edit"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "OBJECT"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 0
+                            },
+                            "historyObligation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "decisionReceiptId",
+                    "decisionReceiptSha256",
+                    "decisionSingleUseKeySha256",
+                    "decisionStartStateProjectionSha256",
+                    "stateChainSha256s",
+                    "orderedLeafBindingSha256s",
+                    "objectModeUndoRedoTransactionProven",
+                    "recordedObjectBaseline",
+                    "kind",
+                    "decisionKind",
+                    "expectedStartStatus",
+                    "expectedTerminalStatus",
+                    "decisionCurrentStateIntegritySha256",
+                    "leaves"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionReceiptId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "decisionReceiptSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionSingleUseKeySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionStartStateProjectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateChainSha256s": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      ]
+                    },
+                    "orderedLeafBindingSha256s": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      ]
+                    },
+                    "objectModeUndoRedoTransactionProven": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "recordedObjectBaseline": {
+                      "type": "object",
+                      "properties": {
+                        "blenderProcessIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "blenderSessionUid": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "documentFingerprintSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "nativeHistoryMarkerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "historyHeadSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "objectIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "objectPointerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshPointerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshDatablockSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "topologySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "selectionSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "stateSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "blenderProcessIdentitySha256",
+                        "blenderSessionUid",
+                        "documentFingerprintSha256",
+                        "nativeHistoryMarkerSha256",
+                        "historyHeadSha256",
+                        "objectIdentitySha256",
+                        "meshIdentitySha256",
+                        "objectPointerSha256",
+                        "meshPointerSha256",
+                        "meshDatablockSha256",
+                        "topologySha256",
+                        "selectionSha256",
+                        "stateSha256",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "back"
+                    },
+                    "decisionKind": {
+                      "type": "string",
+                      "const": "BlenderHistoryTransitionDecisionReceipt"
+                    },
+                    "decisionTransition": {
+                      "type": "string",
+                      "const": "back"
+                    },
+                    "expectedStartStatus": {
+                      "type": "string",
+                      "enum": [
+                        "forward_applied_locked",
+                        "reapplied_locked"
+                      ]
+                    },
+                    "expectedTerminalStatus": {
+                      "type": "string",
+                      "const": "restored_locked"
+                    },
+                    "decisionCurrentStateIntegritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "leaves": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "enter_edit"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "OBJECT"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 0
+                            },
+                            "historyObligation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 2
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "native_undo_once"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": true
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "historyObligation": {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "native_undo_once"
+                                },
+                                "modeScope": {
+                                  "type": "string",
+                                  "const": "edit_middle_only"
+                                },
+                                "objectModeUndoRedoClaim": {
+                                  "type": "boolean",
+                                  "const": false
+                                },
+                                "expectedHistoryHeadBeforeSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "expectedCheckpointSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "modeScope",
+                                "objectModeUndoRedoClaim",
+                                "expectedHistoryHeadBeforeSha256",
+                                "expectedCheckpointSha256"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 3
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "exit_edit"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "OBJECT"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 0
+                            },
+                            "historyObligation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "decisionReceiptId",
+                    "decisionReceiptSha256",
+                    "decisionSingleUseKeySha256",
+                    "decisionStartStateProjectionSha256",
+                    "stateChainSha256s",
+                    "orderedLeafBindingSha256s",
+                    "objectModeUndoRedoTransactionProven",
+                    "recordedObjectBaseline",
+                    "kind",
+                    "decisionKind",
+                    "decisionTransition",
+                    "expectedStartStatus",
+                    "expectedTerminalStatus",
+                    "decisionCurrentStateIntegritySha256",
+                    "leaves"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionReceiptId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "decisionReceiptSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionSingleUseKeySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "decisionStartStateProjectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateChainSha256s": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      ]
+                    },
+                    "orderedLeafBindingSha256s": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      ]
+                    },
+                    "objectModeUndoRedoTransactionProven": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "recordedObjectBaseline": {
+                      "type": "object",
+                      "properties": {
+                        "blenderProcessIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "blenderSessionUid": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "documentFingerprintSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "nativeHistoryMarkerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "historyHeadSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "objectIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshIdentitySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "objectPointerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshPointerSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "meshDatablockSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "topologySha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "selectionSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "stateSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "blenderProcessIdentitySha256",
+                        "blenderSessionUid",
+                        "documentFingerprintSha256",
+                        "nativeHistoryMarkerSha256",
+                        "historyHeadSha256",
+                        "objectIdentitySha256",
+                        "meshIdentitySha256",
+                        "objectPointerSha256",
+                        "meshPointerSha256",
+                        "meshDatablockSha256",
+                        "topologySha256",
+                        "selectionSha256",
+                        "stateSha256",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "redo"
+                    },
+                    "decisionKind": {
+                      "type": "string",
+                      "const": "BlenderHistoryTransitionDecisionReceipt"
+                    },
+                    "decisionTransition": {
+                      "type": "string",
+                      "const": "redo"
+                    },
+                    "expectedStartStatus": {
+                      "type": "string",
+                      "const": "restored_locked"
+                    },
+                    "expectedTerminalStatus": {
+                      "type": "string",
+                      "const": "reapplied_locked"
+                    },
+                    "decisionCurrentStateIntegritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "leaves": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "enter_edit"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "OBJECT"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 0
+                            },
+                            "historyObligation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 2
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "native_redo_once"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": true
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "historyObligation": {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "native_redo_once"
+                                },
+                                "modeScope": {
+                                  "type": "string",
+                                  "const": "edit_middle_only"
+                                },
+                                "objectModeUndoRedoClaim": {
+                                  "type": "boolean",
+                                  "const": false
+                                },
+                                "expectedHistoryHeadBeforeSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "expectedCheckpointSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "modeScope",
+                                "objectModeUndoRedoClaim",
+                                "expectedHistoryHeadBeforeSha256",
+                                "expectedCheckpointSha256"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "leafId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "bindingSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "compoundContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "historyLockTokenSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "order": {
+                              "type": "number",
+                              "const": 3
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "exit_edit"
+                            },
+                            "fromMode": {
+                              "type": "string",
+                              "const": "EDIT_MESH"
+                            },
+                            "toMode": {
+                              "type": "string",
+                              "const": "OBJECT"
+                            },
+                            "modelChanging": {
+                              "type": "boolean",
+                              "const": false
+                            },
+                            "nativeUndoRedoOperationCount": {
+                              "type": "number",
+                              "const": 0
+                            },
+                            "historyObligation": {
+                              "type": "null"
+                            }
+                          },
+                          "required": [
+                            "leafId",
+                            "bindingSha256",
+                            "compoundContentSha256",
+                            "historyLockTokenSha256",
+                            "order",
+                            "kind",
+                            "fromMode",
+                            "toMode",
+                            "modelChanging",
+                            "nativeUndoRedoOperationCount",
+                            "historyObligation"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "decisionReceiptId",
+                    "decisionReceiptSha256",
+                    "decisionSingleUseKeySha256",
+                    "decisionStartStateProjectionSha256",
+                    "stateChainSha256s",
+                    "orderedLeafBindingSha256s",
+                    "objectModeUndoRedoTransactionProven",
+                    "recordedObjectBaseline",
+                    "kind",
+                    "decisionKind",
+                    "decisionTransition",
+                    "expectedStartStatus",
+                    "expectedTerminalStatus",
+                    "decisionCurrentStateIntegritySha256",
+                    "leaves"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "currentState": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "intent_recorded"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "object_baseline"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "OBJECT"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "held"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": []
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "recovery_required"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "unknown"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "UNKNOWN"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "held"
+                    },
+                    "inProgressLeafId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": []
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "forward_applied_locked"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "object_final"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "OBJECT"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "held"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "const": "back"
+                        },
+                        {
+                          "type": "string",
+                          "const": "unlock_final"
+                        }
+                      ]
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "restored_locked"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "object_baseline"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "OBJECT"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "held"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "const": "redo"
+                        },
+                        {
+                          "type": "string",
+                          "const": "abandon_baseline"
+                        }
+                      ]
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "reapplied_locked"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "object_final"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "OBJECT"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "held"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "const": "back"
+                        },
+                        {
+                          "type": "string",
+                          "const": "unlock_final"
+                        }
+                      ]
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "history_conflict"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "unknown"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "UNKNOWN"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "quarantined"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": []
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "quarantined"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "unknown"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "UNKNOWN"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "quarantined"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": []
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "unlocked_final"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "object_final"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "OBJECT"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "released"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": []
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "abandoned_baseline"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "object_baseline"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "OBJECT"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "released"
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": []
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "same_live_session"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "history_lost"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "unknown"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "UNKNOWN"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "quarantined"
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "lost_permanently"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "const": "abandon_baseline"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryMarkerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "objectPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshPointerSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "meshDatablockSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "topologySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "selectionSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "stateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "integritySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "abandoned_baseline"
+                    },
+                    "lifecycleState": {
+                      "type": "string",
+                      "const": "object_baseline"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "OBJECT"
+                    },
+                    "historyLock": {
+                      "type": "string",
+                      "const": "released"
+                    },
+                    "historyContinuity": {
+                      "type": "string",
+                      "const": "lost_permanently"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "inProgressLeafId": {
+                      "type": "null"
+                    },
+                    "permittedHistoryTransitions": {
+                      "type": "array",
+                      "prefixItems": []
+                    }
+                  },
+                  "required": [
+                    "compoundId",
+                    "replayId",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "nativeHistoryMarkerSha256",
+                    "historyHeadSha256",
+                    "objectIdentitySha256",
+                    "meshIdentitySha256",
+                    "objectPointerSha256",
+                    "meshPointerSha256",
+                    "meshDatablockSha256",
+                    "topologySha256",
+                    "selectionSha256",
+                    "stateSha256",
+                    "integritySha256",
+                    "status",
+                    "lifecycleState",
+                    "mode",
+                    "historyLock",
+                    "historyContinuity",
+                    "nativeHistoryLossRecorded",
+                    "inProgressLeafId",
+                    "permittedHistoryTransitions"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "leafProgress": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "leafId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "intentSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "receiptSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "leafId",
+                    "intentSha256",
+                    "receiptSha256"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "leafId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "intentSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "receiptSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "leafId",
+                    "intentSha256",
+                    "receiptSha256"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "leafId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "intentSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "receiptSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "leafId",
+                    "intentSha256",
+                    "receiptSha256"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "formatVersion",
+            "planContentSha256",
+            "target",
+            "actionCatalogVersion",
+            "interactionCatalogVersion",
+            "recipe",
+            "currentState",
+            "leafProgress"
+          ],
+          "additionalProperties": false
+        },
+        "decisionReceipt": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "decisionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "nonce": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                },
+                "issuedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "BlenderExecutionDecisionReceipt"
+                },
+                "acceptedContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "acceptedContentKind": {
+                  "type": "string",
+                  "enum": [
+                    "proposal",
+                    "plan"
+                  ]
+                },
+                "replayId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "adapterId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "instanceId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "adapterId",
+                    "instanceId"
+                  ],
+                  "additionalProperties": false
+                },
+                "blenderSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "documentFingerprintSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "actionCatalogVersion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "interactionCatalogVersion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "formatVersion",
+                "decisionId",
+                "nonce",
+                "issuedAt",
+                "expiresAt",
+                "kind",
+                "acceptedContentSha256",
+                "acceptedContentKind",
+                "replayId",
+                "target",
+                "blenderSessionId",
+                "documentFingerprintSha256",
+                "actionCatalogVersion",
+                "interactionCatalogVersion"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "decisionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                    },
+                    "issuedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "BlenderHistoryTransitionDecisionReceipt"
+                    },
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "currentStateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "expectedHistoryHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "actionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "interactionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "transition": {
+                      "type": "string",
+                      "const": "back"
+                    },
+                    "expectedStatus": {
+                      "type": "string",
+                      "enum": [
+                        "forward_applied_locked",
+                        "reapplied_locked"
+                      ]
+                    },
+                    "terminalObservationSha256": {
+                      "type": "null"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "decisionId",
+                    "nonce",
+                    "issuedAt",
+                    "expiresAt",
+                    "kind",
+                    "compoundId",
+                    "replayId",
+                    "target",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "currentStateSha256",
+                    "expectedHistoryHeadSha256",
+                    "actionCatalogVersion",
+                    "interactionCatalogVersion",
+                    "transition",
+                    "expectedStatus",
+                    "terminalObservationSha256",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "decisionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                    },
+                    "issuedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "BlenderHistoryTransitionDecisionReceipt"
+                    },
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "currentStateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "expectedHistoryHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "actionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "interactionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "transition": {
+                      "type": "string",
+                      "const": "redo"
+                    },
+                    "expectedStatus": {
+                      "type": "string",
+                      "const": "restored_locked"
+                    },
+                    "terminalObservationSha256": {
+                      "type": "null"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "decisionId",
+                    "nonce",
+                    "issuedAt",
+                    "expiresAt",
+                    "kind",
+                    "compoundId",
+                    "replayId",
+                    "target",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "currentStateSha256",
+                    "expectedHistoryHeadSha256",
+                    "actionCatalogVersion",
+                    "interactionCatalogVersion",
+                    "transition",
+                    "expectedStatus",
+                    "terminalObservationSha256",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "decisionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                    },
+                    "issuedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "BlenderHistoryTransitionDecisionReceipt"
+                    },
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "currentStateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "expectedHistoryHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "actionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "interactionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "transition": {
+                      "type": "string",
+                      "const": "unlock_final"
+                    },
+                    "expectedStatus": {
+                      "type": "string",
+                      "enum": [
+                        "forward_applied_locked",
+                        "reapplied_locked"
+                      ]
+                    },
+                    "terminalObservationSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "decisionId",
+                    "nonce",
+                    "issuedAt",
+                    "expiresAt",
+                    "kind",
+                    "compoundId",
+                    "replayId",
+                    "target",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "currentStateSha256",
+                    "expectedHistoryHeadSha256",
+                    "actionCatalogVersion",
+                    "interactionCatalogVersion",
+                    "transition",
+                    "expectedStatus",
+                    "terminalObservationSha256",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "decisionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                    },
+                    "issuedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "BlenderHistoryTransitionDecisionReceipt"
+                    },
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "currentStateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "expectedHistoryHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "actionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "interactionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "transition": {
+                      "type": "string",
+                      "const": "abandon_baseline"
+                    },
+                    "expectedStatus": {
+                      "type": "string",
+                      "const": "restored_locked"
+                    },
+                    "terminalObservationSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "decisionId",
+                    "nonce",
+                    "issuedAt",
+                    "expiresAt",
+                    "kind",
+                    "compoundId",
+                    "replayId",
+                    "target",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "currentStateSha256",
+                    "expectedHistoryHeadSha256",
+                    "actionCatalogVersion",
+                    "interactionCatalogVersion",
+                    "transition",
+                    "expectedStatus",
+                    "terminalObservationSha256",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "decisionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "nonce": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                    },
+                    "issuedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "BlenderHistoryTransitionDecisionReceipt"
+                    },
+                    "compoundId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "blenderProcessIdentitySha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "blenderSessionUid": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "documentFingerprintSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "compoundContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "historyLockTokenSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "currentStateSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "expectedHistoryHeadSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "actionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "interactionCatalogVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "transition": {
+                      "type": "string",
+                      "const": "abandon_baseline"
+                    },
+                    "expectedStatus": {
+                      "type": "string",
+                      "const": "history_lost"
+                    },
+                    "terminalObservationSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "nativeHistoryLossRecorded": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "decisionId",
+                    "nonce",
+                    "issuedAt",
+                    "expiresAt",
+                    "kind",
+                    "compoundId",
+                    "replayId",
+                    "target",
+                    "blenderProcessIdentitySha256",
+                    "blenderSessionUid",
+                    "documentFingerprintSha256",
+                    "compoundContentSha256",
+                    "historyLockTokenSha256",
+                    "currentStateSha256",
+                    "expectedHistoryHeadSha256",
+                    "actionCatalogVersion",
+                    "interactionCatalogVersion",
+                    "transition",
+                    "expectedStatus",
+                    "terminalObservationSha256",
+                    "nativeHistoryLossRecorded"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          ]
+        },
+        "trustedDecisionConsumptionEvent": {
+          "type": "object",
+          "properties": {
+            "formatVersion": {
+              "type": "string",
+              "const": "1.0.0"
+            },
+            "eventId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "provider_authorization_consumed",
+                "blender_decision_consumed",
+                "blender_history_transition_consumed",
+                "training_decision_consumed",
+                "dataset_release_authorization_consumed"
+              ]
+            },
+            "credentialId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "singleUseKeySha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "operationId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "bindingSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "consumedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "formatVersion",
+            "eventId",
+            "sequence",
+            "kind",
+            "credentialId",
+            "singleUseKeySha256",
+            "operationId",
+            "bindingSha256",
+            "consumedAt"
+          ],
+          "additionalProperties": false
+        },
+        "requestedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "dispatchedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "deliveryContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "requestId",
+        "deliveryId",
+        "target",
+        "replayId",
+        "compoundId",
+        "compoundContentSha256",
+        "historyLockTokenSha256",
+        "replay",
+        "decisionReceipt",
+        "trustedDecisionConsumptionEvent",
+        "requestedAt",
+        "dispatchedAt",
+        "deliveryContentSha256"
+      ],
+      "additionalProperties": false
+    },
+    "replacementSessionFingerprintSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "replacementDocumentAuthoritySha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "formatVersion",
+    "recoveryId",
+    "originalDelivery",
+    "replacementSessionFingerprintSha256",
+    "replacementDocumentAuthoritySha256",
+    "requestedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/companion-poke-compound-recovery-challenge.json"
+}

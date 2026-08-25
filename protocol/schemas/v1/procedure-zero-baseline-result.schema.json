@@ -2093,7 +2093,8 @@
                             "1.3.0",
                             "1.4.0",
                             "1.5.0",
-                            "1.6.0"
+                            "1.6.0",
+                            "1.7.0"
                           ]
                         },
                         "catalogVersion": {
@@ -2448,7 +2449,8 @@
                             "1.3.0",
                             "1.4.0",
                             "1.5.0",
-                            "1.6.0"
+                            "1.6.0",
+                            "1.7.0"
                           ]
                         },
                         "catalogVersion": {
@@ -2584,6 +2586,34 @@
                                                 "hostId": {
                                                   "type": "string",
                                                   "minLength": 1
+                                                },
+                                                "connection": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "fromNode": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "fromSocket": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "toNode": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "toSocket": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "fromNode",
+                                                    "fromSocket",
+                                                    "toNode",
+                                                    "toSocket"
+                                                  ],
+                                                  "additionalProperties": false
                                                 }
                                               },
                                               "required": [
@@ -2698,6 +2728,34 @@
                                                 "hostId": {
                                                   "type": "string",
                                                   "minLength": 1
+                                                },
+                                                "connection": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "fromNode": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "fromSocket": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "toNode": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "toSocket": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "fromNode",
+                                                    "fromSocket",
+                                                    "toNode",
+                                                    "toSocket"
+                                                  ],
+                                                  "additionalProperties": false
                                                 }
                                               },
                                               "required": [
@@ -2814,6 +2872,7 @@
                                               "type": "string",
                                               "enum": [
                                                 "identity",
+                                                "json_identity",
                                                 "uniform_vector3",
                                                 "divide_by_two",
                                                 "vector3_x",
@@ -2973,6 +3032,7 @@
                                                               "type": "string",
                                                               "enum": [
                                                                 "identity",
+                                                                "json_identity",
                                                                 "divide_by_two",
                                                                 "uniform_vector3",
                                                                 "vector3_x",
@@ -3126,6 +3186,7 @@
                                                                         "type": "string",
                                                                         "enum": [
                                                                           "identity",
+                                                                          "json_identity",
                                                                           "divide_by_two",
                                                                           "uniform_vector3",
                                                                           "vector3_x",
@@ -3226,169 +3287,6 @@
                                                   ],
                                                   "additionalProperties": false
                                                 }
-                                              },
-                                              "proofExecution": {
-                                                "type": "object",
-                                                "properties": {
-                                                  "executorId": {
-                                                    "type": "string",
-                                                    "const": "blender.uv_sphere_menu_controls.event_simulate.v1"
-                                                  },
-                                                  "targetProfile": {
-                                                    "type": "string",
-                                                    "const": "factory_layout_three_object_ui_scale_2"
-                                                  },
-                                                  "executionBoundary": {
-                                                    "type": "string",
-                                                    "const": "blender_window_event_simulate"
-                                                  },
-                                                  "osHidInput": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "managedActionExecuted": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "managedReceiptCreated": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "authorization": {
-                                                    "type": "string",
-                                                    "const": "accepted_replay_next_step"
-                                                  },
-                                                  "transport": {
-                                                    "type": "string",
-                                                    "const": "event_simulate"
-                                                  },
-                                                  "hostVersions": {
-                                                    "minItems": 2,
-                                                    "maxItems": 2,
-                                                    "type": "array",
-                                                    "items": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "4.5.3",
-                                                        "5.1.1"
-                                                      ]
-                                                    },
-                                                    "const": [
-                                                      "4.5.3",
-                                                      "5.1.1"
-                                                    ]
-                                                  },
-                                                  "operationIds": {
-                                                    "minItems": 7,
-                                                    "maxItems": 7,
-                                                    "type": "array",
-                                                    "items": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "workspace.layout",
-                                                        "menu.add",
-                                                        "menu.mesh",
-                                                        "operator.uv_sphere",
-                                                        "control.location",
-                                                        "control.scale",
-                                                        "control.object_name"
-                                                      ]
-                                                    },
-                                                    "const": [
-                                                      "workspace.layout",
-                                                      "menu.add",
-                                                      "menu.mesh",
-                                                      "operator.uv_sphere",
-                                                      "control.location",
-                                                      "control.scale",
-                                                      "control.object_name"
-                                                    ]
-                                                  },
-                                                  "strongObservationKind": {
-                                                    "type": "string",
-                                                    "const": "uv_sphere_menu_controls_ready"
-                                                  },
-                                                  "nativeUndoCheckpointRequired": {
-                                                    "type": "boolean",
-                                                    "const": true
-                                                  },
-                                                  "nativeUndoDepth": {
-                                                    "type": "number",
-                                                    "const": 8
-                                                  },
-                                                  "uiScale": {
-                                                    "type": "number",
-                                                    "const": 2
-                                                  },
-                                                  "proofArguments": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                      "resourceId": {
-                                                        "type": "string",
-                                                        "const": "proof.uv_sphere.eye"
-                                                      },
-                                                      "objectName": {
-                                                        "type": "string",
-                                                        "const": "OperatingLine.TutorialEye"
-                                                      },
-                                                      "radius": {
-                                                        "type": "number",
-                                                        "const": 1.5
-                                                      },
-                                                      "location": {
-                                                        "minItems": 3,
-                                                        "maxItems": 3,
-                                                        "type": "array",
-                                                        "items": {
-                                                          "anyOf": [
-                                                            {
-                                                              "type": "number",
-                                                              "const": 1.25
-                                                            },
-                                                            {
-                                                              "type": "number",
-                                                              "const": -2
-                                                            },
-                                                            {
-                                                              "type": "number",
-                                                              "const": 0.75
-                                                            }
-                                                          ]
-                                                        },
-                                                        "const": [
-                                                          1.25,
-                                                          -2,
-                                                          0.75
-                                                        ]
-                                                      }
-                                                    },
-                                                    "required": [
-                                                      "resourceId",
-                                                      "objectName",
-                                                      "radius",
-                                                      "location"
-                                                    ],
-                                                    "additionalProperties": false
-                                                  }
-                                                },
-                                                "required": [
-                                                  "executorId",
-                                                  "targetProfile",
-                                                  "executionBoundary",
-                                                  "osHidInput",
-                                                  "managedActionExecuted",
-                                                  "managedReceiptCreated",
-                                                  "authorization",
-                                                  "transport",
-                                                  "hostVersions",
-                                                  "operationIds",
-                                                  "strongObservationKind",
-                                                  "nativeUndoCheckpointRequired",
-                                                  "nativeUndoDepth",
-                                                  "uiScale",
-                                                  "proofArguments"
-                                                ],
-                                                "additionalProperties": false
                                               }
                                             },
                                             "required": [
@@ -3400,125 +3298,7 @@
                                               "controlOperations",
                                               "omittedActionArguments"
                                             ],
-                                            "additionalProperties": false,
-                                            "allOf": [
-                                              {
-                                                "if": {
-                                                  "required": [
-                                                    "proofExecution"
-                                                  ]
-                                                },
-                                                "then": {
-                                                  "properties": {
-                                                    "operatorParameters": {
-                                                      "const": [
-                                                        {
-                                                          "name": "radius",
-                                                          "source": {
-                                                            "kind": "literal",
-                                                            "value": 1
-                                                          }
-                                                        }
-                                                      ]
-                                                    },
-                                                    "controlOperations": {
-                                                      "const": {
-                                                        "insertAfterStepId": "operator.uv_sphere",
-                                                        "operations": [
-                                                          {
-                                                            "id": "control.location",
-                                                            "label": "Location",
-                                                            "target": {
-                                                              "kind": "control",
-                                                              "hostId": "VIEW3D_PT_item.transform.location"
-                                                            },
-                                                            "path": [
-                                                              "Sidebar",
-                                                              "Item",
-                                                              "Transform",
-                                                              "Location"
-                                                            ],
-                                                            "parameters": [
-                                                              {
-                                                                "name": "value",
-                                                                "source": {
-                                                                  "kind": "action_argument",
-                                                                  "argumentName": "location",
-                                                                  "transform": "identity"
-                                                                }
-                                                              }
-                                                            ]
-                                                          },
-                                                          {
-                                                            "id": "control.scale",
-                                                            "label": "Scale",
-                                                            "target": {
-                                                              "kind": "control",
-                                                              "hostId": "VIEW3D_PT_item.transform.scale"
-                                                            },
-                                                            "path": [
-                                                              "Sidebar",
-                                                              "Item",
-                                                              "Transform",
-                                                              "Scale"
-                                                            ],
-                                                            "parameters": [
-                                                              {
-                                                                "name": "value",
-                                                                "source": {
-                                                                  "kind": "action_argument",
-                                                                  "argumentName": "radius",
-                                                                  "transform": "uniform_vector3"
-                                                                }
-                                                              }
-                                                            ]
-                                                          },
-                                                          {
-                                                            "id": "control.object_name",
-                                                            "label": "Object Name",
-                                                            "target": {
-                                                              "kind": "control",
-                                                              "hostId": "PROPERTIES.object.name"
-                                                            },
-                                                            "path": [
-                                                              "Properties",
-                                                              "Object",
-                                                              "Name"
-                                                            ],
-                                                            "parameters": [
-                                                              {
-                                                                "name": "value",
-                                                                "source": {
-                                                                  "kind": "action_argument",
-                                                                  "argumentName": "objectName",
-                                                                  "transform": "identity"
-                                                                }
-                                                              }
-                                                            ]
-                                                          }
-                                                        ]
-                                                      }
-                                                    },
-                                                    "omittedActionArguments": {
-                                                      "type": "array",
-                                                      "minItems": 1,
-                                                      "maxItems": 1,
-                                                      "contains": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                          "argumentName": {
-                                                            "const": "resourceId"
-                                                          }
-                                                        },
-                                                        "required": [
-                                                          "argumentName"
-                                                        ]
-                                                      }
-                                                    }
-                                                  }
-                                                }
-                                              }
-                                            ]
+                                            "additionalProperties": false
                                           }
                                         ]
                                       }
@@ -3684,6 +3464,7 @@
                                                                     "type": "string",
                                                                     "enum": [
                                                                       "identity",
+                                                                      "json_identity",
                                                                       "divide_by_two",
                                                                       "uniform_vector3",
                                                                       "vector3_x",
@@ -3839,6 +3620,7 @@
                                                                         "type": "string",
                                                                         "enum": [
                                                                           "identity",
+                                                                          "json_identity",
                                                                           "divide_by_two",
                                                                           "uniform_vector3",
                                                                           "vector3_x",
@@ -4034,6 +3816,7 @@
                                                                         "type": "string",
                                                                         "enum": [
                                                                           "identity",
+                                                                          "json_identity",
                                                                           "divide_by_two",
                                                                           "uniform_vector3",
                                                                           "vector3_x",
@@ -4133,207 +3916,6 @@
                                               ],
                                               "additionalProperties": false
                                             }
-                                          },
-                                          "proofExecution": {
-                                            "oneOf": [
-                                              {
-                                                "type": "object",
-                                                "properties": {
-                                                  "executorId": {
-                                                    "type": "string",
-                                                    "const": "blender.subdivision_surface_f9.event_simulate.v1"
-                                                  },
-                                                  "targetProfile": {
-                                                    "type": "string",
-                                                    "const": "factory_cube_8_12_6"
-                                                  },
-                                                  "executionBoundary": {
-                                                    "type": "string",
-                                                    "const": "blender_window_event_simulate"
-                                                  },
-                                                  "osHidInput": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "managedActionExecuted": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "managedReceiptCreated": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "authorization": {
-                                                    "type": "string",
-                                                    "const": "accepted_replay_next_step"
-                                                  },
-                                                  "transport": {
-                                                    "type": "string",
-                                                    "const": "event_simulate"
-                                                  },
-                                                  "hostVersions": {
-                                                    "minItems": 2,
-                                                    "maxItems": 2,
-                                                    "type": "array",
-                                                    "items": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "4.5.3",
-                                                        "5.1.1"
-                                                      ]
-                                                    }
-                                                  },
-                                                  "operationIds": {
-                                                    "minItems": 4,
-                                                    "maxItems": 4,
-                                                    "type": "array",
-                                                    "items": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "shortcut.add_subdivision_surface_level_one",
-                                                        "shortcut.open_adjust_last_operation",
-                                                        "shortcut.set_viewport_level",
-                                                        "shortcut.close_adjust_last_operation"
-                                                      ]
-                                                    }
-                                                  },
-                                                  "strongObservationKind": {
-                                                    "type": "string",
-                                                    "const": "subdivision_surface_shortcut_ready"
-                                                  },
-                                                  "nativeUndoCheckpointRequired": {
-                                                    "type": "boolean",
-                                                    "const": true
-                                                  }
-                                                },
-                                                "required": [
-                                                  "executorId",
-                                                  "targetProfile",
-                                                  "executionBoundary",
-                                                  "osHidInput",
-                                                  "managedActionExecuted",
-                                                  "managedReceiptCreated",
-                                                  "authorization",
-                                                  "transport",
-                                                  "hostVersions",
-                                                  "operationIds",
-                                                  "strongObservationKind",
-                                                  "nativeUndoCheckpointRequired"
-                                                ],
-                                                "additionalProperties": false
-                                              },
-                                              {
-                                                "type": "object",
-                                                "properties": {
-                                                  "executorId": {
-                                                    "type": "string",
-                                                    "const": "blender.mesh_edit_subdivide_f3_f9.event_simulate.v1"
-                                                  },
-                                                  "targetProfile": {
-                                                    "type": "string",
-                                                    "const": "factory_cube_single_user_mesh_8_12_6"
-                                                  },
-                                                  "executionBoundary": {
-                                                    "type": "string",
-                                                    "const": "blender_window_event_simulate"
-                                                  },
-                                                  "osHidInput": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "managedActionExecuted": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "managedReceiptCreated": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "managedReplacementMeshCreated": {
-                                                    "type": "boolean",
-                                                    "const": false
-                                                  },
-                                                  "nativeMutationKind": {
-                                                    "type": "string",
-                                                    "const": "in_place_edit_mesh_subdivide"
-                                                  },
-                                                  "authorization": {
-                                                    "type": "string",
-                                                    "const": "accepted_replay_next_step"
-                                                  },
-                                                  "transport": {
-                                                    "type": "string",
-                                                    "const": "event_simulate"
-                                                  },
-                                                  "hostVersions": {
-                                                    "minItems": 2,
-                                                    "maxItems": 2,
-                                                    "type": "array",
-                                                    "items": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "4.5.3",
-                                                        "5.1.1"
-                                                      ]
-                                                    }
-                                                  },
-                                                  "operationIds": {
-                                                    "minItems": 9,
-                                                    "maxItems": 9,
-                                                    "type": "array",
-                                                    "items": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "shortcut.enter_edit_mode",
-                                                        "shortcut.select_all_mesh_elements",
-                                                        "shortcut.search_subdivide",
-                                                        "shortcut.execute_subdivide",
-                                                        "shortcut.open_adjust_last_operation",
-                                                        "shortcut.set_number_of_cuts",
-                                                        "shortcut.set_smoothness",
-                                                        "shortcut.close_adjust_last_operation",
-                                                        "shortcut.return_to_object_mode"
-                                                      ]
-                                                    }
-                                                  },
-                                                  "strongObservationKind": {
-                                                    "type": "string",
-                                                    "const": "mesh_edit_subdivide_shortcut_ready"
-                                                  },
-                                                  "nativeUndoCheckpointRequired": {
-                                                    "type": "boolean",
-                                                    "const": true
-                                                  },
-                                                  "nativeUndoDepth": {
-                                                    "type": "number",
-                                                    "const": 4
-                                                  },
-                                                  "nativeRedoDepth": {
-                                                    "type": "number",
-                                                    "const": 4
-                                                  }
-                                                },
-                                                "required": [
-                                                  "executorId",
-                                                  "targetProfile",
-                                                  "executionBoundary",
-                                                  "osHidInput",
-                                                  "managedActionExecuted",
-                                                  "managedReceiptCreated",
-                                                  "managedReplacementMeshCreated",
-                                                  "nativeMutationKind",
-                                                  "authorization",
-                                                  "transport",
-                                                  "hostVersions",
-                                                  "operationIds",
-                                                  "strongObservationKind",
-                                                  "nativeUndoCheckpointRequired",
-                                                  "nativeUndoDepth",
-                                                  "nativeRedoDepth"
-                                                ],
-                                                "additionalProperties": false
-                                              }
-                                            ]
                                           }
                                         },
                                         "required": [
@@ -4417,6 +3999,196 @@
                                           "resultBinding"
                                         ],
                                         "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "availability": {
+                                            "type": "string",
+                                            "const": "available"
+                                          },
+                                          "source": {
+                                            "type": "string",
+                                            "const": "catalog.operation_level_mcp"
+                                          },
+                                          "semanticBinding": {
+                                            "type": "string",
+                                            "const": "ordered_leaf_operations"
+                                          },
+                                          "parameterBinding": {
+                                            "type": "string",
+                                            "const": "ordered_parameter_operations"
+                                          },
+                                          "serverName": {
+                                            "type": "string",
+                                            "const": "operating-line"
+                                          },
+                                          "toolName": {
+                                            "type": "string",
+                                            "enum": [
+                                              "operatingline.blender.geometry-nodes.transform.execute-next",
+                                              "operatingline.blender.geometry-nodes.light-trails.execute-next",
+                                              "operatingline.blender.animation.pose-keyframes.execute-next",
+                                              "operatingline.blender.rig.armature.execute-next",
+                                              "operatingline.blender.rig.skin-weights.execute-next",
+                                              "operatingline.blender.modifier.solidify.execute-next",
+                                              "operatingline.blender.modifier.bevel.execute-next",
+                                              "operatingline.blender.material.single.execute-next",
+                                              "operatingline.blender.material.palette.execute-next",
+                                              "operatingline.blender.modifier.mirror.execute-next",
+                                              "operatingline.blender.modifier.subdivision-surface.execute-next",
+                                              "operatingline.blender.mesh.edit-bevel-edges.execute-next",
+                                              "operatingline.blender.mesh.edit-inset-faces.execute-next",
+                                              "operatingline.blender.mesh.edit-triangulate.execute-next",
+                                              "operatingline.blender.mesh.edit-extrude-region.execute-next",
+                                              "operatingline.blender.mesh.edit-poke-faces.execute-next"
+                                            ]
+                                          },
+                                          "authorization": {
+                                            "type": "string",
+                                            "const": "accepted_replay_next_step"
+                                          },
+                                          "resultBinding": {
+                                            "type": "string",
+                                            "const": "companion_leaf_operation_progress"
+                                          },
+                                          "operations": {
+                                            "minItems": 1,
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "sourceOperationId": {
+                                                  "type": "string",
+                                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                                },
+                                                "parameters": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "name": {
+                                                        "type": "string",
+                                                        "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                                                      },
+                                                      "source": {
+                                                        "oneOf": [
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "kind": {
+                                                                "type": "string",
+                                                                "const": "literal"
+                                                              },
+                                                              "value": {
+                                                                "$ref": "#/$defs/__schema0"
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "kind",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "kind": {
+                                                                "type": "string",
+                                                                "const": "action_argument"
+                                                              },
+                                                              "argumentName": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "transform": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                  "identity",
+                                                                  "json_identity",
+                                                                  "divide_by_two",
+                                                                  "uniform_vector3",
+                                                                  "vector3_x",
+                                                                  "vector3_y",
+                                                                  "vector3_z"
+                                                                ]
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "kind",
+                                                              "argumentName",
+                                                              "transform"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "kind": {
+                                                                "type": "string",
+                                                                "const": "derived_action_arguments"
+                                                              },
+                                                              "derivation": {
+                                                                "type": "string",
+                                                                "const": "segment_frame"
+                                                              },
+                                                              "startArgumentName": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "endArgumentName": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "output": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                  "distance",
+                                                                  "midpoint",
+                                                                  "rotation_euler_xyz_align_z"
+                                                                ]
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "kind",
+                                                              "derivation",
+                                                              "startArgumentName",
+                                                              "endArgumentName",
+                                                              "output"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          }
+                                                        ]
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "name",
+                                                      "source"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  }
+                                                }
+                                              },
+                                              "required": [
+                                                "sourceOperationId",
+                                                "parameters"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": [
+                                          "availability",
+                                          "source",
+                                          "semanticBinding",
+                                          "parameterBinding",
+                                          "serverName",
+                                          "toolName",
+                                          "authorization",
+                                          "resultBinding",
+                                          "operations"
+                                        ],
+                                        "additionalProperties": false
                                       }
                                     ]
                                   }
@@ -4435,111 +4207,7 @@
                               "title",
                               "guidance"
                             ],
-                            "additionalProperties": false,
-                            "allOf": [
-                              {
-                                "if": {
-                                  "properties": {
-                                    "procedureMaterialization": {
-                                      "type": "object",
-                                      "properties": {
-                                        "menu": {
-                                          "type": "object",
-                                          "required": [
-                                            "proofExecution"
-                                          ]
-                                        }
-                                      },
-                                      "required": [
-                                        "menu"
-                                      ]
-                                    }
-                                  },
-                                  "required": [
-                                    "procedureMaterialization"
-                                  ]
-                                },
-                                "then": {
-                                  "properties": {
-                                    "id": {
-                                      "const": "blender.mesh.create_uv_sphere.native"
-                                    },
-                                    "actionName": {
-                                      "const": "blender.mesh.create_uv_sphere"
-                                    },
-                                    "guidance": {
-                                      "type": "object",
-                                      "properties": {
-                                        "kind": {
-                                          "const": "native_path"
-                                        },
-                                        "steps": {
-                                          "const": [
-                                            {
-                                              "id": "workspace.layout",
-                                              "order": 1,
-                                              "label": "Layout",
-                                              "intent": "navigate",
-                                              "target": {
-                                                "kind": "workspace",
-                                                "hostId": "Layout"
-                                              }
-                                            },
-                                            {
-                                              "id": "menu.add",
-                                              "order": 2,
-                                              "label": "Add",
-                                              "intent": "navigate",
-                                              "target": {
-                                                "kind": "menu",
-                                                "hostId": "VIEW3D_MT_add"
-                                              }
-                                            },
-                                            {
-                                              "id": "menu.mesh",
-                                              "order": 3,
-                                              "label": "Mesh",
-                                              "intent": "navigate",
-                                              "target": {
-                                                "kind": "menu",
-                                                "hostId": "VIEW3D_MT_mesh_add"
-                                              }
-                                            },
-                                            {
-                                              "id": "operator.uv_sphere",
-                                              "order": 4,
-                                              "label": "UV Sphere",
-                                              "intent": "execute",
-                                              "target": {
-                                                "kind": "operator",
-                                                "hostId": "mesh.primitive_uv_sphere_add"
-                                              }
-                                            }
-                                          ]
-                                        },
-                                        "execution": {
-                                          "const": {
-                                            "stepId": "operator.uv_sphere",
-                                            "operatorId": "mesh.primitive_uv_sphere_add",
-                                            "binding": "accepted_plan_action"
-                                          }
-                                        }
-                                      },
-                                      "required": [
-                                        "kind",
-                                        "steps",
-                                        "execution"
-                                      ]
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "actionName",
-                                    "guidance"
-                                  ]
-                                }
-                              }
-                            ]
+                            "additionalProperties": false
                           }
                         }
                       },
@@ -4916,8 +4584,16 @@
               "type": "object",
               "properties": {
                 "maxCanonicalBytes": {
-                  "type": "number",
-                  "const": 262144
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "const": 262144
+                    },
+                    {
+                      "type": "number",
+                      "const": 524288
+                    }
+                  ]
                 }
               },
               "required": [
@@ -6105,7 +5781,10 @@
                         "properties": {
                           "formatVersion": {
                             "type": "string",
-                            "const": "1.0.0"
+                            "enum": [
+                              "1.0.0",
+                              "1.1.0"
+                            ]
                           },
                           "provenance": {
                             "type": "object",
@@ -6221,6 +5900,7 @@
                                   "type": "string",
                                   "enum": [
                                     "identity",
+                                    "json_identity",
                                     "uniform_vector3",
                                     "divide_by_two",
                                     "vector3_x",
@@ -6302,6 +5982,77 @@
                                         "modality": {
                                           "type": "string",
                                           "const": "menu"
+                                        },
+                                        "trackId": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "operationId": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "path": {
+                                          "minItems": 1,
+                                          "maxItems": 32,
+                                          "type": "array",
+                                          "items": {
+                                            "oneOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "field"
+                                                  },
+                                                  "name": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 180
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "name"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "index"
+                                                  },
+                                                  "index": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 1000000
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "index"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "modality",
+                                        "trackId",
+                                        "operationId",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "modality": {
+                                          "type": "string",
+                                          "const": "menu_candidate"
                                         },
                                         "trackId": {
                                           "type": "string",
@@ -6625,7 +6376,8 @@
                   "type": "string",
                   "enum": [
                     "1.0.0",
-                    "1.1.0"
+                    "1.1.0",
+                    "1.2.0"
                   ]
                 },
                 "procedureTreeId": {
@@ -6689,7 +6441,8 @@
                         "1.3.0",
                         "1.4.0",
                         "1.5.0",
-                        "1.6.0"
+                        "1.6.0",
+                        "1.7.0"
                       ]
                     },
                     "id": {
@@ -7062,6 +6815,321 @@
                             ],
                             "additionalProperties": false
                           },
+                          "candidateMenuProjection": {
+                            "type": "object",
+                            "properties": {
+                              "projection": {
+                                "type": "string",
+                                "const": "candidate_only"
+                              },
+                              "interactionCatalogVersion": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                              },
+                              "id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "modality": {
+                                "type": "string",
+                                "const": "menu"
+                              },
+                              "equivalence": {
+                                "type": "string",
+                                "const": "not_equivalent_to_managed_action"
+                              },
+                              "executionAuthority": {
+                                "type": "string",
+                                "const": "none"
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "reason": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "preconditions": {
+                                "minItems": 1,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "workspace",
+                                        "editor",
+                                        "mode",
+                                        "selection",
+                                        "keymap",
+                                        "modal_state",
+                                        "scene_state"
+                                      ]
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "label",
+                                    "value"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "operations": {
+                                "minItems": 1,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "order": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "semanticRefs": {
+                                      "minItems": 1,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                      }
+                                    },
+                                    "description": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "evidenceRefs": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                      }
+                                    },
+                                    "intent": {
+                                      "type": "string",
+                                      "enum": [
+                                        "navigate",
+                                        "configure",
+                                        "execute",
+                                        "verify"
+                                      ]
+                                    },
+                                    "target": {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "workspace",
+                                            "editor",
+                                            "mode",
+                                            "menu",
+                                            "menu_item",
+                                            "operator",
+                                            "control",
+                                            "panel",
+                                            "node",
+                                            "socket",
+                                            "canvas",
+                                            "semantic"
+                                          ]
+                                        },
+                                        "hostId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "connection": {
+                                          "type": "object",
+                                          "properties": {
+                                            "fromNode": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "fromSocket": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toNode": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toSocket": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "fromNode",
+                                            "fromSocket",
+                                            "toNode",
+                                            "toSocket"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "hostId"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "path": {
+                                      "minItems": 1,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "parameters": {
+                                      "type": "object",
+                                      "propertyNames": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "additionalProperties": {
+                                        "$ref": "#/$defs/__schema4"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "order",
+                                    "semanticRefs",
+                                    "description",
+                                    "evidenceRefs",
+                                    "intent",
+                                    "target",
+                                    "path",
+                                    "parameters"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "omittedActionArguments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "argumentName": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "reason": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "argumentName",
+                                    "reason"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "nativeEvidence": {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "bounded_blender_ui_probe"
+                                  },
+                                  "executorId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "hostVersions": {
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "managedActionExecuted": {
+                                    "type": "boolean",
+                                    "const": false
+                                  },
+                                  "managedReceiptCreated": {
+                                    "type": "boolean",
+                                    "const": false
+                                  },
+                                  "managedReplacementMeshCreated": {
+                                    "type": "boolean",
+                                    "const": false
+                                  },
+                                  "nativeMutationKind": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "operationIds": {
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    }
+                                  },
+                                  "nativeUndoCheckpointRequired": {
+                                    "type": "boolean",
+                                    "const": true
+                                  },
+                                  "nativeUndoDepth": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "nativeRedoDepth": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "executorId",
+                                  "hostVersions",
+                                  "managedActionExecuted",
+                                  "managedReceiptCreated",
+                                  "managedReplacementMeshCreated",
+                                  "nativeMutationKind",
+                                  "operationIds",
+                                  "nativeUndoCheckpointRequired",
+                                  "nativeUndoDepth",
+                                  "nativeRedoDepth"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "projection",
+                              "interactionCatalogVersion",
+                              "id",
+                              "modality",
+                              "equivalence",
+                              "executionAuthority",
+                              "title",
+                              "reason",
+                              "preconditions",
+                              "operations",
+                              "omittedActionArguments"
+                            ],
+                            "additionalProperties": false
+                          },
                           "rollback": {
                             "type": "object",
                             "properties": {
@@ -7131,6 +7199,20 @@
                           },
                           {
                             "if": {
+                              "required": [
+                                "candidateMenuProjection"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "action": {
+                                  "type": "object"
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": {
                               "properties": {
                                 "observationPolicy": {
                                   "properties": {
@@ -7178,7 +7260,8 @@
                               "1.3.0",
                               "1.4.0",
                               "1.5.0",
-                              "1.6.0"
+                              "1.6.0",
+                              "1.7.0"
                             ]
                           }
                         },
@@ -7204,7 +7287,10 @@
                       "if": {
                         "properties": {
                           "protocolVersion": {
-                            "const": "1.6.0"
+                            "enum": [
+                              "1.6.0",
+                              "1.7.0"
+                            ]
                           }
                         },
                         "required": [
@@ -7218,6 +7304,31 @@
                               "not": {
                                 "required": [
                                   "executionTrackOverride"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "protocolVersion": {
+                            "const": "1.7.0"
+                          }
+                        },
+                        "required": [
+                          "protocolVersion"
+                        ]
+                      },
+                      "else": {
+                        "properties": {
+                          "steps": {
+                            "items": {
+                              "not": {
+                                "required": [
+                                  "candidateMenuProjection"
                                 ]
                               }
                             }
@@ -7493,6 +7604,37 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema3"
+          }
+        }
+      ]
+    },
+    "__schema4": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema4"
           }
         }
       ]

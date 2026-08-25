@@ -1,0 +1,456 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 5,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.skin-weights.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_modifier_create"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.preserve_volume"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.preserve_volume"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_modifier_create"
+          },
+          "pendingModifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingSkinModifier\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "ArmatureModifier"
+          },
+          "modifierType": {
+            "type": "string",
+            "const": "ARMATURE"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingSkinModifier\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "armatureId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingModifierName",
+          "resourceType",
+          "modifierType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.skin-weights.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_modifier_object_bind"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.preserve_volume"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.preserve_volume"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "armatureId"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_modifier_object_bind"
+          },
+          "pendingModifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingSkinModifier\\.[0-9a-f]{8}$"
+          },
+          "observedBinding": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingSkinModifier\\.[0-9a-f]{8}$"
+              },
+              {
+                "type": "string",
+                "const": "Object"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 6,
+            "maxItems": 6
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "armatureId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "pendingModifierName",
+          "observedBinding",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.skin-weights.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 3,
+            "maximum": 5
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_modifier_property_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.preserve_volume"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.preserve_volume"
+          },
+          "valueSource": {
+            "type": "string",
+            "enum": [
+              "catalog_constant",
+              "accepted_action_argument"
+            ]
+          },
+          "actionArgument": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "const": "preserveVolume"
+              }
+            ]
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_modifier_property_write"
+          },
+          "pendingModifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingSkinModifier\\.[0-9a-f]{8}$"
+          },
+          "propertyName": {
+            "type": "string",
+            "enum": [
+              "use_vertex_groups",
+              "use_bone_envelopes",
+              "use_deform_preserve_volume"
+            ]
+          },
+          "acceptedValue": {
+            "type": "boolean"
+          },
+          "observedValue": {
+            "type": "boolean"
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingSkinModifier\\.[0-9a-f]{8}$"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Vertex Groups",
+                  "Bone Envelopes",
+                  "Preserve Volume"
+                ]
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "armatureId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "pendingModifierName",
+          "propertyName",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.rig.skin-weights.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_modifier_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.modifier_name"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.skin_weights.modifier_name"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "modifierName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_modifier_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingSkinModifier\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "armatureId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Skin Armature Modifier create/bind/property/name mutation order, managed pending identity, accepted-to-observed values, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-skin-rna-modifier-mutations.json"
+}

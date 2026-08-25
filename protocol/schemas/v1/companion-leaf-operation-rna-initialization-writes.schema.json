@@ -1,0 +1,261 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 8,
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "order": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8
+      },
+      "executionMethod": {
+        "type": "string",
+        "const": "blender_rna_property_write"
+      },
+      "mcpTool": {
+        "type": "string",
+        "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+      },
+      "sourceOperationId": {
+        "type": "string",
+        "enum": [
+          "node.light_trails.half_tile_line",
+          "node.light_trails.trail_resolution",
+          "node.light_trails.trail_rows",
+          "node.light_trails.terrain_noise",
+          "node.light_trails.center_noise",
+          "node.light_trails.scale_height",
+          "node.light_trails.mirror_half_tile",
+          "node.light_trails.trail_profile",
+          "node.light_trails.loop_tiles"
+        ]
+      },
+      "semanticAction": {
+        "type": "string",
+        "enum": [
+          "node.light_trails.half_tile_line",
+          "node.light_trails.trail_resolution",
+          "node.light_trails.trail_rows",
+          "node.light_trails.terrain_noise",
+          "node.light_trails.center_noise",
+          "node.light_trails.scale_height",
+          "node.light_trails.mirror_half_tile",
+          "node.light_trails.trail_profile",
+          "node.light_trails.loop_tiles"
+        ]
+      },
+      "nodeGroupId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "nodeGroupName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "nodeName": {
+        "type": "string",
+        "enum": [
+          "OperatingLine Half Tile Line",
+          "OperatingLine Trail Resolution",
+          "OperatingLine Trail Rows",
+          "OperatingLine Terrain Noise",
+          "OperatingLine Center Noise",
+          "OperatingLine Scale Height",
+          "OperatingLine Mirror Half Tile",
+          "OperatingLine Trail Profile",
+          "OperatingLine Loop Tiles"
+        ]
+      },
+      "nodeType": {
+        "type": "string",
+        "enum": [
+          "GeometryNodeCurvePrimitiveLine",
+          "GeometryNodeResampleCurve",
+          "GeometryNodeMeshLine",
+          "ShaderNodeTexNoise",
+          "ShaderNodeMath",
+          "GeometryNodeTransform",
+          "GeometryNodeCurvePrimitiveCircle"
+        ]
+      },
+      "targetKind": {
+        "type": "string",
+        "enum": [
+          "node_property",
+          "input_socket"
+        ]
+      },
+      "socketIdentifier": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "Start",
+              "End",
+              "Count",
+              "Start Location",
+              "Offset",
+              "Scale",
+              "Detail",
+              "Roughness",
+              "W",
+              "Value_001",
+              "Resolution",
+              "Radius"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "propertyName": {
+        "type": "string",
+        "enum": [
+          "mode",
+          "noise_dimensions",
+          "operation",
+          "default_value"
+        ]
+      },
+      "valueKind": {
+        "type": "string",
+        "enum": [
+          "enum",
+          "scalar",
+          "vector_component"
+        ]
+      },
+      "componentIndex": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "componentLabel": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "X",
+              "Y",
+              "Z"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "valueSource": {
+        "type": "string",
+        "enum": [
+          "catalog_constant",
+          "accepted_action_argument"
+        ]
+      },
+      "actionArgument": {
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "tileLength"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "assignedValue": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          }
+        ]
+      },
+      "observedValue": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          }
+        ]
+      },
+      "uiPath": {
+        "type": "array",
+        "items": [
+          {
+            "type": "string",
+            "const": "Geometry Nodes"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Mode",
+              "Dimensions",
+              "Operation",
+              "Value",
+              "X",
+              "Y",
+              "Z"
+            ]
+          }
+        ],
+        "additionalItems": false,
+        "minItems": 5,
+        "maxItems": 5
+      }
+    },
+    "required": [
+      "order",
+      "executionMethod",
+      "mcpTool",
+      "sourceOperationId",
+      "semanticAction",
+      "nodeGroupId",
+      "nodeGroupName",
+      "nodeName",
+      "nodeType",
+      "targetKind",
+      "socketIdentifier",
+      "propertyName",
+      "valueKind",
+      "componentIndex",
+      "componentLabel",
+      "valueSource",
+      "actionArgument",
+      "assignedValue",
+      "observedValue",
+      "uiPath"
+    ],
+    "additionalProperties": false
+  },
+  "$comment": "Exact Light Trails node-initialization target sets, values, source operations, and UI paths require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-rna-initialization-writes.json"
+}

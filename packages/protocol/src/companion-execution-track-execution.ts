@@ -1752,7 +1752,7 @@ export const companionExecutionTrackExecutionRecoveryAckSchema = z
         request.acceptedProgress?.phase === 'commit_intent_recorded' &&
         request.acceptedProgress.contentSha256 === result.lastProgressContentSha256 &&
         ack.evidence.recoveredReportContentSha256 === computeProtocolCanonicalJsonSha256(report) &&
-        report.protocolVersion === '1.6.0' &&
+        report.protocolVersion === request.acceptedProgress.binding.plan.protocolVersion &&
         report.adapterId === request.target.adapterId &&
         report.instanceId === request.target.instanceId &&
         report.plan?.id === request.acceptedProgress.binding.plan.id &&

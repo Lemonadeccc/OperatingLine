@@ -1,0 +1,287 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 2,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_node_create"
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "enum": [
+              "node.light_trails.group_input",
+              "node.light_trails.half_tile_line",
+              "node.light_trails.trail_resolution",
+              "node.light_trails.trail_rows",
+              "node.light_trails.trail_instances",
+              "node.light_trails.realize_trails",
+              "node.light_trails.trail_position",
+              "node.light_trails.terrain_noise",
+              "node.light_trails.center_noise",
+              "node.light_trails.scale_height",
+              "node.light_trails.z_offset",
+              "node.light_trails.displace_trails",
+              "node.light_trails.mirror_half_tile",
+              "node.light_trails.mirrored_tile",
+              "node.light_trails.trail_profile",
+              "node.light_trails.curve_to_mesh",
+              "node.light_trails.loop_tiles",
+              "node.light_trails.tile_instances",
+              "node.light_trails.realize_tiles",
+              "node.light_trails.group_output"
+            ]
+          },
+          "semanticAction": {
+            "type": "string",
+            "enum": [
+              "node.light_trails.group_input",
+              "node.light_trails.half_tile_line",
+              "node.light_trails.trail_resolution",
+              "node.light_trails.trail_rows",
+              "node.light_trails.trail_instances",
+              "node.light_trails.realize_trails",
+              "node.light_trails.trail_position",
+              "node.light_trails.terrain_noise",
+              "node.light_trails.center_noise",
+              "node.light_trails.scale_height",
+              "node.light_trails.z_offset",
+              "node.light_trails.displace_trails",
+              "node.light_trails.mirror_half_tile",
+              "node.light_trails.mirrored_tile",
+              "node.light_trails.trail_profile",
+              "node.light_trails.curve_to_mesh",
+              "node.light_trails.loop_tiles",
+              "node.light_trails.tile_instances",
+              "node.light_trails.realize_tiles",
+              "node.light_trails.group_output"
+            ]
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "structureKind": {
+            "type": "string",
+            "const": "node"
+          },
+          "nodeName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedNode": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Geometry Nodes"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Nodes"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "order",
+          "executionMethod",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "nodeGroupId",
+          "nodeGroupName",
+          "structureKind",
+          "nodeName",
+          "nodeType",
+          "observedNode",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_node_group_interface_socket_create"
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.geometry-nodes.light-trails.execute-next"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "enum": [
+              "node.light_trails.group_input",
+              "node.light_trails.half_tile_line",
+              "node.light_trails.trail_resolution",
+              "node.light_trails.trail_rows",
+              "node.light_trails.trail_instances",
+              "node.light_trails.realize_trails",
+              "node.light_trails.trail_position",
+              "node.light_trails.terrain_noise",
+              "node.light_trails.center_noise",
+              "node.light_trails.scale_height",
+              "node.light_trails.z_offset",
+              "node.light_trails.displace_trails",
+              "node.light_trails.mirror_half_tile",
+              "node.light_trails.mirrored_tile",
+              "node.light_trails.trail_profile",
+              "node.light_trails.curve_to_mesh",
+              "node.light_trails.loop_tiles",
+              "node.light_trails.tile_instances",
+              "node.light_trails.realize_tiles",
+              "node.light_trails.group_output"
+            ]
+          },
+          "semanticAction": {
+            "type": "string",
+            "enum": [
+              "node.light_trails.group_input",
+              "node.light_trails.half_tile_line",
+              "node.light_trails.trail_resolution",
+              "node.light_trails.trail_rows",
+              "node.light_trails.trail_instances",
+              "node.light_trails.realize_trails",
+              "node.light_trails.trail_position",
+              "node.light_trails.terrain_noise",
+              "node.light_trails.center_noise",
+              "node.light_trails.scale_height",
+              "node.light_trails.z_offset",
+              "node.light_trails.displace_trails",
+              "node.light_trails.mirror_half_tile",
+              "node.light_trails.mirrored_tile",
+              "node.light_trails.trail_profile",
+              "node.light_trails.curve_to_mesh",
+              "node.light_trails.loop_tiles",
+              "node.light_trails.tile_instances",
+              "node.light_trails.realize_tiles",
+              "node.light_trails.group_output"
+            ]
+          },
+          "nodeGroupId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "nodeGroupName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "structureKind": {
+            "type": "string",
+            "const": "interface_socket"
+          },
+          "interfaceSocketName": {
+            "type": "string",
+            "const": "Geometry"
+          },
+          "interfaceDirection": {
+            "type": "string",
+            "enum": [
+              "INPUT",
+              "OUTPUT"
+            ]
+          },
+          "interfaceSocketType": {
+            "type": "string",
+            "const": "NodeSocketGeometry"
+          },
+          "observedInterfaceSocket": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Geometry Nodes"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Interface"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "INPUT",
+                  "OUTPUT"
+                ]
+              },
+              {
+                "type": "string",
+                "const": "Geometry"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "order",
+          "executionMethod",
+          "mcpTool",
+          "sourceOperationId",
+          "semanticAction",
+          "nodeGroupId",
+          "nodeGroupName",
+          "structureKind",
+          "interfaceSocketName",
+          "interfaceDirection",
+          "interfaceSocketType",
+          "observedInterfaceSocket",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Light Trails interface-before-node creation order, node names/types, source operations, and UI paths require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-rna-structure-creations.json"
+}

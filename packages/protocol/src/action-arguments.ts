@@ -26,10 +26,13 @@ const schemaKeywords = new Set([
   'weightsSumToOne',
   'acyclicParents',
   'strictlyIncreasingFrames',
+  'consistentBoneRotationChannels',
   'distinctPropertyValues',
   'atLeastOnePositiveProperty',
+  'exactlyOneOfProperties',
   'vectorLengthMinimum',
   'vectorLengthMaximum',
+  'axisAngleUnitAxis',
 ]);
 
 const supportedTypes = new Set([
@@ -50,8 +53,13 @@ const customArrayKeywords = [
   'weightsSumToOne',
   'acyclicParents',
   'strictlyIncreasingFrames',
+  'consistentBoneRotationChannels',
 ] as const;
-const customObjectKeywords = ['distinctPropertyValues', 'atLeastOnePositiveProperty'] as const;
+const customObjectKeywords = [
+  'distinctPropertyValues',
+  'atLeastOnePositiveProperty',
+  'exactlyOneOfProperties',
+] as const;
 const vectorLengthKeywords = ['vectorLengthMinimum', 'vectorLengthMaximum'] as const;
 
 type SchemaRecord = Record<string, unknown>;
@@ -231,6 +239,45 @@ function validateCustomArraySchema(schema: SchemaRecord, path: string): void {
       'numeric',
     );
   }
+  if (schema.consistentBoneRotationChannels === true) {
+    const itemSchemas = customObjectItemSchemas(items, 'consistentBoneRotationChannels', path);
+    itemSchemas.forEach((itemSchema, index) => {
+      const branchPath =
+        itemSchemas.length === 1 ? `${path}.items` : `${path}.items.oneOf[${index}]`;
+      const properties = itemSchema.properties;
+      const required = itemSchema.required;
+      const posesSchema = isRecord(properties) ? properties.poses : undefined;
+      const poseItemSchema = isRecord(posesSchema) ? posesSchema.items : undefined;
+      const poseProperties = isRecord(poseItemSchema) ? poseItemSchema.properties : undefined;
+      const poseRequired = isRecord(poseItemSchema) ? poseItemSchema.required : undefined;
+      const alternatives = isRecord(poseItemSchema)
+        ? poseItemSchema.exactlyOneOfProperties
+        : undefined;
+      if (
+        !Array.isArray(required) ||
+        !required.includes('poses') ||
+        !isRecord(posesSchema) ||
+        posesSchema.type !== 'array' ||
+        !isRecord(poseItemSchema) ||
+        poseItemSchema.type !== 'object' ||
+        !isRecord(poseProperties) ||
+        !Array.isArray(poseRequired) ||
+        !poseRequired.includes('boneName') ||
+        !isRecord(poseProperties.boneName) ||
+        poseProperties.boneName.type !== 'string' ||
+        !Array.isArray(alternatives) ||
+        (alternatives.length !== 2 && alternatives.length !== 3) ||
+        !alternatives.includes('rotationEuler') ||
+        !alternatives.includes('rotationQuaternion') ||
+        (alternatives.length === 3 && !alternatives.includes('rotationAxisAngle'))
+      ) {
+        schemaError(
+          branchPath,
+          'consistentBoneRotationChannels requires poses with boneName and exactly one Euler/quaternion channel plus optional axis-angle support',
+        );
+      }
+    });
+  }
 }
 
 function validateVectorLengthSchema(schema: SchemaRecord, path: string): void {
@@ -317,6 +364,28 @@ function validateCustomObjectSchema(schema: SchemaRecord, path: string): void {
       }
     }
   }
+  if (schema.exactlyOneOfProperties !== undefined) {
+    const propertyNames = schema.exactlyOneOfProperties;
+    if (
+      !Array.isArray(propertyNames) ||
+      propertyNames.length < 2 ||
+      propertyNames.some((name) => typeof name !== 'string' || name.length === 0)
+    ) {
+      schemaError(path, 'exactlyOneOfProperties must contain at least two property names');
+    }
+    if (new Set(propertyNames).size !== propertyNames.length) {
+      schemaError(path, 'exactlyOneOfProperties must not repeat property names');
+    }
+    const properties = schema.properties;
+    if (!isRecord(properties)) {
+      schemaError(path, 'exactlyOneOfProperties requires declared properties');
+    }
+    for (const name of propertyNames) {
+      if (!Object.prototype.hasOwnProperty.call(properties, name)) {
+        schemaError(path, `exactlyOneOfProperties references unknown property ${name}`);
+      }
+    }
+  }
 }
 
 function validateSchemaNode(value: unknown, path: string): void {
@@ -392,7 +461,8 @@ function validateSchemaNode(value: unknown, path: string): void {
     value.maxItems !== undefined ||
     value.uniqueItems !== undefined ||
     customArrayKeywords.some((keyword) => value[keyword] !== undefined) ||
-    vectorLengthKeywords.some((keyword) => value[keyword] !== undefined);
+    vectorLengthKeywords.some((keyword) => value[keyword] !== undefined) ||
+    value.axisAngleUnitAxis !== undefined;
   if (usesArrayKeyword) {
     if (type !== 'array') {
       schemaError(path, 'array keywords require type array');
@@ -420,6 +490,19 @@ function validateSchemaNode(value: unknown, path: string): void {
     }
     validateCustomArraySchema(value, path);
     validateVectorLengthSchema(value, path);
+    if (value.axisAngleUnitAxis !== undefined) {
+      if (value.axisAngleUnitAxis !== true) {
+        schemaError(path, 'axisAngleUnitAxis must be true');
+      }
+      if (
+        value.minItems !== 4 ||
+        value.maxItems !== 4 ||
+        !isRecord(value.items) ||
+        value.items.type !== 'number'
+      ) {
+        schemaError(path, 'axisAngleUnitAxis requires exactly four numeric items');
+      }
+    }
   } else if (type === 'array') {
     schemaError(path, 'array schemas require items');
   }
@@ -605,6 +688,29 @@ function validateCustomArrayRules(value: unknown[], schema: SchemaRecord, path: 
       }
     }
   }
+  if (schema.consistentBoneRotationChannels === true) {
+    type RotationChannel = 'rotationEuler' | 'rotationQuaternion' | 'rotationAxisAngle';
+    const rotationChannelByBone = new Map<string, RotationChannel>();
+    value.forEach((keyframe, frameIndex) => {
+      if (!isRecord(keyframe) || !Array.isArray(keyframe.poses)) return;
+      keyframe.poses.forEach((pose, poseIndex) => {
+        if (!isRecord(pose) || typeof pose.boneName !== 'string') return;
+        const channels = (
+          ['rotationEuler', 'rotationQuaternion', 'rotationAxisAngle'] as const
+        ).filter((channel) => Object.prototype.hasOwnProperty.call(pose, channel));
+        if (channels.length !== 1) return;
+        const channel = channels[0]!;
+        const previous = rotationChannelByBone.get(pose.boneName);
+        if (previous !== undefined && previous !== channel) {
+          errors.push(
+            `${itemPath(path, frameIndex)}.poses[${poseIndex}].boneName rotation channel must remain ${previous}`,
+          );
+          return;
+        }
+        rotationChannelByBone.set(pose.boneName, channel);
+      });
+    });
+  }
   if (schema.acyclicParents === true) {
     const parents = new Map<string, string | null>();
     for (const item of value) {
@@ -657,6 +763,14 @@ function validateCustomArrayRules(value: unknown[], schema: SchemaRecord, path: 
       );
     }
   }
+  if (
+    schema.axisAngleUnitAxis === true &&
+    value.length === 4 &&
+    value.every((item) => typeof item === 'number' && Number.isFinite(item)) &&
+    Math.abs(Math.hypot(value[1] as number, value[2] as number, value[3] as number) - 1) > 1e-6
+  ) {
+    errors.push(`${path || 'arguments'} axis must have unit length`);
+  }
   return errors;
 }
 
@@ -695,6 +809,16 @@ function validateCustomObjectRules(
   ) {
     errors.push(
       `${displayPath} requires at least one positive value among ${positiveProperties.join(', ')}`,
+    );
+  }
+  const exactlyOneProperties = schema.exactlyOneOfProperties as string[] | undefined;
+  if (
+    exactlyOneProperties !== undefined &&
+    exactlyOneProperties.filter((name) => Object.prototype.hasOwnProperty.call(value, name))
+      .length !== 1
+  ) {
+    errors.push(
+      `${displayPath} requires exactly one property among ${exactlyOneProperties.join(', ')}`,
     );
   }
   return errors;

@@ -1,0 +1,315 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 20480,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20480
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.animation.pose-keyframes.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dataPath": {
+            "type": "string",
+            "enum": [
+              "rotation_euler",
+              "rotation_quaternion",
+              "rotation_axis_angle",
+              "location",
+              "scale"
+            ]
+          },
+          "componentIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_keyframe_interpolation_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.pose_animation.interpolation"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.pose_animation.interpolation"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "interpolation"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "keyframe_interpolation_write"
+          },
+          "frame": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "beforeValue": {
+            "type": "string",
+            "const": "BEZIER"
+          },
+          "acceptedValue": {
+            "type": "string",
+            "enum": [
+              "BEZIER",
+              "LINEAR",
+              "CONSTANT"
+            ]
+          },
+          "observedValue": {
+            "type": "string",
+            "enum": [
+              "BEZIER",
+              "LINEAR",
+              "CONSTANT"
+            ]
+          },
+          "observedPointValue": {
+            "type": "number"
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Animation"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "rotation_euler",
+                  "rotation_quaternion",
+                  "rotation_axis_angle",
+                  "location",
+                  "scale"
+                ]
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Interpolation"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 7,
+            "maxItems": 7
+          }
+        },
+        "required": [
+          "order",
+          "mcpTool",
+          "armatureId",
+          "actionId",
+          "actionName",
+          "boneName",
+          "dataPath",
+          "componentIndex",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "actionArgument",
+          "mutationKind",
+          "frame",
+          "beforeValue",
+          "acceptedValue",
+          "observedValue",
+          "observedPointValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 320
+          },
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.animation.pose-keyframes.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boneName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dataPath": {
+            "type": "string",
+            "enum": [
+              "rotation_euler",
+              "rotation_quaternion",
+              "rotation_axis_angle",
+              "location",
+              "scale"
+            ]
+          },
+          "componentIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_fcurve_extrapolation_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.pose_animation.extrapolation"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.pose_animation.extrapolation"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "extrapolation"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "fcurve_extrapolation_write"
+          },
+          "beforeValue": {
+            "type": "string",
+            "const": "CONSTANT"
+          },
+          "acceptedValue": {
+            "type": "string",
+            "enum": [
+              "CONSTANT",
+              "LINEAR"
+            ]
+          },
+          "observedValue": {
+            "type": "string",
+            "enum": [
+              "CONSTANT",
+              "LINEAR"
+            ]
+          },
+          "keyframePointCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Animation"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "rotation_euler",
+                  "rotation_quaternion",
+                  "rotation_axis_angle",
+                  "location",
+                  "scale"
+                ]
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Extrapolation"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 6,
+            "maxItems": 6
+          }
+        },
+        "required": [
+          "order",
+          "mcpTool",
+          "armatureId",
+          "actionId",
+          "actionName",
+          "boneName",
+          "dataPath",
+          "componentIndex",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "actionArgument",
+          "mutationKind",
+          "beforeValue",
+          "acceptedValue",
+          "observedValue",
+          "keyframePointCount",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Pose keyframe interpolation and FCurve extrapolation order, accepted-to-observed values, resource identity, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-pose-rna-animation-property-writes.json"
+}

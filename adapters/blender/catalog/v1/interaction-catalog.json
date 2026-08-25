@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.44.0",
+  "catalogVersion": "1.69.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.22.0",
+  "actionCatalogVersion": "1.27.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.22.0 action.",
+  "description": "Version-tested host interaction recipes, non-executable menu candidates, and explicit semantic fallbacks for every Blender ActionCatalog 1.27.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -88,21 +88,36 @@
             {
               "id": "projection.semantic.transform.location",
               "semanticAction": "set_object_transform",
-              "path": [{ "kind": "field", "name": "location" }],
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "location"
+                }
+              ],
               "actionArgument": "location",
               "transform": "identity"
             },
             {
               "id": "projection.semantic.transform.scale",
               "semanticAction": "set_object_transform",
-              "path": [{ "kind": "field", "name": "scale" }],
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "scale"
+                }
+              ],
               "actionArgument": "radius",
               "transform": "uniform_vector3"
             },
             {
               "id": "projection.semantic.rename.name",
               "semanticAction": "rename_object",
-              "path": [{ "kind": "field", "name": "name" }],
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "name"
+                }
+              ],
               "actionArgument": "objectName",
               "transform": "identity"
             }
@@ -2154,28 +2169,40 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "mode.edit_mesh",
             "order": 3,
             "label": "Edit Mode",
             "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_MESH"
+            }
           },
           {
             "id": "operator.subdivide",
             "order": 4,
             "label": "Subdivide",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.subdivide" }
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.subdivide"
+            }
           }
         ],
         "reason": "The accepted action subdivides every edge into a new owned mesh datablock and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
@@ -2185,6 +2212,259 @@
         "menu": {
           "availability": "unavailable",
           "reason": "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent executable menu track."
+        },
+        "menuCandidate": {
+          "source": "catalog.ordered_menu_candidate_operations",
+          "projection": "candidate_only",
+          "equivalence": "not_equivalent_to_managed_action",
+          "executionAuthority": "none",
+          "reason": "This real Blender UI path mutates the active mesh in place. It teaches the visible controls and ordered parameter entry, but it cannot create the managed replacement mesh identity or receipt required by the accepted action.",
+          "preconditions": [
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
+            {
+              "kind": "selection",
+              "label": "Active Target",
+              "value": "Exactly the accepted single-user mesh object is active and selected"
+            },
+            {
+              "kind": "modal_state",
+              "label": "Modal UI",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Mesh Elements",
+              "value": "All target mesh elements are visible"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Modifiers",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Shape Keys",
+              "value": "None"
+            }
+          ],
+          "operations": [
+            {
+              "id": "candidate.workspace_layout",
+              "label": "Use Layout Workspace",
+              "intent": "navigate",
+              "target": {
+                "kind": "workspace",
+                "hostId": "Layout"
+              },
+              "path": ["Layout"],
+              "parameters": []
+            },
+            {
+              "id": "candidate.use_accepted_active_mesh",
+              "label": "Use Accepted Active Mesh",
+              "intent": "verify",
+              "target": {
+                "kind": "semantic",
+                "hostId": "operatingline.blender.accepted_active_mesh"
+              },
+              "path": ["Layout", "3D Viewport", "Active Object"],
+              "parameters": []
+            },
+            {
+              "id": "candidate.enter_edit_mode",
+              "label": "Choose Edit Mode",
+              "intent": "configure",
+              "target": {
+                "kind": "control",
+                "hostId": "VIEW3D_HT_header.mode"
+              },
+              "path": ["Layout", "3D Viewport Header", "Mode", "Edit Mode"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "literal",
+                    "value": "EDIT"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "candidate.open_select_menu",
+              "label": "Open Select Menu",
+              "intent": "navigate",
+              "target": {
+                "kind": "menu",
+                "hostId": "VIEW3D_MT_select_edit_mesh"
+              },
+              "path": ["Layout", "3D Viewport Header", "Select"],
+              "parameters": []
+            },
+            {
+              "id": "candidate.select_all_mesh_elements",
+              "label": "Select All Mesh Elements",
+              "intent": "configure",
+              "target": {
+                "kind": "operator",
+                "hostId": "mesh.select_all"
+              },
+              "path": ["Layout", "3D Viewport Header", "Select", "All"],
+              "parameters": [
+                {
+                  "name": "action",
+                  "source": {
+                    "kind": "literal",
+                    "value": "SELECT"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "candidate.open_edge_menu",
+              "label": "Open Edge Menu",
+              "intent": "navigate",
+              "target": {
+                "kind": "menu",
+                "hostId": "VIEW3D_MT_edit_mesh_edges"
+              },
+              "path": ["Layout", "3D Viewport Header", "Edge"],
+              "parameters": []
+            },
+            {
+              "id": "candidate.execute_subdivide",
+              "label": "Choose Subdivide",
+              "intent": "execute",
+              "target": {
+                "kind": "operator",
+                "hostId": "mesh.subdivide"
+              },
+              "path": ["Layout", "3D Viewport Header", "Edge", "Subdivide"],
+              "parameters": []
+            },
+            {
+              "id": "candidate.open_adjust_last_operation",
+              "label": "Open Adjust Last Operation",
+              "intent": "navigate",
+              "target": {
+                "kind": "operator",
+                "hostId": "screen.redo_last"
+              },
+              "path": ["Edit", "Adjust Last Operation"],
+              "parameters": []
+            },
+            {
+              "id": "candidate.set_number_of_cuts",
+              "label": "Set Number of Cuts",
+              "intent": "configure",
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.subdivide.number_cuts"
+              },
+              "path": ["Adjust Last Operation", "Number of Cuts"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "cuts",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "candidate.set_smoothness",
+              "label": "Set Smoothness",
+              "intent": "configure",
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.subdivide.smoothness"
+              },
+              "path": ["Adjust Last Operation", "Smoothness"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "smooth",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "candidate.return_to_object_mode",
+              "label": "Return to Object Mode",
+              "intent": "configure",
+              "target": {
+                "kind": "control",
+                "hostId": "VIEW3D_HT_header.mode"
+              },
+              "path": ["Layout", "3D Viewport Header", "Mode", "Object Mode"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "literal",
+                    "value": "OBJECT"
+                  }
+                }
+              ]
+            }
+          ],
+          "nativeEvidence": {
+            "kind": "bounded_blender_ui_probe",
+            "executorId": "blender.mesh_edit_subdivide_candidate_menu_f9.event_simulate.v1",
+            "hostVersions": ["4.5.3", "5.1.1"],
+            "managedActionExecuted": false,
+            "managedReceiptCreated": false,
+            "managedReplacementMeshCreated": false,
+            "nativeMutationKind": "in_place_edit_mesh_subdivide",
+            "operationIds": [
+              "candidate.workspace_layout",
+              "candidate.use_accepted_active_mesh",
+              "candidate.enter_edit_mode",
+              "candidate.open_select_menu",
+              "candidate.select_all_mesh_elements",
+              "candidate.open_edge_menu",
+              "candidate.execute_subdivide",
+              "candidate.open_adjust_last_operation",
+              "candidate.set_number_of_cuts",
+              "candidate.set_smoothness",
+              "candidate.return_to_object_mode"
+            ],
+            "nativeUndoCheckpointRequired": true,
+            "nativeUndoDepth": 4,
+            "nativeRedoDepth": 4
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The exact active target is supplied by the selection precondition; its logical ID is not entered into a Blender control."
+            },
+            {
+              "argumentName": "resultMeshId",
+              "reason": "The native Edit Mode path mutates the current mesh in place and does not create the managed replacement mesh identity."
+            },
+            {
+              "argumentName": "resultMeshName",
+              "reason": "The native Edit Mode path does not copy or rename a managed replacement mesh datablock."
+            }
+          ]
         },
         "shortcut": {
           "availability": "available",
@@ -2447,28 +2727,60 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "mode.edit_mesh",
             "order": 3,
             "label": "Edit Mode",
             "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_MESH"
+            }
+          },
+          {
+            "id": "menu.face",
+            "order": 4,
+            "label": "Face",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_edit_mesh_faces"
+            }
           },
           {
             "id": "operator.triangulate_faces",
-            "order": 4,
+            "order": 5,
             "label": "Triangulate Faces",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.quads_convert_to_tris" }
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.quads_convert_to_tris"
+            }
+          },
+          {
+            "id": "semantic.managed_triangulate_contract",
+            "order": 6,
+            "label": "Managed Triangulate Contract",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.managed_triangulate"
+            }
           }
         ],
         "reason": "The accepted action triangulates the complete bounded mesh into a new owned datablock with fixed FIXED/EAR_CLIP methods and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
@@ -2485,13 +2797,65 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.mesh.edit-triangulate.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "resultMeshId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.select_owned_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "mode.edit_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "menu.face",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "operator.triangulate_faces",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.managed_triangulate_contract",
+              "parameters": [
+                {
+                  "name": "resultMeshName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -2507,21 +2871,30 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "mode.edit_mesh",
             "order": 3,
             "label": "Edit Mode",
             "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_MESH"
+            }
           },
           {
             "id": "semantic.select_face_region",
@@ -2538,7 +2911,20 @@
             "order": 5,
             "label": "Extrude Region",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.extrude_region_move" }
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.extrude_region_move"
+            }
+          },
+          {
+            "id": "semantic.managed_extrude_region_contract",
+            "order": 6,
+            "label": "Managed Extrude Region Contract",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.managed_extrude_region"
+            }
           }
         ],
         "reason": "The accepted action resolves stable source polygon indices, validates one connected bounded region, extrudes it by an exact local-space vector into a new owned mesh datablock, and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership, selection, observation, and rollback contract.",
@@ -2555,13 +2941,83 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.mesh.edit-extrude-region.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "resultMeshId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.select_owned_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "mode.edit_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.select_face_region",
+              "parameters": [
+                {
+                  "name": "polygonIndices",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "polygonIndices",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "operator.extrude_region_move",
+              "parameters": [
+                {
+                  "name": "translation",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "translation",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.managed_extrude_region_contract",
+              "parameters": [
+                {
+                  "name": "resultMeshName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -2577,35 +3033,50 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "mode.edit_mesh",
             "order": 3,
             "label": "Edit Mode",
             "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_MESH"
+            }
           },
           {
             "id": "menu.edge",
             "order": 4,
             "label": "Edge",
             "intent": "navigate",
-            "target": { "kind": "menu", "hostId": "VIEW3D_MT_edit_mesh_edges" }
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_edit_mesh_edges"
+            }
           },
           {
             "id": "operator.bevel_edges",
             "order": 5,
             "label": "Bevel Edges",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.bevel" }
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.bevel"
+            }
           },
           {
             "id": "semantic.managed_bevel_edges_contract",
@@ -2633,18 +3104,46 @@
           "parameterBinding": "ordered_parameter_operations",
           "projection": "candidate_only",
           "preconditions": [
-            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
-            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
-            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
             {
               "kind": "selection",
               "label": "Active Target",
               "value": "Exactly one accepted target Mesh object is active and selected"
             },
-            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
-            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
-            { "kind": "scene_state", "label": "Modifiers", "value": "None" },
-            { "kind": "scene_state", "label": "Shape Keys", "value": "None" },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "modal_state",
+              "label": "Modal UI",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Modifiers",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Shape Keys",
+              "value": "None"
+            },
             {
               "kind": "scene_state",
               "label": "Closed Manifold",
@@ -2688,40 +3187,139 @@
               "keyMode": "chord",
               "keys": ["CTRL", "B"],
               "parameters": [
-                { "name": "offset_type", "source": { "kind": "literal", "value": "OFFSET" } },
-                { "name": "offset", "source": { "kind": "literal", "value": 0 } },
+                {
+                  "name": "offset_type",
+                  "source": {
+                    "kind": "literal",
+                    "value": "OFFSET"
+                  }
+                },
+                {
+                  "name": "offset",
+                  "source": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
                 {
                   "name": "profile_type",
-                  "source": { "kind": "literal", "value": "SUPERELLIPSE" }
+                  "source": {
+                    "kind": "literal",
+                    "value": "SUPERELLIPSE"
+                  }
                 },
-                { "name": "segments", "source": { "kind": "literal", "value": 1 } },
-                { "name": "profile", "source": { "kind": "literal", "value": 0.5 } },
-                { "name": "affect", "source": { "kind": "literal", "value": "EDGES" } },
+                {
+                  "name": "segments",
+                  "source": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                {
+                  "name": "profile",
+                  "source": {
+                    "kind": "literal",
+                    "value": 0.5
+                  }
+                },
+                {
+                  "name": "affect",
+                  "source": {
+                    "kind": "literal",
+                    "value": "EDGES"
+                  }
+                },
                 {
                   "name": "clamp_overlap",
-                  "source": { "kind": "literal", "value": false }
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
                 },
-                { "name": "loop_slide", "source": { "kind": "literal", "value": true } },
-                { "name": "mark_seam", "source": { "kind": "literal", "value": false } },
-                { "name": "mark_sharp", "source": { "kind": "literal", "value": false } },
-                { "name": "material", "source": { "kind": "literal", "value": -1 } },
+                {
+                  "name": "loop_slide",
+                  "source": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                },
+                {
+                  "name": "mark_seam",
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
+                },
+                {
+                  "name": "mark_sharp",
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
+                },
+                {
+                  "name": "material",
+                  "source": {
+                    "kind": "literal",
+                    "value": -1
+                  }
+                },
                 {
                   "name": "harden_normals",
-                  "source": { "kind": "literal", "value": false }
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
                 },
                 {
                   "name": "face_strength_mode",
-                  "source": { "kind": "literal", "value": "NONE" }
+                  "source": {
+                    "kind": "literal",
+                    "value": "NONE"
+                  }
                 },
-                { "name": "miter_outer", "source": { "kind": "literal", "value": "SHARP" } },
-                { "name": "miter_inner", "source": { "kind": "literal", "value": "SHARP" } },
-                { "name": "spread", "source": { "kind": "literal", "value": 0.1 } },
-                { "name": "vmesh_method", "source": { "kind": "literal", "value": "ADJ" } },
+                {
+                  "name": "miter_outer",
+                  "source": {
+                    "kind": "literal",
+                    "value": "SHARP"
+                  }
+                },
+                {
+                  "name": "miter_inner",
+                  "source": {
+                    "kind": "literal",
+                    "value": "SHARP"
+                  }
+                },
+                {
+                  "name": "spread",
+                  "source": {
+                    "kind": "literal",
+                    "value": 0.1
+                  }
+                },
+                {
+                  "name": "vmesh_method",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ADJ"
+                  }
+                },
                 {
                   "name": "release_confirm",
-                  "source": { "kind": "literal", "value": false }
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
                 },
-                { "name": "confirm", "source": { "kind": "literal", "value": "ENTER" } }
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
               ]
             },
             {
@@ -2743,7 +3341,10 @@
               "id": "shortcut.set_bevel_width",
               "label": "Set Bevel Width",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "mesh.bevel.offset" },
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.bevel.offset"
+              },
               "path": ["Adjust Last Operation", "Width"],
               "parameters": [
                 {
@@ -2761,7 +3362,10 @@
               "id": "shortcut.set_bevel_segments",
               "label": "Set Bevel Segments",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "mesh.bevel.segments" },
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.bevel.segments"
+              },
               "path": ["Adjust Last Operation", "Segments"],
               "parameters": [
                 {
@@ -2779,7 +3383,10 @@
               "id": "shortcut.set_bevel_profile",
               "label": "Set Bevel Profile",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "mesh.bevel.profile" },
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.bevel.profile"
+              },
               "path": ["Adjust Last Operation", "Profile Shape"],
               "parameters": [
                 {
@@ -2827,13 +3434,90 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.mesh.edit-bevel-edges.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "resultMeshId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.select_owned_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "mode.edit_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "menu.edge",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "operator.bevel_edges",
+              "parameters": [
+                {
+                  "name": "width",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "width",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "segments",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "segments",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "profile",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "profile",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.managed_bevel_edges_contract",
+              "parameters": [
+                {
+                  "name": "resultMeshName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -2849,35 +3533,50 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "mode.edit_mesh",
             "order": 3,
             "label": "Edit Mode",
             "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_MESH"
+            }
           },
           {
             "id": "menu.face",
             "order": 4,
             "label": "Face",
             "intent": "navigate",
-            "target": { "kind": "menu", "hostId": "VIEW3D_MT_edit_mesh_faces" }
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_edit_mesh_faces"
+            }
           },
           {
             "id": "operator.inset_faces",
             "order": 5,
             "label": "Inset Faces",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.inset" }
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.inset"
+            }
           },
           {
             "id": "semantic.managed_inset_faces_contract",
@@ -2905,18 +3604,46 @@
           "parameterBinding": "ordered_parameter_operations",
           "projection": "candidate_only",
           "preconditions": [
-            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
-            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
-            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
             {
               "kind": "selection",
               "label": "Active Target",
               "value": "Exactly one accepted target Mesh object is active and selected"
             },
-            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
-            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
-            { "kind": "scene_state", "label": "Modifiers", "value": "None" },
-            { "kind": "scene_state", "label": "Shape Keys", "value": "None" },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "modal_state",
+              "label": "Modal UI",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Modifiers",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Shape Keys",
+              "value": "None"
+            },
             {
               "kind": "scene_state",
               "label": "Closed Nondegenerate Manifold",
@@ -2960,33 +3687,90 @@
               "keyMode": "sequence",
               "keys": ["I"],
               "parameters": [
-                { "name": "use_boundary", "source": { "kind": "literal", "value": true } },
-                { "name": "use_even_offset", "source": { "kind": "literal", "value": true } },
+                {
+                  "name": "use_boundary",
+                  "source": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                },
+                {
+                  "name": "use_even_offset",
+                  "source": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                },
                 {
                   "name": "use_relative_offset",
-                  "source": { "kind": "literal", "value": false }
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
                 },
-                { "name": "use_edge_rail", "source": { "kind": "literal", "value": false } },
-                { "name": "thickness", "source": { "kind": "literal", "value": 0 } },
-                { "name": "depth", "source": { "kind": "literal", "value": 0 } },
-                { "name": "use_outset", "source": { "kind": "literal", "value": false } },
+                {
+                  "name": "use_edge_rail",
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
+                },
+                {
+                  "name": "thickness",
+                  "source": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
+                {
+                  "name": "depth",
+                  "source": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
+                {
+                  "name": "use_outset",
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
+                },
                 {
                   "name": "use_select_inset",
-                  "source": { "kind": "literal", "value": false }
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
                 },
                 {
                   "name": "use_individual",
-                  "source": { "kind": "literal", "value": false }
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
                 },
                 {
                   "name": "use_interpolate",
-                  "source": { "kind": "literal", "value": true }
+                  "source": {
+                    "kind": "literal",
+                    "value": true
+                  }
                 },
                 {
                   "name": "release_confirm",
-                  "source": { "kind": "literal", "value": false }
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
                 },
-                { "name": "confirm", "source": { "kind": "literal", "value": "ENTER" } }
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
               ]
             },
             {
@@ -3008,7 +3792,10 @@
               "id": "shortcut.set_inset_thickness",
               "label": "Set Inset Thickness",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "mesh.inset.thickness" },
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.inset.thickness"
+              },
               "path": ["Adjust Last Operation", "Thickness"],
               "parameters": [
                 {
@@ -3026,7 +3813,10 @@
               "id": "shortcut.set_inset_depth",
               "label": "Set Inset Depth",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "mesh.inset.depth" },
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.inset.depth"
+              },
               "path": ["Adjust Last Operation", "Depth"],
               "parameters": [
                 {
@@ -3044,9 +3834,20 @@
               "id": "shortcut.set_inset_individual",
               "label": "Enable Individual Faces",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "mesh.inset.use_individual" },
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.inset.use_individual"
+              },
               "path": ["Adjust Last Operation", "Individual"],
-              "parameters": [{ "name": "value", "source": { "kind": "literal", "value": true } }]
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                }
+              ]
             },
             {
               "kind": "key_input",
@@ -3083,13 +3884,82 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.mesh.edit-inset-faces.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "resultMeshId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.select_owned_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "mode.edit_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "menu.face",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "operator.inset_faces",
+              "parameters": [
+                {
+                  "name": "thickness",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "thickness",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "depth",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "depth",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.managed_inset_faces_contract",
+              "parameters": [
+                {
+                  "name": "resultMeshName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -3105,42 +3975,60 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "mode.edit_mesh",
             "order": 3,
             "label": "Edit Mode",
             "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_MESH"
+            }
           },
           {
             "id": "menu.face",
             "order": 4,
             "label": "Face",
             "intent": "navigate",
-            "target": { "kind": "menu", "hostId": "VIEW3D_MT_edit_mesh_faces" }
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_edit_mesh_faces"
+            }
           },
           {
             "id": "operator.poke_faces",
             "order": 5,
             "label": "Poke Faces",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.poke" }
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.poke"
+            }
           },
           {
             "id": "semantic.managed_poke_faces_contract",
             "order": 6,
             "label": "Managed Poke Contract",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.managed_poke_faces" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.managed_poke_faces"
+            }
           }
         ],
         "reason": "The accepted action validates a complete closed, nondegenerate manifold surface, pokes every face into triangles in a new owned mesh datablock, verifies the exact V+F / E+L / L topology contract and bounds, swaps the target link transactionally, observes the exact result, and retains compensation state. Blender's UI MEDIAN_WEIGHTED center_mode is the literal UI spelling equivalent to the managed BMesh MEAN_WEIGHTED contract, but the context-sensitive operator alone cannot express the managed ownership and rollback contract.",
@@ -3158,18 +4046,46 @@
           "parameterBinding": "ordered_parameter_operations",
           "projection": "candidate_only",
           "preconditions": [
-            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
-            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
-            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
             {
               "kind": "selection",
               "label": "Active Target",
               "value": "Exactly one accepted target Mesh object is active and selected"
             },
-            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
-            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
-            { "kind": "scene_state", "label": "Modifiers", "value": "None" },
-            { "kind": "scene_state", "label": "Shape Keys", "value": "None" },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "modal_state",
+              "label": "Modal UI",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Modifiers",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Shape Keys",
+              "value": "None"
+            },
             {
               "kind": "scene_state",
               "label": "Closed Nondegenerate Manifold",
@@ -3180,7 +4096,11 @@
               "label": "Topology Bounds",
               "value": "Source and exact V+F / E+L / L result topology are within 8192 vertices, 16384 edges, and 8192 polygons"
             },
-            { "kind": "scene_state", "label": "UI Language", "value": "English" }
+            {
+              "kind": "scene_state",
+              "label": "UI Language",
+              "value": "English"
+            }
           ],
           "operations": [
             {
@@ -3215,7 +4135,13 @@
               "keys": ["F3"],
               "selectionPath": ["Poke Faces"],
               "parameters": [
-                { "name": "query", "source": { "kind": "literal", "value": "poke faces" } }
+                {
+                  "name": "query",
+                  "source": {
+                    "kind": "literal",
+                    "value": "poke faces"
+                  }
+                }
               ]
             },
             {
@@ -3225,11 +4151,26 @@
               "keyMode": "sequence",
               "keys": ["ENTER"],
               "parameters": [
-                { "name": "offset", "source": { "kind": "literal", "value": 0 } },
-                { "name": "use_relative_offset", "source": { "kind": "literal", "value": false } },
+                {
+                  "name": "offset",
+                  "source": {
+                    "kind": "literal",
+                    "value": 0
+                  }
+                },
+                {
+                  "name": "use_relative_offset",
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
+                },
                 {
                   "name": "center_mode",
-                  "source": { "kind": "literal", "value": "MEDIAN_WEIGHTED" }
+                  "source": {
+                    "kind": "literal",
+                    "value": "MEDIAN_WEIGHTED"
+                  }
                 }
               ]
             },
@@ -3252,7 +4193,10 @@
               "id": "shortcut.set_poke_offset",
               "label": "Set Poke Offset",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "mesh.poke.offset" },
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.poke.offset"
+              },
               "path": ["Adjust Last Operation", "Offset"],
               "parameters": [
                 {
@@ -3300,13 +4244,74 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.mesh.edit-poke-faces.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "resultMeshId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.select_owned_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "mode.edit_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "menu.face",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "operator.poke_faces",
+              "parameters": [
+                {
+                  "name": "offset",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "offset",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.managed_poke_faces_contract",
+              "parameters": [
+                {
+                  "name": "resultMeshName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "resultMeshName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -3322,32 +4327,132 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "panel.modifier_properties",
             "order": 2,
             "label": "Modifiers",
             "intent": "navigate",
-            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_MODIFIER"
+            }
           },
           {
             "id": "control.add_modifier",
             "order": 3,
             "label": "Add Modifier",
             "intent": "execute",
-            "target": { "kind": "control", "hostId": "object.modifier_add" }
+            "target": {
+              "kind": "control",
+              "hostId": "object.modifier_add"
+            }
           },
           {
             "id": "semantic.bevel_parameters",
             "order": 4,
             "label": "Bevel Settings",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.bevel_modifier" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.bevel_modifier"
+            }
           }
         ],
         "reason": "The action must bind exact width, segment, angle, ownership, and compensation state; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/bevel.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The native modifier UI does not encode the managed modifier identity and name, exact width, segments and angle limit, fixed ANGLE limit method, source-content guard, observation, or compensating rollback contract."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No declared shortcut expresses the accepted Bevel Modifier parameters and managed ownership contract."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.modifier.bevel.execute-next",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "panel.modifier_properties",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "control.add_modifier",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.bevel_parameters",
+              "parameters": [
+                {
+                  "name": "modifierName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "width",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "width",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "segments",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "segments",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "angleLimit",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "angleLimit",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
+        }
       }
     },
     {
@@ -3362,28 +4467,40 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "panel.modifier_properties",
             "order": 2,
             "label": "Modifiers",
             "intent": "navigate",
-            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_MODIFIER"
+            }
           },
           {
             "id": "control.add_modifier",
             "order": 3,
             "label": "Add Modifier",
             "intent": "execute",
-            "target": { "kind": "control", "hostId": "object.modifier_add" }
+            "target": {
+              "kind": "control",
+              "hostId": "object.modifier_add"
+            }
           },
           {
             "id": "semantic.solidify_parameters",
             "order": 4,
             "label": "Solidify Settings",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.solidify_modifier" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.solidify_modifier"
+            }
           }
         ],
         "reason": "The action must bind exact thickness, offset, ownership, bounded topology, and compensation state while fixing mode to EXTRUDE, even offset and rim on, and rim-only off; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
@@ -3400,13 +4517,73 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.modifier.solidify.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "panel.modifier_properties",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "control.add_modifier",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.solidify_parameters",
+              "parameters": [
+                {
+                  "name": "modifierName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "thickness",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "thickness",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "offset",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "offset",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -3422,21 +4599,30 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "operator.subdivision_set",
             "order": 3,
             "label": "Set Subdivision Level",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "object.subdivision_set" }
+            "target": {
+              "kind": "operator",
+              "hostId": "object.subdivision_set"
+            }
           },
           {
             "id": "semantic.subdivision_surface_contract",
@@ -3464,16 +4650,36 @@
           "parameterBinding": "ordered_parameter_operations",
           "projection": "candidate_only",
           "preconditions": [
-            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
-            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
-            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
             {
               "kind": "selection",
               "label": "Active Target",
               "value": "Exactly the unmodified factory Cube (8 vertices, 12 edges, 6 polygons) is active and selected"
             },
-            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
-            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "modal_state",
+              "label": "Modal UI",
+              "value": "None"
+            },
             {
               "kind": "scene_state",
               "label": "Modifier Type",
@@ -3498,11 +4704,26 @@
               "keyMode": "chord",
               "keys": ["CTRL", "1"],
               "parameters": [
-                { "name": "level", "source": { "kind": "literal", "value": 1 } },
-                { "name": "relative", "source": { "kind": "literal", "value": false } },
+                {
+                  "name": "level",
+                  "source": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                {
+                  "name": "relative",
+                  "source": {
+                    "kind": "literal",
+                    "value": false
+                  }
+                },
                 {
                   "name": "ensure_modifier",
-                  "source": { "kind": "literal", "value": true }
+                  "source": {
+                    "kind": "literal",
+                    "value": true
+                  }
                 }
               ]
             },
@@ -3525,7 +4746,10 @@
               "id": "shortcut.set_viewport_level",
               "label": "Set Viewport Level",
               "surfaceOperationId": "shortcut.open_adjust_last_operation",
-              "target": { "kind": "control", "hostId": "object.subdivision_set.level" },
+              "target": {
+                "kind": "control",
+                "hostId": "object.subdivision_set.level"
+              },
               "path": ["Adjust Last Operation", "Level"],
               "parameters": [
                 {
@@ -3583,8 +4807,66 @@
           }
         },
         "mcp": {
-          "availability": "unavailable",
-          "reason": "No approved action-level MCP tool is available."
+          "availability": "available",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.modifier.subdivision-surface.execute-next",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.select_owned_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "operator.subdivision_set",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.subdivision_surface_contract",
+              "parameters": [
+                {
+                  "name": "modifierName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "viewportLevel",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "viewportLevel",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -3600,49 +4882,70 @@
             "order": 1,
             "label": "Layout",
             "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
           },
           {
             "id": "semantic.select_owned_mesh",
             "order": 2,
             "label": "Owned Mesh",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.owned_mesh"
+            }
           },
           {
             "id": "panel.modifier_properties",
             "order": 3,
             "label": "Modifiers",
             "intent": "navigate",
-            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_MODIFIER"
+            }
           },
           {
             "id": "control.add_modifier",
             "order": 4,
             "label": "Add Modifier",
             "intent": "execute",
-            "target": { "kind": "menu", "hostId": "OBJECT_MT_modifier_add" }
+            "target": {
+              "kind": "menu",
+              "hostId": "OBJECT_MT_modifier_add"
+            }
           },
           {
             "id": "category.generate",
             "order": 5,
             "label": "Generate",
             "intent": "navigate",
-            "target": { "kind": "menu", "hostId": "OBJECT_MT_modifier_add_generate" }
+            "target": {
+              "kind": "menu",
+              "hostId": "OBJECT_MT_modifier_add_generate"
+            }
           },
           {
             "id": "modifier.mirror",
             "order": 6,
             "label": "Mirror",
             "intent": "execute",
-            "target": { "kind": "operator", "hostId": "object.modifier_add" }
+            "target": {
+              "kind": "operator",
+              "hostId": "object.modifier_add"
+            }
           },
           {
             "id": "semantic.mirror_contract",
             "order": 7,
             "label": "Managed Mirror Contract",
             "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.mirror_modifier" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.mirror_modifier"
+            }
           }
         ],
         "reason": "The native operator must be invoked with type=MIRROR, but the accepted action also binds the owned target and modifier identities, exact axis, complete fixed Mirror properties, bounded source, evaluated input, projected and actual evaluated topology, observation, and compensating rollback contract atomically.",
@@ -3659,13 +4962,77 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.modifier.mirror.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.select_owned_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "panel.modifier_properties",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "control.add_modifier",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "category.generate",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "modifier.mirror",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.mirror_contract",
+              "parameters": [
+                {
+                  "name": "modifierName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "axis",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "axis",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -3677,11 +5044,14 @@
         "kind": "semantic_path",
         "steps": [
           {
-            "id": "workspace.geometry_nodes",
+            "id": "semantic.preflight_transform_geometry_resources",
             "order": 1,
-            "label": "Geometry Nodes",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Geometry Nodes" }
+            "label": "Validate Transform Geometry Preconditions",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.transform_geometry_resource_preflight"
+            }
           },
           {
             "id": "semantic.new_geometry_modifier",
@@ -3694,22 +5064,1483 @@
             }
           },
           {
-            "id": "node.transform_geometry",
+            "id": "node.group_input",
             "order": 3,
-            "label": "Transform Geometry",
-            "intent": "configure",
-            "target": { "kind": "node", "hostId": "GeometryNodeTransform" }
+            "label": "Add Group Input",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "NodeGroupInput"
+            }
+          },
+          {
+            "id": "node.transform_geometry",
+            "order": 4,
+            "label": "Add Transform Geometry",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "GeometryNodeTransform"
+            }
+          },
+          {
+            "id": "node.group_output",
+            "order": 5,
+            "label": "Add Group Output",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "NodeGroupOutput"
+            }
+          },
+          {
+            "id": "semantic.connect_group_input_geometry_to_transform",
+            "order": 6,
+            "label": "Connect Group Input Geometry to Transform Geometry",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.group_input.geometry_to_transform.geometry",
+              "connection": {
+                "fromNode": "NodeGroupInput",
+                "fromSocket": "Geometry",
+                "toNode": "GeometryNodeTransform",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_transform_geometry_to_group_output",
+            "order": 7,
+            "label": "Connect Transform Geometry to Group Output Geometry",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.transform.geometry_to_group_output.geometry",
+              "connection": {
+                "fromNode": "GeometryNodeTransform",
+                "fromSocket": "Geometry",
+                "toNode": "NodeGroupOutput",
+                "toSocket": "Geometry"
+              }
+            }
           },
           {
             "id": "semantic.verify_node_links",
-            "order": 4,
+            "order": 8,
             "label": "Verify Links",
             "intent": "verify",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.transform_node_links" }
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.transform_node_links"
+            }
           }
         ],
-        "reason": "The accepted action creates the node group interface, graph, values, modifier binding, and rollback receipt atomically; no single native control represents the complete graph.",
+        "reason": "Step 01 validates managed resource availability and does not navigate or switch Blender workspaces. The accepted action creates the node group interface, graph, values, modifier binding, and rollback receipt atomically; no single native control represents the complete graph.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/geometry_nodes/introduction.html"
+      },
+      "procedureMaterialization": {
+        "semantic": {
+          "source": "catalog.semantic_parameter_projections",
+          "projections": [
+            {
+              "id": "projection.semantic.transform_geometry.translation",
+              "semanticAction": "node.transform_geometry",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "translation"
+                }
+              ],
+              "actionArgument": "translation",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.transform_geometry.rotation",
+              "semanticAction": "node.transform_geometry",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "rotation"
+                }
+              ],
+              "actionArgument": "rotation",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.transform_geometry.scale",
+              "semanticAction": "node.transform_geometry",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "scale"
+                }
+              ],
+              "actionArgument": "scale",
+              "transform": "identity"
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The selected object's managed identity is an execution precondition, not a parameter entered on the Transform Geometry node."
+            },
+            {
+              "argumentName": "modifierId",
+              "reason": "The managed modifier identity has no editable semantic parameter on the Transform Geometry node."
+            },
+            {
+              "argumentName": "modifierName",
+              "reason": "The modifier name belongs to the modifier container rather than the Transform Geometry node parameter step."
+            },
+            {
+              "argumentName": "nodeGroupId",
+              "reason": "The managed node-group identity has no editable semantic parameter on the Transform Geometry node."
+            },
+            {
+              "argumentName": "nodeGroupName",
+              "reason": "The node-group name belongs to the graph container rather than the Transform Geometry node parameter step."
+            }
+          ]
+        },
+        "menu": {
+          "availability": "unavailable",
+          "reason": "No verified native menu path covers node creation, socket wiring, all three Transform Geometry values, managed identities, observation, and rollback as one accepted operation."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "Shift+A can open node search, but no verified shortcut sequence uniquely creates this complete graph, wires both sockets, and assigns every accepted parameter."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.geometry-nodes.transform.execute-next",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "semantic.preflight_transform_geometry_resources",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "nodeGroupId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "nodeGroupId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "nodeGroupName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "nodeGroupName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.new_geometry_modifier",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.group_input",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.transform_geometry",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.transform_geometry.translation",
+              "parameters": [
+                {
+                  "name": "translation",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "translation",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.transform_geometry.rotation",
+              "parameters": [
+                {
+                  "name": "rotation",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "rotation",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.transform_geometry.scale",
+              "parameters": [
+                {
+                  "name": "scale",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "scale",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.group_output",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_group_input_geometry_to_transform",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_transform_geometry_to_group_output",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.verify_node_links",
+              "parameters": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "blender.geometry_nodes.create_light_trails.semantic",
+      "actionName": "blender.geometry_nodes.create_light_trails",
+      "title": "Create mirrored procedural light trails without baking",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.geometry_nodes",
+            "order": 1,
+            "label": "Geometry Nodes",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Geometry Nodes"
+            }
+          },
+          {
+            "id": "semantic.new_geometry_modifier",
+            "order": 2,
+            "label": "New Modifier",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.geometry_nodes_modifier"
+            }
+          },
+          {
+            "id": "node.light_trails.group_input",
+            "order": 3,
+            "label": "Group Input Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Input"
+            }
+          },
+          {
+            "id": "node.light_trails.half_tile_line",
+            "order": 4,
+            "label": "Half Tile Line Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Half Tile Line"
+            }
+          },
+          {
+            "id": "node.light_trails.trail_resolution",
+            "order": 5,
+            "label": "Trail Resolution Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Trail Resolution"
+            }
+          },
+          {
+            "id": "node.light_trails.trail_rows",
+            "order": 6,
+            "label": "Trail Rows Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Trail Rows"
+            }
+          },
+          {
+            "id": "node.light_trails.trail_instances",
+            "order": 7,
+            "label": "Trail Instances Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Trail Instances"
+            }
+          },
+          {
+            "id": "node.light_trails.realize_trails",
+            "order": 8,
+            "label": "Realize Trails Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Realize Trails"
+            }
+          },
+          {
+            "id": "node.light_trails.trail_position",
+            "order": 9,
+            "label": "Trail Position Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Trail Position"
+            }
+          },
+          {
+            "id": "node.light_trails.terrain_noise",
+            "order": 10,
+            "label": "Terrain Noise Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Terrain Noise"
+            }
+          },
+          {
+            "id": "node.light_trails.center_noise",
+            "order": 11,
+            "label": "Center Noise Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Center Noise"
+            }
+          },
+          {
+            "id": "node.light_trails.scale_height",
+            "order": 12,
+            "label": "Scale Height Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Scale Height"
+            }
+          },
+          {
+            "id": "node.light_trails.z_offset",
+            "order": 13,
+            "label": "Z Offset Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Z Offset"
+            }
+          },
+          {
+            "id": "node.light_trails.displace_trails",
+            "order": 14,
+            "label": "Displace Trails Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Displace Trails"
+            }
+          },
+          {
+            "id": "node.light_trails.mirror_half_tile",
+            "order": 15,
+            "label": "Mirror Half Tile Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Mirror Half Tile"
+            }
+          },
+          {
+            "id": "node.light_trails.mirrored_tile",
+            "order": 16,
+            "label": "Mirrored Tile Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Mirrored Tile"
+            }
+          },
+          {
+            "id": "node.light_trails.trail_profile",
+            "order": 17,
+            "label": "Trail Profile Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Trail Profile"
+            }
+          },
+          {
+            "id": "node.light_trails.curve_to_mesh",
+            "order": 18,
+            "label": "Curve To Mesh Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Curve To Mesh"
+            }
+          },
+          {
+            "id": "node.light_trails.loop_tiles",
+            "order": 19,
+            "label": "Loop Tiles Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Loop Tiles"
+            }
+          },
+          {
+            "id": "node.light_trails.tile_instances",
+            "order": 20,
+            "label": "Tile Instances Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Tile Instances"
+            }
+          },
+          {
+            "id": "node.light_trails.realize_tiles",
+            "order": 21,
+            "label": "Realize Tiles Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Realize Tiles"
+            }
+          },
+          {
+            "id": "node.light_trails.group_output",
+            "order": 22,
+            "label": "Group Output Node",
+            "intent": "execute",
+            "target": {
+              "kind": "node",
+              "hostId": "node-name:OperatingLine Output"
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.half_line_to_resolution",
+            "order": 23,
+            "label": "Connect Half Tile Line to Trail Resolution",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.half_line_to_resolution",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Half Tile Line",
+                "fromSocket": "Curve",
+                "toNode": "node-name:OperatingLine Trail Resolution",
+                "toSocket": "Curve"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.rows_to_instances",
+            "order": 24,
+            "label": "Connect Trail Rows to Trail Instances",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.rows_to_instances",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Trail Rows",
+                "fromSocket": "Mesh",
+                "toNode": "node-name:OperatingLine Trail Instances",
+                "toSocket": "Points"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.resolution_to_instances",
+            "order": 25,
+            "label": "Connect Trail Resolution to Trail Instances",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.resolution_to_instances",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Trail Resolution",
+                "fromSocket": "Curve",
+                "toNode": "node-name:OperatingLine Trail Instances",
+                "toSocket": "Instance"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.instances_to_realize",
+            "order": 26,
+            "label": "Connect Trail Instances to Realize Trails",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.instances_to_realize",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Trail Instances",
+                "fromSocket": "Instances",
+                "toNode": "node-name:OperatingLine Realize Trails",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.position_to_noise",
+            "order": 27,
+            "label": "Connect Trail Position to Terrain Noise",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.position_to_noise",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Trail Position",
+                "fromSocket": "Position",
+                "toNode": "node-name:OperatingLine Terrain Noise",
+                "toSocket": "Vector"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.noise_to_center",
+            "order": 28,
+            "label": "Connect Terrain Noise to Center Noise",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.noise_to_center",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Terrain Noise",
+                "fromSocket": "Fac",
+                "toNode": "node-name:OperatingLine Center Noise",
+                "toSocket": "Value"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.center_to_height",
+            "order": 29,
+            "label": "Connect Center Noise to Scale Height",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.center_to_height",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Center Noise",
+                "fromSocket": "Value",
+                "toNode": "node-name:OperatingLine Scale Height",
+                "toSocket": "Value"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.height_to_offset",
+            "order": 30,
+            "label": "Connect Scale Height to Z Offset",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.height_to_offset",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Scale Height",
+                "fromSocket": "Value",
+                "toNode": "node-name:OperatingLine Z Offset",
+                "toSocket": "Z"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.realize_to_displace",
+            "order": 31,
+            "label": "Connect Realize Trails to Displace Trails",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.realize_to_displace",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Realize Trails",
+                "fromSocket": "Geometry",
+                "toNode": "node-name:OperatingLine Displace Trails",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.offset_to_displace",
+            "order": 32,
+            "label": "Connect Z Offset to Displace Trails",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.offset_to_displace",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Z Offset",
+                "fromSocket": "Vector",
+                "toNode": "node-name:OperatingLine Displace Trails",
+                "toSocket": "Offset"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.displace_to_mirror",
+            "order": 33,
+            "label": "Connect Displace Trails to Mirror Half Tile",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.displace_to_mirror",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Displace Trails",
+                "fromSocket": "Geometry",
+                "toNode": "node-name:OperatingLine Mirror Half Tile",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.displace_to_join",
+            "order": 34,
+            "label": "Connect Displace Trails to Mirrored Tile",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.displace_to_join",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Displace Trails",
+                "fromSocket": "Geometry",
+                "toNode": "node-name:OperatingLine Mirrored Tile",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.mirror_to_join",
+            "order": 35,
+            "label": "Connect Mirror Half Tile to Mirrored Tile",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.mirror_to_join",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Mirror Half Tile",
+                "fromSocket": "Geometry",
+                "toNode": "node-name:OperatingLine Mirrored Tile",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.join_to_curve_mesh",
+            "order": 36,
+            "label": "Connect Mirrored Tile to Curve To Mesh",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.join_to_curve_mesh",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Mirrored Tile",
+                "fromSocket": "Geometry",
+                "toNode": "node-name:OperatingLine Curve To Mesh",
+                "toSocket": "Curve"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.profile_to_curve_mesh",
+            "order": 37,
+            "label": "Connect Trail Profile to Curve To Mesh",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.profile_to_curve_mesh",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Trail Profile",
+                "fromSocket": "Curve",
+                "toNode": "node-name:OperatingLine Curve To Mesh",
+                "toSocket": "Profile Curve"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.tiles_to_instances",
+            "order": 38,
+            "label": "Connect Loop Tiles to Tile Instances",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.tiles_to_instances",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Loop Tiles",
+                "fromSocket": "Mesh",
+                "toNode": "node-name:OperatingLine Tile Instances",
+                "toSocket": "Points"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.mesh_to_instances",
+            "order": 39,
+            "label": "Connect Curve Mesh to Tile Instances",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.mesh_to_instances",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Curve To Mesh",
+                "fromSocket": "Mesh",
+                "toNode": "node-name:OperatingLine Tile Instances",
+                "toSocket": "Instance"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.instances_to_final_realize",
+            "order": 40,
+            "label": "Connect Tile Instances to Realize Tiles",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.instances_to_final_realize",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Tile Instances",
+                "fromSocket": "Instances",
+                "toNode": "node-name:OperatingLine Realize Tiles",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.connect_light_trails.realize_to_output",
+            "order": 41,
+            "label": "Connect Realize Tiles to Group Output",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.socket.light_trails.realize_to_output",
+              "connection": {
+                "fromNode": "node-name:OperatingLine Realize Tiles",
+                "fromSocket": "Geometry",
+                "toNode": "node-name:OperatingLine Output",
+                "toSocket": "Geometry"
+              }
+            }
+          },
+          {
+            "id": "semantic.verify_no_bake",
+            "order": 42,
+            "label": "Verify No Bake",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.geometry_nodes_no_bake"
+            }
+          }
+        ],
+        "reason": "The accepted action creates and verifies this fixed named-node graph together with managed identities and rollback. Every node frame and all nineteen links have stable receipt-bound endpoints for numbered in-editor guidance. Twelve accepted scalar values have OperatingLine-owned editors and Blender 5.3+ exact native RNA targeting when the bound socket is visible; older hosts retain honest container guidance. The recipe expressly excludes Bake and Simulation nodes.",
+        "manualReference": "https://docs.blender.org/manual/en/4.5/modeling/geometry_nodes/index.html"
+      },
+      "procedureMaterialization": {
+        "semantic": {
+          "source": "catalog.semantic_parameter_projections",
+          "projections": [
+            {
+              "id": "projection.semantic.light_trails.tile_length",
+              "semanticAction": "node.light_trails.half_tile_line",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "tileLength"
+                }
+              ],
+              "actionArgument": "tileLength",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.points_per_trail",
+              "semanticAction": "node.light_trails.trail_resolution",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "pointsPerTrail"
+                }
+              ],
+              "actionArgument": "pointsPerTrail",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.trail_count",
+              "semanticAction": "node.light_trails.trail_rows",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "trailCount"
+                }
+              ],
+              "actionArgument": "trailCount",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.trail_spacing",
+              "semanticAction": "node.light_trails.trail_rows",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "trailSpacing"
+                }
+              ],
+              "actionArgument": "trailSpacing",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.noise_scale",
+              "semanticAction": "node.light_trails.terrain_noise",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "noiseScale"
+                }
+              ],
+              "actionArgument": "noiseScale",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.noise_detail",
+              "semanticAction": "node.light_trails.terrain_noise",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "noiseDetail"
+                }
+              ],
+              "actionArgument": "noiseDetail",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.noise_roughness",
+              "semanticAction": "node.light_trails.terrain_noise",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "noiseRoughness"
+                }
+              ],
+              "actionArgument": "noiseRoughness",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.noise_seed",
+              "semanticAction": "node.light_trails.terrain_noise",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "noiseSeed"
+                }
+              ],
+              "actionArgument": "noiseSeed",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.height",
+              "semanticAction": "node.light_trails.scale_height",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "height"
+                }
+              ],
+              "actionArgument": "height",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.profile_sides",
+              "semanticAction": "node.light_trails.trail_profile",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "profileSides"
+                }
+              ],
+              "actionArgument": "profileSides",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.profile_radius",
+              "semanticAction": "node.light_trails.trail_profile",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "profileRadius"
+                }
+              ],
+              "actionArgument": "profileRadius",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.light_trails.tile_repeat_count",
+              "semanticAction": "node.light_trails.loop_tiles",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "tileRepeatCount"
+                }
+              ],
+              "actionArgument": "tileRepeatCount",
+              "transform": "identity"
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The receipt-bound target identity is an execution precondition, not a node value."
+            },
+            {
+              "argumentName": "modifierId",
+              "reason": "The managed modifier identity has no node-editor value control."
+            },
+            {
+              "argumentName": "modifierName",
+              "reason": "The modifier name belongs to the managed container rather than a graph node value."
+            },
+            {
+              "argumentName": "nodeGroupId",
+              "reason": "The managed node-group identity has no node-editor value control."
+            },
+            {
+              "argumentName": "nodeGroupName",
+              "reason": "The node-group name belongs to the graph container rather than a graph node value."
+            }
+          ]
+        },
+        "menu": {
+          "availability": "unavailable",
+          "reason": "Receipt-bound node frames, all nineteen node links, and twelve accepted scalar values are guided in-editor. Blender 5.3+ can target the reviewed primary RNA value widgets when visible, but the supported 4.5/5.1 hosts do not expose that API and a complete per-socket native execution proof is not claimed."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No bounded shortcut sequence can express the complete node graph, managed identities, semantic signature, observation, and rollback contract."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.geometry-nodes.light-trails.execute-next",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.geometry_nodes",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "nodeGroupId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "nodeGroupId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "nodeGroupName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "nodeGroupName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.new_geometry_modifier",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.group_input",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.half_tile_line",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.tile_length",
+              "parameters": [
+                {
+                  "name": "tileLength",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "tileLength",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.light_trails.trail_resolution",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.points_per_trail",
+              "parameters": [
+                {
+                  "name": "pointsPerTrail",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "pointsPerTrail",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.light_trails.trail_rows",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.trail_count",
+              "parameters": [
+                {
+                  "name": "trailCount",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "trailCount",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.trail_spacing",
+              "parameters": [
+                {
+                  "name": "trailSpacing",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "trailSpacing",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.light_trails.trail_instances",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.realize_trails",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.trail_position",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.terrain_noise",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.noise_scale",
+              "parameters": [
+                {
+                  "name": "noiseScale",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "noiseScale",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.noise_detail",
+              "parameters": [
+                {
+                  "name": "noiseDetail",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "noiseDetail",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.noise_roughness",
+              "parameters": [
+                {
+                  "name": "noiseRoughness",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "noiseRoughness",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.noise_seed",
+              "parameters": [
+                {
+                  "name": "noiseSeed",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "noiseSeed",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.light_trails.center_noise",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.scale_height",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.height",
+              "parameters": [
+                {
+                  "name": "height",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "height",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.light_trails.z_offset",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.displace_trails",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.mirror_half_tile",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.mirrored_tile",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.trail_profile",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.profile_sides",
+              "parameters": [
+                {
+                  "name": "profileSides",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "profileSides",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.profile_radius",
+              "parameters": [
+                {
+                  "name": "profileRadius",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "profileRadius",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.light_trails.curve_to_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.loop_tiles",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.light_trails.tile_repeat_count",
+              "parameters": [
+                {
+                  "name": "tileRepeatCount",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "tileRepeatCount",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "node.light_trails.tile_instances",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.realize_tiles",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "node.light_trails.group_output",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.half_line_to_resolution",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.rows_to_instances",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.resolution_to_instances",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.instances_to_realize",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.position_to_noise",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.noise_to_center",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.center_to_height",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.height_to_offset",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.realize_to_displace",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.offset_to_displace",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.displace_to_mirror",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.displace_to_join",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.mirror_to_join",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.join_to_curve_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.profile_to_curve_mesh",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.tiles_to_instances",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.mesh_to_instances",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.instances_to_final_realize",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.connect_light_trails.realize_to_output",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.verify_no_bake",
+              "parameters": []
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "blender.lookdev.create_light_trails_scene.semantic",
+      "actionName": "blender.lookdev.create_light_trails_scene",
+      "title": "Create the animated light-trails look-development scene",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.shading",
+            "order": 1,
+            "label": "Shading",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Shading"
+            }
+          },
+          {
+            "id": "semantic.trail_gradient_emission",
+            "order": 2,
+            "label": "Curve Gradient and Emission",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.light_trails_gradient_emission"
+            }
+          },
+          {
+            "id": "semantic.parent_empty_camera",
+            "order": 3,
+            "label": "Parent Empty to Camera",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.light_trails_camera_controller"
+            }
+          },
+          {
+            "id": "semantic.camera_linear_keyframes",
+            "order": 4,
+            "label": "Camera Linear Keyframes",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.light_trails_camera_animation"
+            }
+          },
+          {
+            "id": "semantic.floor_voronoi_surface",
+            "order": 5,
+            "label": "Floor Voronoi, Metallic, and Emission",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.light_trails_floor_material"
+            }
+          },
+          {
+            "id": "workspace.compositing_fog_glow",
+            "order": 6,
+            "label": "Compositing Fog Glow",
+            "intent": "configure",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Compositing"
+            }
+          },
+          {
+            "id": "semantic.verify_no_bake_render",
+            "order": 7,
+            "label": "Verify No Bake or Render",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.light_trails_scene_no_bake_render"
+            }
+          }
+        ],
+        "reason": "The accepted action atomically configures owned scene, world, camera-controller animation, two node materials, target material slots, and Fog Glow compositor state with compensating rollback. It performs no Bake, Render, or Export operation, and no single Blender control represents the complete bounded setup.",
+        "manualReference": "https://docs.blender.org/manual/en/4.5/render/shader_nodes/introduction.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "A complete per-control menu proof for the cross-editor Shading, camera, animation, material-node, and compositor sequence has not been captured across every supported Blender version."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "A complete cross-editor shortcut proof with exact node sockets, material values, animation interpolation, ownership, observation, and rollback has not been captured across supported Blender versions."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
       }
     },
     {
@@ -3762,6 +6593,94 @@
         ],
         "reason": "The canonical action creates and assigns the exact material through Blender data APIs; stable native rectangles for the Properties controls are not exposed by the supported public UI API.",
         "manualReference": "https://docs.blender.org/manual/en/latest/render/materials/introduction.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The public Blender UI API does not expose stable rectangles for every material name, Material property, Principled input, ordered target assignment, managed identity, source-content guard, observation, and compensating rollback control in this transaction."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No declared shortcut sequence expresses the accepted material values, ordered multi-target slot assignment, managed ownership, source-content proof, and compensating rollback contract."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.material.single.execute-next",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.shading",
+              "parameters": [
+                {
+                  "name": "materialId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "materialId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "panel.material_properties",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "control.new_material",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.principled_surface",
+              "parameters": [
+                {
+                  "name": "materialName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "materialName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "baseColor",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "baseColor",
+                    "transform": "json_identity"
+                  }
+                },
+                {
+                  "name": "roughness",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "roughness",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "metallic",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "metallic",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "targets",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targets",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            }
+          ]
+        }
       }
     },
     {
@@ -3814,6 +6733,53 @@
         ],
         "reason": "One accepted leaf creates several materials and assignments atomically; Blender does not expose one native control that represents the whole palette operation.",
         "manualReference": "https://docs.blender.org/manual/en/latest/render/materials/introduction.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The public Blender UI API does not expose stable rectangles for a variable-length palette, every nested Principled value, ordered target assignment, managed identity, source-content guard, observation, and atomic compensating rollback control."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No declared shortcut sequence expresses the accepted ordered material definitions, nested values, globally unique target assignments, managed ownership, source-content proof, and atomic rollback contract."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.material.palette.execute-next",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.shading",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "panel.material_properties",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.palette_entries",
+              "parameters": [
+                {
+                  "name": "materials",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "materials",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.assign_targets",
+              "parameters": []
+            }
+          ]
+        }
       }
     },
     {
@@ -3862,12 +6828,85 @@
               "kind": "semantic",
               "hostId": "operatingline.blender.rigid_bindings"
             }
+          },
+          {
+            "id": "semantic.verify_armature",
+            "order": 5,
+            "label": "Verify Armature",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.armature_observation"
+            }
           }
         ],
         "reason": "The accepted action creates several bones and rigid object bindings as one compensated transaction, not as one allowlisted native menu command.",
         "manualReference": "https://docs.blender.org/manual/en/latest/animation/armatures/introduction.html"
       },
       "procedureMaterialization": {
+        "semantic": {
+          "source": "catalog.semantic_parameter_projections",
+          "projections": [
+            {
+              "id": "projection.semantic.armature.object_name",
+              "semanticAction": "menu.add_armature",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "objectName"
+                }
+              ],
+              "actionArgument": "objectName",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.armature.data_name",
+              "semanticAction": "menu.add_armature",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "dataName"
+                }
+              ],
+              "actionArgument": "dataName",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.armature.bones",
+              "semanticAction": "mode.edit_bones",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "bones"
+                }
+              ],
+              "actionArgument": "bones",
+              "transform": "json_identity"
+            },
+            {
+              "id": "projection.semantic.armature.bindings",
+              "semanticAction": "semantic.rigid_parent",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "bindings"
+                }
+              ],
+              "actionArgument": "bindings",
+              "transform": "json_identity"
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "armatureId",
+              "reason": "The managed Armature identity is execution authority metadata rather than a Blender control value."
+            },
+            {
+              "argumentName": "collectionId",
+              "reason": "The receipt-bound collection is an execution precondition rather than an authored Armature value."
+            }
+          ]
+        },
         "menu": {
           "availability": "unavailable",
           "reason": "The managed action creates a bounded multi-bone armature and rigid object bindings as one compensated transaction; no single Blender menu command represents the complete accepted action."
@@ -3878,13 +6917,104 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.rig.armature.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "armatureId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "armatureId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "collectionId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "collectionId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "menu.add_armature",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.armature.object_name",
+              "parameters": [
+                {
+                  "name": "objectName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "objectName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.armature.data_name",
+              "parameters": [
+                {
+                  "name": "dataName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "dataName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "mode.edit_bones",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.armature.bones",
+              "parameters": [
+                {
+                  "name": "bones",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "bones",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.rigid_parent",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.armature.bindings",
+              "parameters": [
+                {
+                  "name": "bindings",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "bindings",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.verify_armature",
+              "parameters": []
+            }
+          ]
         }
       }
     },
@@ -3944,12 +7074,77 @@
               "kind": "semantic",
               "hostId": "operatingline.blender.armature_modifier"
             }
+          },
+          {
+            "id": "semantic.verify_skin_weights",
+            "order": 6,
+            "label": "Verify Skin Weights",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.skin_weights_observation"
+            }
           }
         ],
         "reason": "The accepted action validates and assigns a complete bounded per-vertex weight table plus an Armature modifier atomically; Blender has no single native control representing that transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/properties/vertex_groups/vertex_groups.html"
       },
       "procedureMaterialization": {
+        "semantic": {
+          "source": "catalog.semantic_parameter_projections",
+          "projections": [
+            {
+              "id": "projection.semantic.skin_weights.weights",
+              "semanticAction": "semantic.normalized_weights",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "weights"
+                }
+              ],
+              "actionArgument": "weights",
+              "transform": "json_identity"
+            },
+            {
+              "id": "projection.semantic.skin_weights.preserve_volume",
+              "semanticAction": "semantic.armature_modifier",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "preserveVolume"
+                }
+              ],
+              "actionArgument": "preserveVolume",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.skin_weights.modifier_name",
+              "semanticAction": "semantic.armature_modifier",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "modifierName"
+                }
+              ],
+              "actionArgument": "modifierName",
+              "transform": "identity"
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The managed mesh identity is execution authority metadata rather than a Weight Paint control value."
+            },
+            {
+              "argumentName": "armatureId",
+              "reason": "The managed Armature identity is execution authority metadata rather than an authored weight value."
+            },
+            {
+              "argumentName": "modifierId",
+              "reason": "The managed modifier identity is execution authority metadata rather than a Blender control value."
+            }
+          ]
+        },
         "menu": {
           "availability": "unavailable",
           "reason": "The managed action assigns a complete normalized per-vertex weight table and an owned Armature modifier atomically; no single Blender menu path represents that transaction."
@@ -3960,13 +7155,103 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.rig.skin-weights.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.layout",
+              "parameters": [
+                {
+                  "name": "targetId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "targetId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "armatureId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "armatureId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "modifierId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "panel.object_data",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "mode.weight_paint",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.normalized_weights",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.skin_weights.weights",
+              "parameters": [
+                {
+                  "name": "weights",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "weights",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.armature_modifier",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.skin_weights.preserve_volume",
+              "parameters": [
+                {
+                  "name": "preserveVolume",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "preserveVolume",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "projection.semantic.skin_weights.modifier_name",
+              "parameters": [
+                {
+                  "name": "modifierName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "modifierName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.verify_skin_weights",
+              "parameters": []
+            }
+          ]
         }
       }
     },
@@ -4008,23 +7293,126 @@
             }
           },
           {
-            "id": "operator.insert_keyframe",
+            "id": "semantic.create_pose_action",
             "order": 4,
+            "label": "Create Action",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.pose_action"
+            }
+          },
+          {
+            "id": "operator.insert_keyframe",
+            "order": 5,
             "label": "Keyframes",
             "intent": "execute",
             "target": {
               "kind": "operator",
               "hostId": "anim.keyframe_insert"
             }
+          },
+          {
+            "id": "control.pose_interpolation",
+            "order": 6,
+            "label": "Interpolation",
+            "intent": "configure",
+            "target": {
+              "kind": "control",
+              "hostId": "ActionFCurve.keyframe_points.interpolation"
+            }
+          },
+          {
+            "id": "control.pose_extrapolation",
+            "order": 7,
+            "label": "Extrapolation",
+            "intent": "configure",
+            "target": {
+              "kind": "control",
+              "hostId": "FCurve.extrapolation"
+            }
+          },
+          {
+            "id": "semantic.verify_pose_animation",
+            "order": 8,
+            "label": "Verify Pose Animation",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.pose_animation_observation"
+            }
           }
         ],
-        "reason": "The accepted action writes a bounded set of exact frames, pose transforms, interpolation, and extrapolation atomically; the native keyframe command alone cannot represent that complete parameterized transaction.",
+        "reason": "The accepted action writes a bounded set of exact frames, per-bone Euler, unit-quaternion, or unit-axis angle channels, optional location/scale, interpolation, and extrapolation atomically; the native keyframe command alone cannot represent that complete parameterized transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/animation/keyframes/introduction.html"
       },
       "procedureMaterialization": {
+        "semantic": {
+          "source": "catalog.semantic_parameter_projections",
+          "projections": [
+            {
+              "id": "projection.semantic.pose_animation.action_name",
+              "semanticAction": "semantic.create_pose_action",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "actionName"
+                }
+              ],
+              "actionArgument": "actionName",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.pose_animation.keyframes",
+              "semanticAction": "operator.insert_keyframe",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "keyframes"
+                }
+              ],
+              "actionArgument": "keyframes",
+              "transform": "json_identity"
+            },
+            {
+              "id": "projection.semantic.pose_animation.interpolation",
+              "semanticAction": "control.pose_interpolation",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "interpolation"
+                }
+              ],
+              "actionArgument": "interpolation",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.pose_animation.extrapolation",
+              "semanticAction": "control.pose_extrapolation",
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "extrapolation"
+                }
+              ],
+              "actionArgument": "extrapolation",
+              "transform": "identity"
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "actionId",
+              "reason": "The managed Action identity is execution authority metadata rather than a Blender control value."
+            },
+            {
+              "argumentName": "armatureId",
+              "reason": "The receipt-bound armature selection is an execution precondition rather than a keyed channel value."
+            }
+          ]
+        },
         "menu": {
           "availability": "unavailable",
-          "reason": "The managed action authors bounded multi-frame pose transforms, interpolation, and extrapolation atomically; no single Blender menu command represents the complete accepted animation."
+          "reason": "The managed action authors bounded multi-frame Euler/quaternion/axis-angle pose transforms and curve settings atomically; numbered values are shown in the leaf rail, but no single Blender menu command represents the complete accepted animation."
         },
         "shortcut": {
           "availability": "unavailable",
@@ -4032,13 +7420,116 @@
         },
         "mcp": {
           "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
+          "source": "catalog.operation_level_mcp",
+          "semanticBinding": "ordered_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
           "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
+          "toolName": "operatingline.blender.animation.pose-keyframes.execute-next",
           "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "resultBinding": "companion_leaf_operation_progress",
+          "operations": [
+            {
+              "sourceOperationId": "workspace.animation",
+              "parameters": [
+                {
+                  "name": "actionId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "actionId",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "armatureId",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "armatureId",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "editor.action",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "mode.pose",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "semantic.create_pose_action",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.pose_animation.action_name",
+              "parameters": [
+                {
+                  "name": "actionName",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "actionName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "operator.insert_keyframe",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.pose_animation.keyframes",
+              "parameters": [
+                {
+                  "name": "keyframes",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "keyframes",
+                    "transform": "json_identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "control.pose_interpolation",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.pose_animation.interpolation",
+              "parameters": [
+                {
+                  "name": "interpolation",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "interpolation",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "control.pose_extrapolation",
+              "parameters": []
+            },
+            {
+              "sourceOperationId": "projection.semantic.pose_animation.extrapolation",
+              "parameters": [
+                {
+                  "name": "extrapolation",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "extrapolation",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "sourceOperationId": "semantic.verify_pose_animation",
+              "parameters": []
+            }
+          ]
         }
       }
     },

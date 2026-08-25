@@ -1,0 +1,273 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 2,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.animation.pose-keyframes.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_action_create"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.create_pose_action"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.create_pose_action"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "action_create"
+          },
+          "pendingActionName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingPose\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "Action"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Animation"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingPose\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "actionId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingActionName",
+          "resourceType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.animation.pose-keyframes.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 2
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_armature_action_bind"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.create_pose_action"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.create_pose_action"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "armature_action_bind"
+          },
+          "pendingActionName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingPose\\.[0-9a-f]{8}$"
+          },
+          "observedBinding": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Animation"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Action"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingPose\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "actionId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingActionName",
+          "observedBinding",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.animation.pose-keyframes.execute-next"
+          },
+          "armatureId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_action_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "projection.semantic.pose_animation.action_name"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "projection.semantic.pose_animation.action_name"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "actionName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "action_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingPose\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Animation"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "required": [
+          "mcpTool",
+          "armatureId",
+          "actionId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Pose Action create/bind and accepted-name write order, managed pending identity, resource agreement, and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-pose-rna-action-resource-mutations.json"
+}

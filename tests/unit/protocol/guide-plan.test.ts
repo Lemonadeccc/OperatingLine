@@ -147,6 +147,143 @@ describe('guide plan protocol fixture', () => {
     expect(guidePlanSchema.safeParse(plan).success).toBe(false);
   });
 
+  it('versions candidate-only menu projections without granting execution authority', () => {
+    const plan = readFixture() as {
+      protocolVersion: string;
+      steps: Array<Record<string, unknown>>;
+    };
+    plan.protocolVersion = '1.7.0';
+    const executable = plan.steps.find((step) => step.action !== null)!;
+    const group = plan.steps.find((step) => step.action === null)!;
+    const candidateMenuProjection = {
+      projection: 'candidate_only',
+      interactionCatalogVersion: '1.49.0',
+      id: 'candidate.create-eye.menu',
+      modality: 'menu',
+      equivalence: 'not_equivalent_to_managed_action',
+      executionAuthority: 'none',
+      title: 'Candidate eye menu projection',
+      reason: 'A display-only native menu path has not been proven equivalent.',
+      preconditions: [{ kind: 'workspace', label: 'Workspace', value: 'Layout' }],
+      operations: [
+        {
+          id: 'candidate.menu.add',
+          order: 1,
+          semanticRefs: ['semantic.create-eye'],
+          description: 'Open Add.',
+          evidenceRefs: [],
+          intent: 'navigate',
+          target: { kind: 'menu', hostId: 'VIEW3D_MT_add' },
+          path: ['Layout', 'Add'],
+          parameters: {},
+        },
+        {
+          id: 'candidate.menu.eye',
+          order: 2,
+          semanticRefs: ['semantic.create-eye'],
+          description: 'Create the eye with concrete values.',
+          evidenceRefs: [],
+          intent: 'execute',
+          target: { kind: 'operator', hostId: 'mesh.primitive_uv_sphere_add' },
+          path: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+          parameters: { radius: 0.12, location: [0.32, -0.86, 2.14] },
+        },
+      ],
+      omittedActionArguments: [
+        { argumentName: 'objectName', reason: 'Naming is not represented in this candidate.' },
+      ],
+      nativeEvidence: {
+        kind: 'bounded_blender_ui_probe',
+        executorId: 'blender.native-ui',
+        hostVersions: ['4.5.0'],
+        managedActionExecuted: false,
+        managedReceiptCreated: false,
+        managedReplacementMeshCreated: false,
+        nativeMutationKind: 'native_operator',
+        operationIds: ['candidate.menu.add', 'candidate.menu.eye'],
+        nativeUndoCheckpointRequired: true,
+        nativeUndoDepth: 1,
+        nativeRedoDepth: 1,
+      },
+    };
+    executable.candidateMenuProjection = candidateMenuProjection;
+    const parsed = guidePlanSchema.parse(plan);
+    const parsedProjection = parsed.steps.find(
+      (step) => step.id === executable.id,
+    )?.candidateMenuProjection;
+    expect(parsedProjection?.operations.map((operation) => operation.order)).toEqual([1, 2]);
+    expect(parsedProjection?.operations[1]).toMatchObject({
+      path: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+      parameters: { radius: 0.12, location: [0.32, -0.86, 2.14] },
+    });
+    expect(
+      parsed.steps.find((step) => step.id === executable.id)?.executionTrackOverride,
+    ).toBeUndefined();
+
+    plan.protocolVersion = '1.6.0';
+    expect(guidePlanSchema.safeParse(plan).success).toBe(false);
+    plan.protocolVersion = '1.7.0';
+
+    for (const unsafeProjection of [
+      {
+        ...candidateMenuProjection,
+        executionAuthority: 'managed_action',
+      },
+      {
+        ...candidateMenuProjection,
+        equivalence: 'equivalent_to_managed_action',
+      },
+      {
+        ...candidateMenuProjection,
+        availability: 'available',
+      },
+      {
+        ...candidateMenuProjection,
+        nativeEvidence: {
+          ...candidateMenuProjection.nativeEvidence,
+          operationIds: ['candidate.menu.eye', 'candidate.menu.add'],
+        },
+      },
+      {
+        ...candidateMenuProjection,
+        nativeEvidence: {
+          ...candidateMenuProjection.nativeEvidence,
+          hostVersions: ['4.5.0', '4.5.0'],
+        },
+      },
+      {
+        ...candidateMenuProjection,
+        operations: candidateMenuProjection.operations.map((operation) => ({
+          ...operation,
+          order: 2,
+        })),
+      },
+    ]) {
+      executable.candidateMenuProjection = unsafeProjection;
+      expect(guidePlanSchema.safeParse(plan).success).toBe(false);
+    }
+
+    executable.candidateMenuProjection = candidateMenuProjection;
+    executable.executionTrackOverride = {
+      kind: 'interaction_catalog_proof',
+      interactionCatalogVersion: '1.49.0',
+      interactionCatalogContentSha256: 'a'.repeat(64),
+      recipeId: 'recipe.create-eye',
+      modality: 'menu',
+      trackId: 'track.create-eye.menu',
+      trackContentSha256: 'b'.repeat(64),
+      proofExecutionContentSha256: 'c'.repeat(64),
+    };
+    const coexisting = guidePlanSchema.parse(plan);
+    expect(
+      coexisting.steps.find((step) => step.id === executable.id)?.executionTrackOverride,
+    ).toEqual(executable.executionTrackOverride);
+    delete executable.executionTrackOverride;
+    delete executable.candidateMenuProjection;
+    group.candidateMenuProjection = candidateMenuProjection;
+    expect(guidePlanSchema.safeParse(plan).success).toBe(false);
+  });
+
   it('keeps Zod and the emitted JSON Schema aligned for 3D positions', () => {
     const extraCoordinate = readFixture() as { steps: Array<Record<string, unknown>> };
     const anchorStep = extraCoordinate.steps.find(
@@ -192,7 +329,9 @@ describe('guide plan protocol fixture', () => {
         expect.objectContaining({
           if: expect.objectContaining({
             properties: {
-              protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0'] },
+              protocolVersion: {
+                enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0'],
+              },
             },
           }),
         }),

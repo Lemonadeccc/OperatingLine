@@ -1,0 +1,415 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maxItems": 26,
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.solidify.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_solidify_modifier_create"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "control.add_modifier"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "control.add_modifier"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "managed_receipt_identity"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "solidify_modifier_create"
+          },
+          "pendingModifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingSolidifyModifier\\.[0-9a-f]{8}$"
+          },
+          "resourceType": {
+            "type": "string",
+            "const": "SolidifyModifier"
+          },
+          "modifierType": {
+            "type": "string",
+            "const": "SOLIDIFY"
+          },
+          "observedResource": {
+            "type": "boolean",
+            "const": true
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "const": "Add Modifier"
+              },
+              {
+                "type": "string",
+                "const": "Generate"
+              },
+              {
+                "type": "string",
+                "const": "Solidify"
+              },
+              {
+                "type": "string",
+                "pattern": "^OperatingLine\\.PendingSolidifyModifier\\.[0-9a-f]{8}$"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 7,
+            "maxItems": 7
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "mutationKind",
+          "pendingModifierName",
+          "resourceType",
+          "modifierType",
+          "observedResource",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.solidify.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "number",
+            "const": 1
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_modifier_name_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.solidify_parameters"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.solidify_parameters"
+          },
+          "valueSource": {
+            "type": "string",
+            "const": "accepted_action_argument"
+          },
+          "actionArgument": {
+            "type": "string",
+            "const": "modifierName"
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "solidify_modifier_name_write"
+          },
+          "beforeName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.PendingSolidifyModifier\\.[0-9a-f]{8}$"
+          },
+          "acceptedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observedName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Name"
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "beforeName",
+          "acceptedName",
+          "observedName",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "mcpTool": {
+            "type": "string",
+            "const": "operatingline.blender.modifier.solidify.execute-next"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modifierId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 26
+          },
+          "executionMethod": {
+            "type": "string",
+            "const": "blender_rna_solidify_modifier_property_write"
+          },
+          "sourceOperationId": {
+            "type": "string",
+            "const": "semantic.solidify_parameters"
+          },
+          "semanticAction": {
+            "type": "string",
+            "const": "semantic.solidify_parameters"
+          },
+          "valueSource": {
+            "type": "string",
+            "enum": [
+              "catalog_constant",
+              "accepted_action_argument"
+            ]
+          },
+          "actionArgument": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "const": "thickness"
+              },
+              {
+                "type": "string",
+                "const": "offset"
+              }
+            ]
+          },
+          "mutationKind": {
+            "type": "string",
+            "const": "solidify_modifier_property_write"
+          },
+          "modifierName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "propertyName": {
+            "type": "string",
+            "enum": [
+              "solidify_mode",
+              "thickness",
+              "thickness_clamp",
+              "use_thickness_angle_clamp",
+              "thickness_vertex_group",
+              "offset",
+              "edge_crease_inner",
+              "edge_crease_outer",
+              "edge_crease_rim",
+              "material_offset",
+              "material_offset_rim",
+              "vertex_group",
+              "shell_vertex_group",
+              "rim_vertex_group",
+              "use_even_offset",
+              "use_rim",
+              "use_rim_only",
+              "use_quality_normals",
+              "invert_vertex_group",
+              "use_flat_faces",
+              "use_flip_normals",
+              "nonmanifold_thickness_mode",
+              "nonmanifold_boundary_mode",
+              "nonmanifold_merge_threshold",
+              "bevel_convex"
+            ]
+          },
+          "acceptedValue": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "observedValue": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "uiPath": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string",
+                "const": "Properties"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "const": "Modifiers"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "solidify_mode",
+                  "thickness",
+                  "thickness_clamp",
+                  "use_thickness_angle_clamp",
+                  "thickness_vertex_group",
+                  "offset",
+                  "edge_crease_inner",
+                  "edge_crease_outer",
+                  "edge_crease_rim",
+                  "material_offset",
+                  "material_offset_rim",
+                  "vertex_group",
+                  "shell_vertex_group",
+                  "rim_vertex_group",
+                  "use_even_offset",
+                  "use_rim",
+                  "use_rim_only",
+                  "use_quality_normals",
+                  "invert_vertex_group",
+                  "use_flat_faces",
+                  "use_flip_normals",
+                  "nonmanifold_thickness_mode",
+                  "nonmanifold_boundary_mode",
+                  "nonmanifold_merge_threshold",
+                  "bevel_convex"
+                ]
+              }
+            ],
+            "additionalItems": false,
+            "minItems": 5,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "mcpTool",
+          "targetId",
+          "modifierId",
+          "order",
+          "executionMethod",
+          "sourceOperationId",
+          "semanticAction",
+          "valueSource",
+          "actionArgument",
+          "mutationKind",
+          "modifierName",
+          "propertyName",
+          "acceptedValue",
+          "observedValue",
+          "uiPath"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "$comment": "Exact Solidify Modifier create, accepted name, and ordered fixed/accepted RNA property writes plus observed values and UI paths require the exported Zod/Runtime semantic validation gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-leaf-operation-solidify-rna-mutations.json"
+}

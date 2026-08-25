@@ -1343,6 +1343,8 @@
           "actionId": "snowman.animation.wave",
           "actionName": "OperatingLine.Action.SnowmanWave",
           "armatureId": "snowman.rig.armature",
+          "interpolation": "BEZIER",
+          "extrapolation": "CONSTANT",
           "keyframes": [
             {
               "frame": 1,

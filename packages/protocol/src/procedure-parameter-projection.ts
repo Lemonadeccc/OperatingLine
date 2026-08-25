@@ -1,9 +1,11 @@
 import { z } from 'zod';
 
+import type { JsonValue } from './canonical-json-value.js';
 import { guideStepIdSchema } from './guide.js';
 import { catalogVersionSchema } from './version.js';
 
-export const procedureParameterProjectionFormatVersion = '1.0.0' as const;
+export const supportedProcedureParameterProjectionFormatVersions = ['1.0.0', '1.1.0'] as const;
+export const procedureParameterProjectionFormatVersion = '1.1.0' as const;
 
 const forbiddenPathFields = new Set(['__proto__', 'constructor', 'prototype']);
 const safeParameterNameSchema = z
@@ -34,6 +36,7 @@ export type ProcedureParameterPathSegment = z.infer<typeof procedureParameterPat
 
 export const procedureParameterTransformSchema = z.enum([
   'identity',
+  'json_identity',
   'uniform_vector3',
   'divide_by_two',
   'vector3_x',
@@ -52,6 +55,12 @@ export const procedureParameterProjectionTargetSchema = z.discriminatedUnion('mo
   }),
   z.strictObject({
     modality: z.literal('menu'),
+    trackId: guideStepIdSchema,
+    operationId: guideStepIdSchema,
+    path: parameterPathSchema,
+  }),
+  z.strictObject({
+    modality: z.literal('menu_candidate'),
     trackId: guideStepIdSchema,
     operationId: guideStepIdSchema,
     path: parameterPathSchema,
@@ -94,26 +103,39 @@ const omittedArgumentCoverageSchema = z.strictObject({
   reason: z.string().trim().min(1).max(2_000),
 });
 
-export const procedureParameterProjectionSchema = z.strictObject({
-  formatVersion: z.literal(procedureParameterProjectionFormatVersion),
-  provenance: z.strictObject({
-    kind: z.literal('interaction_catalog_materialization'),
-    interactionCatalogVersion: catalogVersionSchema,
-    recipeId: guideStepIdSchema,
-  }),
-  arguments: z
-    .array(
-      z.discriminatedUnion('disposition', [
-        projectedArgumentCoverageSchema,
-        omittedArgumentCoverageSchema,
-      ]),
-    )
-    .max(1_000),
-  bindings: z.array(procedureParameterBindingSchema).max(10_000),
-});
+export const procedureParameterProjectionSchema = z
+  .strictObject({
+    formatVersion: z.enum(supportedProcedureParameterProjectionFormatVersions),
+    provenance: z.strictObject({
+      kind: z.literal('interaction_catalog_materialization'),
+      interactionCatalogVersion: catalogVersionSchema,
+      recipeId: guideStepIdSchema,
+    }),
+    arguments: z
+      .array(
+        z.discriminatedUnion('disposition', [
+          projectedArgumentCoverageSchema,
+          omittedArgumentCoverageSchema,
+        ]),
+      )
+      .max(1_000),
+    bindings: z.array(procedureParameterBindingSchema).max(10_000),
+  })
+  .superRefine((projection, context) => {
+    if (
+      projection.formatVersion === '1.0.0' &&
+      projection.bindings.some((binding) => binding.target.modality === 'menu_candidate')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['bindings'],
+        message: 'Menu candidate parameter bindings require projection format 1.1.0',
+      });
+    }
+  });
 export type ProcedureParameterProjection = z.infer<typeof procedureParameterProjectionSchema>;
 
-export type ProcedureProjectedParameterValue = boolean | number | string | readonly number[];
+export type ProcedureProjectedParameterValue = JsonValue;
 
 function finiteVector3(value: unknown): readonly [number, number, number] {
   if (
@@ -138,6 +160,11 @@ export function projectProcedureParameter(
   value: unknown,
   transform: ProcedureParameterTransform,
 ): ProcedureProjectedParameterValue {
+  if (transform === 'json_identity') {
+    const parsed = z.json().safeParse(value);
+    if (parsed.success) return structuredClone(parsed.data) as JsonValue;
+    throw new Error('JSON identity parameter projection requires a finite JSON value');
+  }
   if (transform === 'uniform_vector3') {
     const component = finiteNumber(value);
     return [component, component, component];
