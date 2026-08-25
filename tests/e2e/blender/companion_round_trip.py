@@ -342,13 +342,21 @@ def main() -> None:
 
         assert bpy.ops.operating_line.start() == {"FINISHED"}
         start_sequence = controller.last_report["sequence"]
-        wait_until(
-            lambda: (
-                controller._transport is not None
-                and controller._transport.last_delivered_sequence >= start_sequence
-            ),
-            "walkthrough_started report delivery",
-        )
+        try:
+            wait_until(
+                lambda: (
+                    controller._transport is not None
+                    and controller._transport.last_delivered_sequence >= start_sequence
+                ),
+                "walkthrough_started report delivery",
+            )
+        except TimeoutError as error:
+            raise TimeoutError(
+                "Timed out waiting for walkthrough_started report delivery; "
+                f"controller status={controller.status!r}, error={controller.error!r}, "
+                f"expected sequence={start_sequence}, delivered sequence="
+                f"{controller._transport.last_delivered_sequence if controller._transport is not None else None}"
+            ) from error
         for item in factory_objects:
             assert bpy.data.objects.get(item.name) is item
             assert item.as_pointer() == factory_object_pointers[item.name]

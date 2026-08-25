@@ -35,6 +35,7 @@ def assert_not_persisted() -> None:
         addon._COMPANION_SESSION_ID_SLOT,
         addon._COMPANION_INSTANCE_ID_SLOT,
         addon._COMPANION_DOCUMENT_INCARNATION_ID_SLOT,
+        addon._COMPANION_REPORT_SEQUENCE_SLOT,
     }
     assert all(slot not in bpy.context.scene for slot in slots)
     assert all(slot not in bpy.context.window_manager for slot in slots)
@@ -79,15 +80,60 @@ def main() -> None:
         assert second_load.instance_id != first_load.instance_id
         assert_not_persisted()
 
+    final_report_before_restart = second_load.report("connected", submit=False)
     session_id = second_load.session_id
     document_incarnation_id = second_load.document_incarnation_id
     instance_id = second_load.instance_id
     addon.unregister()
     addon.register()
     restarted = addon.get_companion()
-    assert restarted.session_id == session_id
+    assert restarted.session_id != session_id
     assert restarted.document_incarnation_id == document_incarnation_id
     assert restarted.instance_id == instance_id
+    assert restarted.last_report is None
+    assert restarted.report_sequence == final_report_before_restart["sequence"]
+    first_report_after_restart = restarted.report("connected", submit=False)
+    assert (
+        first_report_after_restart["sequence"]
+        == final_report_before_restart["sequence"] + 1
+    )
+    namespace = addon._runtime_namespace()
+    valid_sequence_state = namespace[addon._COMPANION_REPORT_SEQUENCE_SLOT]
+    namespace[addon._COMPANION_REPORT_SEQUENCE_SLOT] = {
+        "instanceId": instance_id,
+        "sequence": addon.MAX_COMPANION_REPORT_SEQUENCE + 1,
+    }
+    try:
+        addon._companion_report_sequence(instance_id)
+    except RuntimeError as error:
+        assert "outside protocol bounds" in str(error)
+    else:
+        raise AssertionError("Out-of-range persisted report sequence was accepted")
+    finally:
+        namespace[addon._COMPANION_REPORT_SEQUENCE_SLOT] = valid_sequence_state
+    different_instance_id = str(uuid.uuid4())
+    namespace[addon._COMPANION_REPORT_SEQUENCE_SLOT] = {
+        "instanceId": different_instance_id,
+        "sequence": addon.MAX_COMPANION_REPORT_SEQUENCE,
+    }
+    assert addon._companion_report_sequence(instance_id) == 0
+    assert namespace[addon._COMPANION_REPORT_SEQUENCE_SLOT] == {
+        "instanceId": instance_id,
+        "sequence": 0,
+    }
+    namespace[addon._COMPANION_REPORT_SEQUENCE_SLOT] = valid_sequence_state
+    exhausted = addon.CompanionController(
+        str(uuid.uuid4()),
+        session_id=str(uuid.uuid4()),
+        document_incarnation_id=str(uuid.uuid4()),
+        initial_report_sequence=addon.MAX_COMPANION_REPORT_SEQUENCE,
+    )
+    try:
+        exhausted.report("connected", submit=False)
+    except RuntimeError as error:
+        assert "sequence is exhausted" in str(error)
+    else:
+        raise AssertionError("Exhausted report sequence generated an invalid report")
     addon.unregister()
     print("OperatingLine Companion identity lifecycle test passed")
 

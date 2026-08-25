@@ -217,6 +217,7 @@ const runtime = await startRuntime({
   actionCatalogs: blenderActionCatalogs,
 });
 const reportsById = new Map();
+const stateReportRequestIds = [];
 const mcpVisibleReportIds = new Set();
 const establishedLeaseIds = new Set();
 const companionSessions = [];
@@ -289,6 +290,7 @@ const proxy = createServer(async (request, response) => {
     }
     if (request.method === 'POST' && request.url === '/api/v1/companion/state') {
       const report = JSON.parse(body.toString('utf8'));
+      stateReportRequestIds.push(report.reportId);
       reportsById.set(report.reportId, report);
       const listed = await callMcpTool(
         runtime,
@@ -589,9 +591,10 @@ try {
     ),
   );
   assert.ok(heartbeatRequests.every((heartbeat, index) => heartbeat.sequence === index + 1));
+  assert.deepEqual(new Set(stateReportRequestIds), new Set(reportsById.keys()));
   assert.equal(
     leaseProtectedRequests.filter((request) => request.url === '/api/v1/companion/state').length,
-    reportsById.size,
+    stateReportRequestIds.length,
   );
   assert.ok(
     leaseProtectedRequests.some(

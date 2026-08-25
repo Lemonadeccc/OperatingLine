@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
 import os
+import sys
 import traceback
+from copy import deepcopy
 from pathlib import Path
 from typing import Callable
 
 import bpy
+import bmesh
 
 
 RESULT_PATH = Path(os.environ["OPERATINGLINE_SUBDIVIDE_F9_RESULT"])
+ENTRY_MODE = os.environ.get("OPERATINGLINE_SUBDIVIDE_F9_ENTRY_MODE", "operator-search")
+assert ENTRY_MODE in {"operator-search", "candidate-menu"}
 NUMBER_CUTS_TEXT = os.environ["OPERATINGLINE_SUBDIVIDE_F9_NUMBER_CUTS"]
 SMOOTHNESS_TEXT = os.environ["OPERATINGLINE_SUBDIVIDE_F9_SMOOTHNESS"]
 NUMBER_CUTS = int(NUMBER_CUTS_TEXT)
@@ -29,6 +35,29 @@ EXPECTED_TOPOLOGY = {
     "polygons": 6 * SUBDIVISIONS_PER_EDGE**2,
 }
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ADAPTER_ROOT = REPO_ROOT / "adapters" / "blender" / "extension"
+INTERACTION_CATALOG_PATH = (
+    REPO_ROOT
+    / "adapters"
+    / "blender"
+    / "catalog"
+    / "v1"
+    / "interaction-catalog.json"
+)
+CANDIDATE_ACTION_ARGUMENTS = {
+    "targetId": "candidate.factory_cube",
+    "resultMeshId": "candidate.factory_cube.subdivided_mesh",
+    "resultMeshName": "OperatingLine.CandidateMenuProof.SubdividedMesh",
+    "cuts": NUMBER_CUTS,
+    "smooth": SMOOTHNESS,
+}
+CANDIDATE_OPERATION_IDS: tuple[str, ...] = ()
+candidate_menu_invocations: list[dict[str, object]] = []
+disable_candidate_menu_guidance: Callable[[], None] | None = None
+candidate_setup_session = None
+candidate_setup_receipt_id: str | None = None
+
 window = bpy.context.window
 assert window is not None
 area = next(candidate for candidate in window.screen.areas if candidate.type == "VIEW_3D")
@@ -37,6 +66,195 @@ space = area.spaces.active
 center_x = area.x + area.width // 2
 center_y = area.y + area.height // 2
 ui_scale = bpy.context.preferences.system.ui_scale
+
+
+def _candidate_parameter_value(source: dict[str, object]) -> object:
+    if source.get("kind") == "literal":
+        return deepcopy(source.get("value"))
+    if source.get("kind") == "action_argument" and source.get("transform") == "identity":
+        argument_name = source.get("argumentName")
+        assert isinstance(argument_name, str)
+        return deepcopy(CANDIDATE_ACTION_ARGUMENTS[argument_name])
+    raise AssertionError(f"Unsupported candidate parameter source: {source!r}")
+
+
+def enable_candidate_menu_proof() -> tuple[str, ...]:
+    """Patch the real menus from one validated, display-only candidate Guide."""
+
+    global candidate_setup_receipt_id, candidate_setup_session
+    global disable_candidate_menu_guidance
+    spec = importlib.util.spec_from_file_location(
+        "operating_line_subdivide_candidate_menu_proof",
+        ADAPTER_ROOT / "__init__.py",
+        submodule_search_locations=[str(ADAPTER_ROOT)],
+    )
+    assert spec is not None and spec.loader is not None
+    extension = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = extension
+    spec.loader.exec_module(extension)
+
+    from operating_line_subdivide_candidate_menu_proof.operating_line.domain import (
+        load_task_tree_data,
+    )
+    from operating_line_subdivide_candidate_menu_proof.operating_line.application import (
+        DemoSession,
+    )
+    from operating_line_subdivide_candidate_menu_proof.operating_line.infrastructure import (
+        action_registry,
+        resolve_resource,
+    )
+    from operating_line_subdivide_candidate_menu_proof.operating_line.presentation.native_menu_guidance import (
+        candidate_menu_snapshot,
+        disable_native_menu_guidance,
+        enable_native_menu_guidance,
+        guided_menu_action_matches,
+        native_menu_snapshot,
+    )
+
+    catalog = json.loads(INTERACTION_CATALOG_PATH.read_text(encoding="utf-8"))
+    recipe = next(
+        item
+        for item in catalog["recipes"]
+        if item["actionName"] == "blender.mesh.edit_subdivide"
+    )
+    declaration = recipe["procedureMaterialization"]["menuCandidate"]
+    assert declaration["executionAuthority"] == "none"
+    operations = [
+        {
+            "id": operation["id"],
+            "order": ordinal,
+            "semanticRefs": ["semantic.mesh.edit_subdivide"],
+            "description": operation["label"],
+            "evidenceRefs": [],
+            "intent": operation["intent"],
+            "target": deepcopy(operation["target"]),
+            "path": deepcopy(operation["path"]),
+            "parameters": {
+                assignment["name"]: _candidate_parameter_value(assignment["source"])
+                for assignment in operation["parameters"]
+            },
+        }
+        for ordinal, operation in enumerate(declaration["operations"], start=1)
+    ]
+    projection = {
+        "projection": declaration["projection"],
+        "interactionCatalogVersion": catalog["catalogVersion"],
+        "id": f"{recipe['id']}.menu-candidate",
+        "modality": "menu",
+        "equivalence": declaration["equivalence"],
+        "executionAuthority": declaration["executionAuthority"],
+        "title": f"{recipe['title']} menu candidate",
+        "reason": declaration["reason"],
+        "preconditions": deepcopy(declaration["preconditions"]),
+        "operations": operations,
+        "omittedActionArguments": deepcopy(declaration["omittedActionArguments"]),
+        **(
+            {}
+            if "nativeEvidence" not in declaration
+            else {"nativeEvidence": deepcopy(declaration["nativeEvidence"])}
+        ),
+    }
+    plan = {
+        "protocolVersion": "1.7.0",
+        "id": "subdivide-candidate-menu-proof",
+        "revision": 1,
+        "rootStepId": "candidate.proof",
+        "steps": [
+            {
+                "id": "candidate.proof",
+                "parentId": None,
+                "order": 0,
+                "dependsOn": [],
+                "title": "Subdivide candidate proof",
+                "action": None,
+                "anchors": [],
+                "expectedObservations": [],
+            },
+            {
+                "id": "candidate.setup_cube",
+                "parentId": "candidate.proof",
+                "order": 1,
+                "dependsOn": [],
+                "title": "Create a receipt-bound target cube",
+                "action": {
+                    "adapterId": "blender",
+                    "name": "blender.mesh.create_cube",
+                    "arguments": {
+                        "resourceId": CANDIDATE_ACTION_ARGUMENTS["targetId"],
+                        "objectName": "OperatingLine.CandidateMenuProofCube",
+                        "size": 2.0,
+                        "location": [0.0, 0.0, 0.0],
+                    },
+                },
+                "anchors": [],
+                "expectedObservations": [],
+            },
+            {
+                "id": "candidate.subdivide",
+                "parentId": "candidate.proof",
+                "order": 2,
+                "dependsOn": ["candidate.setup_cube"],
+                "title": "Run the native Subdivide candidate",
+                "action": {
+                    "adapterId": "blender",
+                    "name": "blender.mesh.edit_subdivide",
+                    "arguments": deepcopy(CANDIDATE_ACTION_ARGUMENTS),
+                },
+                "anchors": [],
+                "expectedObservations": [],
+                "candidateMenuProjection": projection,
+            },
+        ],
+    }
+    root = load_task_tree_data(plan)
+    session = DemoSession(
+        root,
+        action_registry(root),
+        plan_id=plan["id"],
+        revision=plan["revision"],
+        source_plan=plan,
+    )
+    session.start()
+    setup_step = session.next()
+    assert setup_step is not None and setup_step.id == "candidate.setup_cube"
+    setup_receipt = session.receipt_for_step(setup_step.id)
+    assert setup_receipt is not None and len(session.receipts) == 1
+    target_identities = tuple(
+        identity
+        for identity in setup_receipt.created
+        if identity.logical_id == CANDIDATE_ACTION_ARGUMENTS["targetId"]
+        and identity.resource_type == "OBJECT"
+    )
+    assert len(target_identities) == 1
+    target_object = resolve_resource(target_identities[0])
+    assert isinstance(target_object, bpy.types.Object)
+    assert target_object.type == "MESH"
+    bpy.ops.object.select_all(action="DESELECT")
+    target_object.select_set(True)
+    bpy.context.view_layer.objects.active = target_object
+    assert session.guidance_step is not None
+    assert session.guidance_step.id == "candidate.subdivide"
+    assert bpy.ops.ed.undo_push(
+        message="OperatingLine receipt-bound candidate baseline"
+    ) == {"FINISHED"}
+    candidate_setup_session = session
+    candidate_setup_receipt_id = setup_receipt.receipt_id
+
+    assert enable_native_menu_guidance(lambda: session)
+    snapshot = candidate_menu_snapshot()
+    assert snapshot is not None and snapshot.candidate_only
+    assert not snapshot.managed_equivalent
+    assert native_menu_snapshot() is None
+    assert not snapshot.accepts("mesh.subdivide")
+    assert not guided_menu_action_matches(root.id, "mesh.subdivide")
+    operation_ids = tuple(operation.operation_id for operation in snapshot.operations)
+    assert operation_ids == tuple(operation["id"] for operation in operations)
+    disable_candidate_menu_guidance = disable_native_menu_guidance
+    return operation_ids
+
+
+if ENTRY_MODE == "candidate-menu":
+    CANDIDATE_OPERATION_IDS = enable_candidate_menu_proof()
 
 
 def mesh_geometry_fingerprint(mesh: bpy.types.Mesh) -> str:
@@ -101,13 +319,25 @@ def scene_state_evidence(active: bpy.types.Object) -> dict[str, object]:
 
 initial_active = bpy.context.view_layer.objects.active
 assert initial_active is not None
-assert initial_active.name == "Cube"
+expected_object_name = (
+    "OperatingLine.CandidateMenuProofCube"
+    if ENTRY_MODE == "candidate-menu"
+    else "Cube"
+)
+assert initial_active.name == expected_object_name
 assert initial_active.type == "MESH"
+assert window.workspace.name == "Layout"
+assert bpy.context.selected_objects == [initial_active]
 object_pointer_before = initial_active.as_pointer()
 mesh_data_pointer_before = initial_active.data.as_pointer()
 mesh_datablock_count_before = len(bpy.data.meshes)
-factory_geometry_fingerprint_before = mesh_geometry_fingerprint(initial_active.data)
-factory_state_evidence_before = scene_state_evidence(initial_active)
+if ENTRY_MODE == "candidate-menu":
+    for vertex in initial_active.data.vertices:
+        vertex.select = False
+    initial_active.data.update()
+    assert not any(vertex.select for vertex in initial_active.data.vertices)
+baseline_geometry_fingerprint_before = mesh_geometry_fingerprint(initial_active.data)
+baseline_state_evidence_before = scene_state_evidence(initial_active)
 
 # The F9 popup is anchored at the viewport center. These logical offsets select
 # its first two numeric rows at every verified UI scale.
@@ -211,12 +441,13 @@ def finish() -> None:
     assert bpy.context.mode == "OBJECT"
     assert active is not None
     assert active.type == "MESH"
-    assert active.name == "Cube"
+    assert active.name == expected_object_name
 
     mesh_data_pointer_after = active.data.as_pointer()
     mesh_datablock_count_after = len(bpy.data.meshes)
     assert mesh_data_pointer_after == mesh_data_pointer_before
     assert mesh_datablock_count_after == mesh_datablock_count_before
+    assert bpy.data.meshes.get(CANDIDATE_ACTION_ARGUMENTS["resultMeshName"]) is None
 
     topology = {
         "vertices": len(active.data.vertices),
@@ -250,18 +481,18 @@ def finish() -> None:
     }
     assert (
         undo_operation_snapshot["geometrySha256"]
-        == factory_geometry_fingerprint_before
+        == baseline_geometry_fingerprint_before
     )
     assert {
         key: restored_baseline_snapshot[key]
-        for key in factory_state_evidence_before
-    } == factory_state_evidence_before
+        for key in baseline_state_evidence_before
+    } == baseline_state_evidence_before
     assert redo_snapshot["mode"] == "OBJECT"
     assert redo_snapshot["topology"] == topology
     assert redo_snapshot["stateSha256"] == applied_snapshot["stateSha256"]
     assert redo_snapshot["geometrySha256"] != restored_baseline_snapshot["geometrySha256"]
     assert all(
-        snapshot["activeObjectName"] == "Cube"
+        snapshot["activeObjectName"] == expected_object_name
         and snapshot["objectPointer"] == object_pointer_before
         and snapshot["meshDataPointer"] == mesh_data_pointer_before
         and snapshot["meshDatablockCount"] == mesh_datablock_count_before
@@ -290,8 +521,73 @@ def finish() -> None:
         for index, event in enumerate(redo_event_evidence)
     )
 
+    candidate_menu_evidence = None
+    if ENTRY_MODE == "candidate-menu":
+        assert candidate_setup_session is not None
+        assert candidate_setup_session.active_index == 0
+        assert len(candidate_setup_session.receipts) == 1
+        setup_receipt = candidate_setup_session.receipt_for_step(
+            "candidate.setup_cube"
+        )
+        assert setup_receipt is not None
+        assert setup_receipt.receipt_id == candidate_setup_receipt_id
+        assert candidate_setup_session.receipt_for_step("candidate.subdivide") is None
+        assert CANDIDATE_OPERATION_IDS == (
+            "candidate.workspace_layout",
+            "candidate.use_accepted_active_mesh",
+            "candidate.enter_edit_mode",
+            "candidate.open_select_menu",
+            "candidate.select_all_mesh_elements",
+            "candidate.open_edge_menu",
+            "candidate.execute_subdivide",
+            "candidate.open_adjust_last_operation",
+            "candidate.set_number_of_cuts",
+            "candidate.set_smoothness",
+            "candidate.return_to_object_mode",
+        )
+        assert candidate_menu_invocations == [
+            {
+                "operationId": "candidate.open_select_menu",
+                "menuName": "VIEW3D_MT_select_edit_mesh",
+                "result": ["INTERFACE"],
+                "expectedVisibleLabel": "All    05 CANDIDATE ONLY",
+            },
+            {
+                "operationId": "candidate.open_edge_menu",
+                "menuName": "VIEW3D_MT_edit_mesh_edges",
+                "result": ["INTERFACE"],
+                "expectedVisibleLabel": "Subdivide    07 CANDIDATE ONLY",
+            },
+        ]
+        candidate_menu_evidence = {
+            "kind": "bounded_blender_ui_probe",
+            "executorId": "blender.mesh_edit_subdivide_candidate_menu_f9.event_simulate.v1",
+            "hostVersion": ".".join(str(component) for component in bpy.app.version[:3]),
+            "managedActionExecuted": False,
+            "managedReceiptCreated": False,
+            "managedReplacementMeshCreated": False,
+            "nativeMutationKind": "in_place_edit_mesh_subdivide",
+            "targetBinding": {
+                "logicalTargetId": CANDIDATE_ACTION_ARGUMENTS["targetId"],
+                "objectName": expected_object_name,
+                "setupStepId": "candidate.setup_cube",
+                "setupReceiptId": setup_receipt.receipt_id,
+                "setupReceiptCountBeforeCandidate": 1,
+                "setupReceiptCountAfterCandidate": len(
+                    candidate_setup_session.receipts
+                ),
+                "candidateReceiptCreated": False,
+            },
+            "operationIds": list(CANDIDATE_OPERATION_IDS),
+            "menuInvocations": candidate_menu_invocations,
+            "nativeUndoCheckpointRequired": True,
+            "nativeUndoDepth": 4,
+            "nativeRedoDepth": 4,
+        }
+
     result = {
         "ok": True,
+        "entryMode": ENTRY_MODE,
         "blenderVersion": bpy.app.version_string,
         "window": [window.width, window.height],
         "area": [area.x, area.y, area.width, area.height],
@@ -327,13 +623,20 @@ def finish() -> None:
                 "undo": undo_event_evidence,
                 "redo": redo_event_evidence,
             },
-            "factoryCubeGeometryRestored": True,
-            "factoryStartupStateRestored": True,
+            "baselineProfile": (
+                "receipt_bound_managed_cube"
+                if ENTRY_MODE == "candidate-menu"
+                else "factory_startup_cube"
+            ),
+            "baselineGeometryRestored": True,
+            "baselineStateRestored": True,
             "parameterizedGeometryRestored": True,
-            "factoryStartupStateSha256": factory_state_evidence_before[
+            "expectedBaselineStateSha256": baseline_state_evidence_before[
                 "stateSha256"
             ],
-            "baselineStateSha256": restored_baseline_snapshot["stateSha256"],
+            "restoredBaselineStateSha256": restored_baseline_snapshot[
+                "stateSha256"
+            ],
             "appliedStateSha256": applied_snapshot["stateSha256"],
             "finalStateSha256": redo_snapshot["stateSha256"],
             "parameterEvidence": {
@@ -344,9 +647,12 @@ def finish() -> None:
             "meshIdentityUnchanged": True,
             "meshDatablockCountUnchanged": True,
         },
+        "candidateMenuEvidence": candidate_menu_evidence,
     }
     write_result(result)
     print("SUBDIVIDE_F9 PASS " + json.dumps(result, sort_keys=True), flush=True)
+    if disable_candidate_menu_guidance is not None:
+        disable_candidate_menu_guidance()
     bpy.ops.wm.quit_blender()
 
 
@@ -457,15 +763,96 @@ def add_text(label: str, text: str) -> None:
         )
 
 
+def open_candidate_menu(
+    operation_id: str,
+    menu_name: str,
+    expected_visible_label: str,
+) -> None:
+    assert ENTRY_MODE == "candidate-menu"
+    assert bpy.context.mode == "EDIT_MESH"
+    window.cursor_warp(area.x + area.width - 24, area.y + area.height - 24)
+    result = bpy.ops.wm.call_menu("EXEC_DEFAULT", name=menu_name)
+    assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
+    candidate_menu_invocations.append(
+        {
+            "operationId": operation_id,
+            "menuName": menu_name,
+            "result": sorted(result),
+            "expectedVisibleLabel": expected_visible_label,
+        }
+    )
+
+
+def assert_candidate_select_all() -> None:
+    assert ENTRY_MODE == "candidate-menu"
+    assert bpy.context.mode == "EDIT_MESH"
+    edit_mesh = bmesh.from_edit_mesh(initial_active.data)
+    assert edit_mesh.verts
+    assert all(vertex.select for vertex in edit_mesh.verts)
+    assert any(
+        operator.bl_idname == "MESH_OT_select_all"
+        for operator in bpy.context.window_manager.operators
+    )
+
+
+def assert_candidate_subdivide_applied() -> None:
+    assert ENTRY_MODE == "candidate-menu"
+    assert bpy.context.mode == "EDIT_MESH"
+    edit_mesh = bmesh.from_edit_mesh(initial_active.data)
+    assert (len(edit_mesh.verts), len(edit_mesh.edges), len(edit_mesh.faces)) == (
+        26,
+        48,
+        24,
+    )
+    assert any(
+        operator.bl_idname == "MESH_OT_subdivide"
+        for operator in bpy.context.window_manager.operators
+    )
+
+
 # Each UI event gets its own main-loop timer turn. Modeling reaches Blender only
 # through Window.event_simulate; bpy is used after the popup closes for evidence.
 add_event("dismiss splash", "ESC", delay=0.15)
 add_event("anchor cursor", "MOUSEMOVE", "NOTHING", delay=0.15)
 add_press_release("enter edit mode", "TAB", delay=0.3)
-add_press_release("select all", "A", delay=0.2)
-add_press_release("open operator search", "F3", delay=0.3)
-add_text("search subdivide", "subdivide")
-add_press_release("execute search result", "RET", delay=0.6)
+if ENTRY_MODE == "candidate-menu":
+    steps.append(
+        (
+            "open candidate Select menu",
+            0.3,
+            lambda: open_candidate_menu(
+                "candidate.open_select_menu",
+                "VIEW3D_MT_select_edit_mesh",
+                "All    05 CANDIDATE ONLY",
+            ),
+        )
+    )
+    add_press_release("execute candidate Select All", "RET", delay=0.4)
+    steps.append(("verify candidate Select All", 0.1, assert_candidate_select_all))
+    steps.append(
+        (
+            "open candidate Edge menu",
+            0.3,
+            lambda: open_candidate_menu(
+                "candidate.open_edge_menu",
+                "VIEW3D_MT_edit_mesh_edges",
+                "Subdivide    07 CANDIDATE ONLY",
+            ),
+        )
+    )
+    add_press_release("execute candidate Subdivide", "RET", delay=0.6)
+    steps.append(
+        (
+            "verify candidate Subdivide",
+            0.1,
+            assert_candidate_subdivide_applied,
+        )
+    )
+else:
+    add_press_release("select all", "A", delay=0.2)
+    add_press_release("open operator search", "F3", delay=0.3)
+    add_text("search subdivide", "subdivide")
+    add_press_release("execute search result", "RET", delay=0.6)
 add_press_release("open redo panel", "F9", delay=0.5)
 
 # Do not invoke bpy operators or screenshots while the temporary F9 panel owns UI.
@@ -526,6 +913,7 @@ def advance() -> float | None:
     except Exception as error:
         failure = {
             "ok": False,
+            "entryMode": ENTRY_MODE,
             "blenderVersion": bpy.app.version_string,
             "failedStep": label,
             "error": f"{type(error).__name__}: {error}",
@@ -533,6 +921,7 @@ def advance() -> float | None:
             "numberCutsPoint": number_cuts_point,
             "smoothnessPoint": smoothness_point,
             "historySnapshots": history_snapshots,
+            "candidateMenuInvocations": candidate_menu_invocations,
         }
         write_result(failure)
         print("SUBDIVIDE_F9 FAIL " + json.dumps(failure, sort_keys=True), flush=True)
@@ -545,6 +934,7 @@ print(
     + json.dumps(
         {
             "blenderVersion": bpy.app.version_string,
+            "entryMode": ENTRY_MODE,
             "window": [window.width, window.height],
             "area": [area.x, area.y, area.width, area.height],
             "uiScale": ui_scale,

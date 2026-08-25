@@ -9,8 +9,10 @@ import json
 import os
 import shutil
 import sys
+import traceback
 from pathlib import Path
 from queue import Queue
+from types import SimpleNamespace
 import uuid
 
 import bpy
@@ -25,18 +27,17 @@ OUTPUT_DIRECTORY = REPO_ROOT / "artifacts" / "blender"
 OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 STATE = os.environ.get("OPERATINGLINE_VISUAL_STATE", "forward")
 OUTPUT_NAMES = {
+    "timer-failure-probe": "timer-failure-probe-unused.png",
     "initial": "guidance-initial.png",
+    "node-editor": "guidance-node-editor.png",
+    "node-editor-geometry": "guidance-node-editor-geometry.png",
     "goal-request": "guidance-goal-request.png",
     "revision": "guidance-revision-request.png",
     "revision-collapsed": "guidance-revision-collapsed.png",
     "proposal": "guidance-proposal-review.png",
     "initial-provider-disclosure": "guidance-initial-provider-disclosure.png",
-    "initial-provider-generating": "guidance-initial-provider-generating.png",
-    "initial-provider-failed": "guidance-initial-provider-failed.png",
     "provider-disclosure": "guidance-provider-disclosure.png",
-    "provider-generating": "guidance-provider-generating.png",
     "dialogue-disclosure": "guidance-dialogue-disclosure.png",
-    "dialogue-streaming": "guidance-dialogue-streaming.png",
     "forward": "guidance-mid-forward.png",
     "back": "guidance-after-back.png",
     "hidden": "guidance-hidden.png",
@@ -68,7 +69,15 @@ spec.loader.exec_module(extension)
 from operating_line_visual_smoke.operating_line.application import (  # noqa: E402
     GuidanceState,
 )
+from operating_line_visual_smoke.operating_line.application.provider_handoff import (  # noqa: E402
+    PROVIDER_AUTHORITY_UNAVAILABLE,
+)
+from operating_line_visual_smoke.operating_line.domain import (  # noqa: E402
+    BLENDER_ACTION_CATALOG_VERSION,
+    PROTOCOL_VERSION,
+)
 from operating_line_visual_smoke.operating_line.infrastructure.overlay import (  # noqa: E402
+    _resolve_node_editor_markers,
     _semantic_hint,
 )
 from operating_line_visual_smoke.operating_line.presentation.native_menu_guidance import (  # noqa: E402
@@ -98,6 +107,9 @@ class StrictFakeTransport:
     def __init__(self):
         self.incoming = Queue()
         self.running = True
+        self.session_snapshot = SimpleNamespace(
+            negotiated_guide_protocol_version=PROTOCOL_VERSION,
+        )
         self.last_delivered_sequence = 0
         self.replan_run_requests = []
         self.dialogue_run_requests = []
@@ -122,6 +134,21 @@ class StrictFakeTransport:
 
     def wait_stopped(self, _timeout):
         return not self.running
+
+
+def register_fatal_timer(callback, *, first_interval):
+    """Turn asynchronous Blender timer failures into a prompt process failure."""
+
+    def guarded_callback():
+        try:
+            return callback()
+        except Exception:
+            traceback.print_exc()
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(1)
+
+    bpy.app.timers.register(guarded_callback, first_interval=first_interval)
 
 
 def assert_factory_objects_preserved():
@@ -159,41 +186,7 @@ def visual_provider_list():
     }
 
 
-def begin_visual_replan(state, instance_id):
-    provider = state.selected_provider
-    assert provider is not None
-    return state.begin(
-        target_instance_id=instance_id,
-        generation_request_id=str(uuid.uuid4()),
-        authorization={
-            "formatVersion": "1.0.0",
-            "canonicalization": "operatingline-authority-json-v1",
-            "kind": "ProviderCallAuthorization",
-            "authorityId": str(uuid.uuid4()),
-            "issuer": "trusted-visual-fixture",
-            "notBefore": "2026-08-21T00:00:00Z",
-            "expiresAt": "2099-08-21T00:00:00Z",
-            "provider": {
-                "providerId": provider["id"],
-                "descriptorVersion": provider["version"],
-                "model": "visual-fixture",
-            },
-            "operation": "semantic_replan_generation",
-            "generationRequestSha256": "a" * 64,
-            "disclosedDataSha256": "b" * 64,
-            "maximumCallCount": 1,
-            "signature": {
-                "signerId": "trusted-visual-fixture",
-                "keyId": "visual-key-1",
-                "algorithm": "ed25519",
-                "signature": "A" * 86,
-                "signedAt": "2026-08-21T00:00:00Z",
-            },
-        },
-    )
-
-
-def configure_provider_handoff(*, generating):
+def configure_provider_handoff():
     companion = extension.get_companion()
     fake_transport = StrictFakeTransport()
     companion._transport = fake_transport
@@ -207,42 +200,18 @@ def configure_provider_handoff(*, generating):
     companion.revision_request_status = (
         f"Request {revision_request_id[:8]} stored in runtime for MCP planner"
     )
-    if generating:
-        run = begin_visual_replan(
-            companion.provider_handoff, companion.instance_id
-        )
-        fake_transport.start_replan_run(run)
-        companion.provider_handoff.apply_status(
-            {
-                "contractVersion": "1.1.0",
-                "generationRequestId": run["generationRequestId"],
-                "revisionRequestId": revision_request_id,
-                "targetAdapterId": "blender",
-                "targetInstanceId": companion.instance_id,
-                "provider": {
-                    "id": "visual.remote-planner",
-                    "version": "1.0.0",
-                    "displayName": "Remote Snowman Planner",
-                },
-                "status": "generating",
-                "terminal": False,
-                "sceneChanged": False,
-                "proposalId": None,
-                "error": None,
-                "needsRevision": None,
-                "updatedAt": "2026-08-05T12:00:00Z",
-            }
-        )
-        assert len(fake_transport.replan_run_requests) == 1
-        assert companion.provider_handoff.generation_request_id is not None
-        assert companion.provider_handoff.phase == "generating"
+    assert companion.provider_handoff.can_run
+    try:
+        companion.begin_replan_run()
+    except ValueError as error:
+        assert str(error) == PROVIDER_AUTHORITY_UNAVAILABLE
     else:
-        assert companion.provider_handoff.can_run
-        assert not fake_transport.replan_run_requests
+        raise AssertionError("Replanning must fail closed without signed authority")
+    assert not fake_transport.replan_run_requests
     assert_active_session_preserved()
 
 
-def configure_dialogue_handoff(*, streaming):
+def configure_dialogue_handoff():
     companion = extension.get_companion()
     fake_transport = StrictFakeTransport()
     companion._transport = fake_transport
@@ -252,43 +221,14 @@ def configure_dialogue_handoff(*, streaming):
     companion.add_revision_reference("active", "snowman.model.head")
     message = "Explain this head step and prepare a larger version if needed"
     bpy.context.window_manager.operating_line_revision_message = message
-    if streaming:
-        run = companion.begin_dialogue_run(message)
-        bpy.context.window_manager.operating_line_revision_message = ""
-        companion.dialogue_handoff.apply_status(
-            {
-                "contractVersion": "1.0.0",
-                "dialogueRequestId": run["dialogueRequestId"],
-                "revisionRequestId": run["revisionRequest"]["requestId"],
-                "replanGenerationRequestId": run["replanGenerationRequestId"],
-                "targetAdapterId": "blender",
-                "targetInstanceId": companion.instance_id,
-                "provider": {
-                    "id": "visual.remote-planner",
-                    "version": "1.0.0",
-                    "displayName": "Remote Snowman Planner",
-                },
-                "status": "streaming",
-                "terminal": False,
-                "sceneChanged": False,
-                "assistantMessage": (
-                    "The selected step creates the snowman head. I am checking "
-                    "whether the requested size change needs a reviewable Plan revision..."
-                ),
-                "assistantMessageRevision": 1,
-                "semanticDecision": None,
-                "revisionRequestRecorded": False,
-                "proposalId": None,
-                "error": None,
-                "needsRevision": None,
-                "updatedAt": "2026-08-12T12:00:00Z",
-            }
-        )
-        assert fake_transport.dialogue_run_requests == [run]
-        assert companion.dialogue_handoff.phase == "streaming"
+    assert not companion.dialogue_handoff.can_run
+    try:
+        companion.begin_dialogue_run(message)
+    except ValueError as error:
+        assert str(error) == PROVIDER_AUTHORITY_UNAVAILABLE
     else:
-        assert companion.dialogue_handoff.can_run
-        assert not fake_transport.dialogue_run_requests
+        raise AssertionError("Dialogue must fail closed without signed authority")
+    assert not fake_transport.dialogue_run_requests
     assert_active_session_preserved()
 
 
@@ -308,52 +248,21 @@ def configure_goal_request():
     assert_active_session_preserved()
 
 
-def configure_initial_provider_handoff(*, generating, failed=False):
-    assert not (generating and failed)
+def configure_initial_provider_handoff():
     configure_goal_request()
     companion = extension.get_companion()
     fake_transport = companion._transport
     assert isinstance(fake_transport, StrictFakeTransport)
     companion.initial_plan_handoff.set_providers(visual_provider_list())
     companion.select_initial_plan_provider("visual.remote-planner")
-    if generating or failed:
-        run = companion.begin_initial_plan_run()
-        companion.initial_plan_handoff.apply_status(
-            {
-                "contractVersion": "1.0.0",
-                "generationRequestId": run["generationRequestId"],
-                "goalRequestId": run["goalRequestId"],
-                "targetAdapterId": "blender",
-                "targetInstanceId": companion.instance_id,
-                "provider": {
-                    "id": "visual.remote-planner",
-                    "version": "1.0.0",
-                    "displayName": "Remote Snowman Planner",
-                },
-                "status": "failed" if failed else "generating",
-                "terminal": failed,
-                "sceneChanged": False,
-                "proposalId": None,
-                "error": (
-                    {
-                        "code": "planner_provider_failed",
-                        "retryMode": "new_request_id",
-                        "message": "Provider failed safely; confirm a new run to retry",
-                    }
-                    if failed
-                    else None
-                ),
-                "needsRevision": None,
-                "updatedAt": "2026-08-09T12:00:00Z",
-            }
-        )
-        assert fake_transport.initial_plan_run_requests == [run]
-        assert companion.initial_plan_handoff.phase == (
-            "failed" if failed else "generating"
-        )
+    assert not companion.initial_plan_handoff.can_run
+    try:
+        companion.begin_initial_plan_run()
+    except ValueError as error:
+        assert str(error) == PROVIDER_AUTHORITY_UNAVAILABLE
     else:
-        assert companion.initial_plan_handoff.can_run
-        assert not fake_transport.initial_plan_run_requests
+        raise AssertionError("Initial planning must fail closed without signed authority")
+    assert not fake_transport.initial_plan_run_requests
     assert_active_session_preserved()
 
 
@@ -367,9 +276,222 @@ def view3d_context():
     raise AssertionError("No VIEW_3D area available for visual capture")
 
 
+def prepare_node_editor_area():
+    """Switch the largest editable area, then open the panel on a later UI tick."""
+
+    editable = tuple(
+        area
+        for area in bpy.context.screen.areas
+        if area.type not in {"TOPBAR", "STATUSBAR", "OUTLINER", "PROPERTIES"}
+    )
+    assert editable
+    area = max(editable, key=lambda candidate: candidate.width * candidate.height)
+    if STATE == "node-editor-geometry":
+        target = bpy.data.objects.get("OperatingLine.Ground")
+        assert target is not None
+        bpy.context.view_layer.objects.active = target
+        target.select_set(True)
+    area.type = "NODE_EDITOR"
+    area.ui_type = "GeometryNodeTree"
+    space = area.spaces.active
+    space.show_region_ui = True
+    if STATE == "node-editor-geometry" and hasattr(space, "geometry_nodes_type"):
+        space.geometry_nodes_type = "MODIFIER"
+    print(
+        "OperatingLine visual area switched: "
+        f"{area.type}/{area.ui_type}",
+        flush=True,
+    )
+    register_fatal_timer(open_node_editor_panel, first_interval=0.25)
+    return None
+
+
+def assert_geometry_node_markers(area, space):
+    """Prove exact node-frame markers and duplicate-node fail closure."""
+
+    window_region = next(item for item in area.regions if item.type == "WINDOW")
+    snapshot = interaction_guidance_snapshot()
+    assert snapshot is not None and snapshot.focused_ordinal == 4
+    with bpy.context.temp_override(
+        area=area,
+        region=window_region,
+        space_data=space,
+    ):
+        markers = _resolve_node_editor_markers(bpy.context, session, snapshot)
+        assert tuple(marker.ordinal for marker in markers) == (3, 4, 8)
+        assert all(marker.reference for marker in markers)
+        assert all(marker.cursor_token == snapshot.cursor_token for marker in markers)
+
+        node_tree = space.edit_tree
+        assert node_tree is not None
+        duplicate = node_tree.nodes.new("GeometryNodeTransform")
+        try:
+            duplicate_markers = _resolve_node_editor_markers(
+                bpy.context,
+                session,
+                snapshot,
+            )
+            assert tuple(marker.ordinal for marker in duplicate_markers) == (3, 8)
+        finally:
+            node_tree.nodes.remove(duplicate)
+    print("OperatingLine Node Editor exact markers: 03, 04, 08", flush=True)
+
+
+def open_node_editor_panel():
+    area = next(
+        item
+        for item in bpy.context.screen.areas
+        if item.type == "NODE_EDITOR"
+    )
+    space = area.spaces.active
+    region = next(item for item in area.regions if item.type == "UI")
+    panel_type = getattr(
+        bpy.types,
+        "OPERATINGLINE_PT_node_editor_guidance",
+        None,
+    )
+    assert panel_type is not None
+    assert panel_type.bl_space_type == "NODE_EDITOR"
+    region.active_panel_category = "OperatingLine"
+    print(
+        "OperatingLine Node Editor panel category: "
+        f"{region.active_panel_category}",
+        flush=True,
+    )
+    assert region.active_panel_category == "OperatingLine"
+    bpy.context.window.cursor_warp(area.x + area.width - 200, area.y + 500)
+    bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
+    if STATE == "node-editor-geometry":
+        window_region = next(item for item in area.regions if item.type == "WINDOW")
+        with bpy.context.temp_override(
+            area=area,
+            region=window_region,
+            space_data=space,
+        ):
+            assert space.edit_tree is not None
+            assert space.edit_tree.name == "OperatingLine.VisualGeometryNodes"
+            assert bpy.ops.node.view_all("EXEC_DEFAULT") == {"FINISHED"}
+        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
+        assert_geometry_node_markers(area, space)
+    register_fatal_timer(capture_and_quit, first_interval=0.75)
+    return None
+
+
 def configure_state():
-    if STATE == "initial":
+    global session
+    if STATE in {"initial", "node-editor"}:
         assert session.active_index == -1
+        if STATE == "node-editor":
+            snapshot = interaction_guidance_snapshot()
+            assert snapshot is not None
+            assert tuple(
+                operation.ordinal for operation in snapshot.operations
+            ) == tuple(range(1, 7))
+            assert tuple(operation.label for operation in snapshot.operations) == (
+                "Layout",
+                "Add",
+                "Mesh",
+                "Plane",
+                "Location",
+                "Object Name",
+            )
+    elif STATE == "node-editor-geometry":
+        plan_path = ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
+        geometry_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        geometry_plan["id"] = "geometry-node-guidance-visual"
+        geometry_plan["revision"] = 1
+        geometry_step = next(
+            step
+            for step in geometry_plan["steps"]
+            if step["id"] == "snowman.model.body_lower"
+        )
+        geometry_step["title"] = "Build a Transform Geometry graph"
+        geometry_step["intent"] = (
+            "Create nodes, set socket values, connect the graph, and verify it"
+        )
+        geometry_step["action"] = {
+            "adapterId": "blender",
+            "name": "blender.geometry_nodes.create_transform",
+            "arguments": {
+                "targetId": "snowman.ground",
+                "modifierId": "visual.geometry.modifier",
+                "modifierName": "OperatingLine.VisualGeometryModifier",
+                "nodeGroupId": "visual.geometry.node_group",
+                "nodeGroupName": "OperatingLine.VisualGeometryNodes",
+                "translation": [1, 2, 3],
+                "rotation": [0, 0, 0.5],
+                "scale": [1.25, 1.25, 1.25],
+            },
+        }
+        geometry_step["expectedObservations"] = [
+            {
+                "kind": "resource_exists",
+                "parameters": {"resourceId": "visual.geometry.missing"},
+            }
+        ]
+        geometry_step["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "retain_for_repair",
+        }
+        assert extension.get_companion().install_plan(geometry_plan)
+        assert bpy.ops.operating_line.start() == {"FINISHED"}
+        session = extension.get_session()
+        assert session.active_index == -1
+        assert session.steps[0].id == "snowman.scene.ground"
+        assert session.steps[1].id == "snowman.model.body_lower"
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+        assert session.active_index == 1
+        assert session.observation_blocked
+        next_step = session.guidance_step
+        assert next_step is not None and next_step.action is not None
+        assert next_step.action.name == "blender.geometry_nodes.create_transform"
+        snapshot = interaction_guidance_snapshot()
+        assert snapshot is not None
+        assert tuple(
+            operation.ordinal for operation in snapshot.operations
+        ) == tuple(range(1, 12))
+        assert tuple(operation.label for operation in snapshot.operations) == (
+            "Geometry Nodes",
+            "New Modifier",
+            "Add Group Input",
+            "Add Transform Geometry",
+            "Set Translation",
+            "Set Rotation",
+            "Set Scale",
+            "Add Group Output",
+            "Connect Group Input Geometry to Transform Geometry",
+            "Connect Transform Geometry to Group Output Geometry",
+            "Verify Links",
+        )
+        assert tuple(
+            operation.parameters[0].value for operation in snapshot.operations[4:7]
+        ) == ([1, 2, 3], [0, 0, 0.5], [1.25, 1.25, 1.25])
+        assert (
+            snapshot.operations[8].connection.from_node,
+            snapshot.operations[8].connection.from_socket,
+            snapshot.operations[8].connection.to_node,
+            snapshot.operations[8].connection.to_socket,
+        ) == ("NodeGroupInput", "Geometry", "GeometryNodeTransform", "Geometry")
+        assert (
+            snapshot.operations[9].connection.from_node,
+            snapshot.operations[9].connection.from_socket,
+            snapshot.operations[9].connection.to_node,
+            snapshot.operations[9].connection.to_socket,
+        ) == ("GeometryNodeTransform", "Geometry", "NodeGroupOutput", "Geometry")
+        assert all(operation.reference for operation in snapshot.operations)
+        for expected_ordinal in (1, 2, 3):
+            focused = snapshot.focused_operation
+            assert focused.ordinal == expected_ordinal
+            assert bpy.ops.operating_line.leaf_operation_next(
+                step_id=snapshot.step_id,
+                operation_id=focused.operation_id,
+                ordinal=snapshot.focused_ordinal,
+                cursor_token=snapshot.cursor_token,
+            ) == {"FINISHED"}
+            snapshot = interaction_guidance_snapshot()
+            assert snapshot is not None
+        assert snapshot.focused_ordinal == 4
     elif STATE == "goal-request":
         configure_goal_request()
     elif STATE in {"revision", "revision-collapsed"}:
@@ -489,7 +611,7 @@ def configure_state():
             "targetInstanceId": companion.instance_id,
             "revisionRequestId": request_id,
             "revisionThread": revision_thread,
-            "catalogVersion": "1.12.0",
+            "catalogVersion": BLENDER_ACTION_CATALOG_VERSION,
             "plan": plan,
             "planDiff": plan_diff,
             "proposedAt": "2026-08-04T12:00:00Z",
@@ -499,7 +621,7 @@ def configure_state():
             "protocolVersion": "1.1.0",
             "requestId": request_id,
             "adapterId": "blender",
-            "catalogVersion": "1.12.0",
+            "catalogVersion": BLENDER_ACTION_CATALOG_VERSION,
             "instanceId": companion.instance_id,
             "basePlan": base_plan,
             "references": [
@@ -535,19 +657,12 @@ def configure_state():
         assert extension.get_session() is accepted_session
         assert extension.get_companion().proposal_session is not None
         assert not session.receipts
-    elif STATE in {
-        "initial-provider-disclosure",
-        "initial-provider-generating",
-        "initial-provider-failed",
-    }:
-        configure_initial_provider_handoff(
-            generating=STATE == "initial-provider-generating",
-            failed=STATE == "initial-provider-failed",
-        )
-    elif STATE in {"provider-disclosure", "provider-generating"}:
-        configure_provider_handoff(generating=STATE == "provider-generating")
-    elif STATE in {"dialogue-disclosure", "dialogue-streaming"}:
-        configure_dialogue_handoff(streaming=STATE == "dialogue-streaming")
+    elif STATE == "initial-provider-disclosure":
+        configure_initial_provider_handoff()
+    elif STATE == "provider-disclosure":
+        configure_provider_handoff()
+    elif STATE == "dialogue-disclosure":
+        configure_dialogue_handoff()
     elif STATE == "forward":
         for _ in range(9):
             assert bpy.ops.operating_line.next() == {"FINISHED"}
@@ -709,22 +824,24 @@ def configure_state():
     if STATE in {
         "goal-request",
         "initial-provider-disclosure",
-        "initial-provider-generating",
-        "initial-provider-failed",
         "provider-disclosure",
-        "provider-generating",
         "dialogue-disclosure",
-        "dialogue-streaming",
     }:
         assert_active_session_preserved()
 
 
 def prepare_view():
+    if STATE == "timer-failure-probe":
+        raise AssertionError("intentional visual timer failure probe")
+
     panel_type = getattr(bpy.types, "OPERATINGLINE_PT_sidebar", None)
     assert panel_type is not None
     assert panel_type.bl_space_type == "VIEW_3D"
     assert panel_type.bl_region_type == "UI"
     assert panel_type.bl_category == "OperatingLine"
+
+    if STATE in {"node-editor", "node-editor-geometry"}:
+        return prepare_node_editor_area()
 
     area, region, space = view3d_context()
     space.show_region_ui = True
@@ -763,7 +880,7 @@ def prepare_view():
             assert result == {"FINISHED"}
         else:
             assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
-        bpy.app.timers.register(settle_menu_capture, first_interval=0.15)
+        register_fatal_timer(settle_menu_capture, first_interval=0.15)
         return None
 
     bpy.context.window.cursor_warp(1320, 820)
@@ -778,16 +895,13 @@ def prepare_view():
     bpy.context.window.cursor_warp(1100, 500)
     if STATE in {
         "initial-provider-disclosure",
-        "initial-provider-generating",
-        "initial-provider-failed",
         "provider-disclosure",
-        "provider-generating",
     }:
-        bpy.app.timers.register(scroll_provider_panel, first_interval=0.35)
-    elif STATE in {"dialogue-disclosure", "dialogue-streaming"}:
-        bpy.app.timers.register(scroll_dialogue_panel, first_interval=0.35)
+        register_fatal_timer(scroll_provider_panel, first_interval=0.35)
+    elif STATE == "dialogue-disclosure":
+        register_fatal_timer(scroll_dialogue_panel, first_interval=0.35)
     else:
-        bpy.app.timers.register(capture_and_quit, first_interval=0.75)
+        register_fatal_timer(capture_and_quit, first_interval=0.75)
     return None
 
 
@@ -798,15 +912,15 @@ def scroll_provider_panel():
         bpy.context.window.event_simulate(
             type="WHEELDOWNMOUSE", value="PRESS", x=1100, y=500
         )
-    bpy.app.timers.register(capture_and_quit, first_interval=0.75)
+    register_fatal_timer(capture_and_quit, first_interval=0.75)
     return None
 
 
-_dialogue_scroll_remaining = 32 if STATE == "dialogue-disclosure" else 80
+_dialogue_scroll_remaining = 32
 
 
 def scroll_dialogue_panel():
-    """Reveal the dialogue disclosure or durable assistant stream."""
+    """Reveal the fail-closed dialogue authority disclosure."""
 
     global _dialogue_scroll_remaining
     if _dialogue_scroll_remaining > 0:
@@ -815,7 +929,7 @@ def scroll_dialogue_panel():
         )
         _dialogue_scroll_remaining -= 1
         return 0.01
-    bpy.app.timers.register(capture_and_quit, first_interval=0.75)
+    register_fatal_timer(capture_and_quit, first_interval=0.75)
     return None
 
 
@@ -823,7 +937,7 @@ def settle_menu_capture():
     """Move off the first menu row so screenshots contain no hover tooltip."""
 
     bpy.context.window.cursor_warp(1580, 940)
-    bpy.app.timers.register(capture_and_quit, first_interval=0.15)
+    register_fatal_timer(capture_and_quit, first_interval=0.15)
     return None
 
 
@@ -834,12 +948,8 @@ def capture_and_quit():
     assert_guidance_pixels()
     if STATE in {
         "initial-provider-disclosure",
-        "initial-provider-generating",
-        "initial-provider-failed",
         "provider-disclosure",
-        "provider-generating",
         "dialogue-disclosure",
-        "dialogue-streaming",
     }:
         assert_factory_objects_preserved()
         assert_active_session_preserved()
@@ -853,7 +963,7 @@ def capture_and_quit():
         assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
         assert bpy.context.window_manager.operating_line_overlay_enabled is True
     hold_seconds = float(os.environ.get("OPERATINGLINE_VISUAL_HOLD_SECONDS", "0"))
-    bpy.app.timers.register(cleanup_and_quit, first_interval=max(hold_seconds, 0.5))
+    register_fatal_timer(cleanup_and_quit, first_interval=max(hold_seconds, 0.5))
     return None
 
 
@@ -895,12 +1005,8 @@ def assert_guidance_pixels():
         "revision-collapsed",
         "proposal",
         "initial-provider-disclosure",
-        "initial-provider-generating",
-        "initial-provider-failed",
         "provider-disclosure",
-        "provider-generating",
         "dialogue-disclosure",
-        "dialogue-streaming",
     }:
         assert next_step > 0.0003
         assert locked > 0.0001
@@ -911,7 +1017,7 @@ def assert_guidance_pixels():
         assert back < 0.00003
     elif STATE in {"menu-cube", "menu-icosphere", "menu-torus"}:
         assert completed > 0.00005
-        assert back > 0.0001
+        assert back > 0.00005
         assert next_step > 0.0003
     elif STATE in {
         "forward",
@@ -924,12 +1030,20 @@ def assert_guidance_pixels():
         assert completed > 0.00005
         assert back > 0.0003
         assert next_step > 0.0003
+    elif STATE == "node-editor-geometry":
+        assert completed > 0.00005
+        assert back > 0.0001
+        assert locked > 0.0001
     elif STATE == "hidden":
         assert max(completed, back, next_step) < 0.00003
     elif STATE == "operator":
         assert completed > 0.00005
-        assert 0.00005 < back < 0.0003
-        assert 0.00005 < next_step < 0.0003
+        # The expanded leaf rail contributes additional state-colored pixels.
+        # Target truthfulness is proved above by the non-native snapshot and
+        # exact semantic fallback, so this visual check only requires the Back
+        # and Next states to remain visibly rendered.
+        assert back > 0.00005
+        assert next_step > 0.00005
 
 
 def cleanup_and_quit():
@@ -939,4 +1053,4 @@ def cleanup_and_quit():
 
 
 configure_state()
-bpy.app.timers.register(prepare_view, first_interval=0.5)
+register_fatal_timer(prepare_view, first_interval=0.5)

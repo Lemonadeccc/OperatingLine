@@ -7,6 +7,11 @@ import { spawnSync } from 'node:child_process';
 import { requireBlenderBinaries } from './blender-binaries.mjs';
 
 const testFile = resolve('tests/e2e/blender/subdivide_f9_round_trip.py');
+const entryModeArgument = process.argv.find((argument) => argument.startsWith('--entry-mode='));
+const entryMode = entryModeArgument?.slice('--entry-mode='.length) ?? 'operator-search';
+if (!['operator-search', 'candidate-menu'].includes(entryMode)) {
+  throw new Error(`Unsupported Subdivide F9 entry mode: ${entryMode}`);
+}
 const actionBounds = {
   numberCuts: { minimum: 1, maximum: 8 },
   smoothness: { minimum: 0, maximum: 1 },
@@ -16,6 +21,51 @@ const representativeActionArguments = [
   { numberCuts: 2, smoothness: 0.5 },
   { numberCuts: 8, smoothness: 1 },
 ];
+const candidateOperationIds = [
+  'candidate.workspace_layout',
+  'candidate.use_accepted_active_mesh',
+  'candidate.enter_edit_mode',
+  'candidate.open_select_menu',
+  'candidate.select_all_mesh_elements',
+  'candidate.open_edge_menu',
+  'candidate.execute_subdivide',
+  'candidate.open_adjust_last_operation',
+  'candidate.set_number_of_cuts',
+  'candidate.set_smoothness',
+  'candidate.return_to_object_mode',
+];
+
+function candidateMenuEvidenceIsValid(evidence, blenderVersion) {
+  const hostVersion = /^(\d+\.\d+\.\d+)/.exec(blenderVersion)?.[1];
+  return entryMode === 'operator-search'
+    ? evidence === null
+    : evidence?.kind === 'bounded_blender_ui_probe' &&
+        evidence.executorId === 'blender.mesh_edit_subdivide_candidate_menu_f9.event_simulate.v1' &&
+        evidence.hostVersion === hostVersion &&
+        evidence.managedActionExecuted === false &&
+        evidence.managedReceiptCreated === false &&
+        evidence.managedReplacementMeshCreated === false &&
+        evidence.nativeMutationKind === 'in_place_edit_mesh_subdivide' &&
+        evidence.targetBinding?.logicalTargetId === 'candidate.factory_cube' &&
+        evidence.targetBinding?.objectName === 'OperatingLine.CandidateMenuProofCube' &&
+        evidence.targetBinding?.setupStepId === 'candidate.setup_cube' &&
+        typeof evidence.targetBinding?.setupReceiptId === 'string' &&
+        evidence.targetBinding.setupReceiptId.length > 0 &&
+        evidence.targetBinding?.setupReceiptCountBeforeCandidate === 1 &&
+        evidence.targetBinding?.setupReceiptCountAfterCandidate === 1 &&
+        evidence.targetBinding?.candidateReceiptCreated === false &&
+        evidence.operationIds?.join('|') === candidateOperationIds.join('|') &&
+        evidence.menuInvocations?.length === 2 &&
+        evidence.menuInvocations[0]?.operationId === 'candidate.open_select_menu' &&
+        evidence.menuInvocations[0]?.menuName === 'VIEW3D_MT_select_edit_mesh' &&
+        evidence.menuInvocations[0]?.expectedVisibleLabel === 'All    05 CANDIDATE ONLY' &&
+        evidence.menuInvocations[1]?.operationId === 'candidate.open_edge_menu' &&
+        evidence.menuInvocations[1]?.menuName === 'VIEW3D_MT_edit_mesh_edges' &&
+        evidence.menuInvocations[1]?.expectedVisibleLabel === 'Subdivide    07 CANDIDATE ONLY' &&
+        evidence.nativeUndoCheckpointRequired === true &&
+        evidence.nativeUndoDepth === 4 &&
+        evidence.nativeRedoDepth === 4;
+}
 
 function validateActionArguments(actionArguments) {
   if (
@@ -67,7 +117,7 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
   const resultPath = join(outputDirectory, 'result.json');
 
   console.log(
-    `Testing Subdivide F9 UI round trip with ${firstLine} ` +
+    `Testing Subdivide F9 ${entryMode} UI round trip with ${firstLine} ` +
       `cuts=${actionArguments.numberCuts} smooth=${actionArguments.smoothness}`,
   );
   try {
@@ -90,6 +140,7 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
         env: {
           ...process.env,
           OPERATINGLINE_SUBDIVIDE_F9_RESULT: resultPath,
+          OPERATINGLINE_SUBDIVIDE_F9_ENTRY_MODE: entryMode,
           OPERATINGLINE_SUBDIVIDE_F9_NUMBER_CUTS: String(actionArguments.numberCuts),
           OPERATINGLINE_SUBDIVIDE_F9_SMOOTHNESS: String(actionArguments.smoothness),
           PYTHONDONTWRITEBYTECODE: '1',
@@ -120,6 +171,14 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
     }
     const history = payload.historySnapshots;
     const nativeHistory = payload.nativeHistory;
+    const expectedObjectName =
+      entryMode === 'candidate-menu' ? 'OperatingLine.CandidateMenuProofCube' : 'Cube';
+    const expectedBaselineProfile =
+      entryMode === 'candidate-menu' ? 'receipt_bound_managed_cube' : 'factory_startup_cube';
+    const expectedSceneObjects =
+      entryMode === 'candidate-menu'
+        ? 'Camera:CAMERA|Cube:MESH|Light:LIGHT|OperatingLine.CandidateMenuProofCube:MESH'
+        : 'Camera:CAMERA|Cube:MESH|Light:LIGHT';
     const validSha256 = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
     const expectedHistoryLabels = [
       'applied',
@@ -136,7 +195,7 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
       Array.isArray(history) &&
       history.every(
         (snapshot) =>
-          snapshot.activeObjectName === 'Cube' &&
+          snapshot.activeObjectName === expectedObjectName &&
           snapshot.objectPointer === payload.objectPointerBefore &&
           snapshot.meshDataPointer === payload.meshDataPointerBefore &&
           snapshot.meshDatablockCount === payload.meshDatablockCountBefore &&
@@ -156,6 +215,7 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
           event.shift === shift,
       );
     if (
+      payload.entryMode !== entryMode ||
       payload.operatorId !== 'MESH_OT_subdivide' ||
       payload.properties?.number_cuts !== actionArguments.numberCuts ||
       payload.properties?.smoothness !== actionArguments.smoothness ||
@@ -164,7 +224,7 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
       payload.topology?.vertices !== topology.vertices ||
       payload.topology?.edges !== topology.edges ||
       payload.topology?.polygons !== topology.polygons ||
-      payload.objectName !== 'Cube' ||
+      payload.objectName !== expectedObjectName ||
       payload.mode !== 'OBJECT' ||
       !Number.isSafeInteger(payload.objectPointerBefore) ||
       payload.objectPointerBefore <= 0 ||
@@ -192,9 +252,9 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
       history[1]?.topology?.polygons !== 6 ||
       history[1]?.geometrySha256 === history[0]?.geometrySha256 ||
       history[4]?.mode !== 'OBJECT' ||
-      history[4]?.selectedObjectNames?.join('|') !== 'Cube' ||
+      history[4]?.selectedObjectNames?.join('|') !== expectedObjectName ||
       history[4]?.sceneObjects?.map((entry) => `${entry.name}:${entry.type}`).join('|') !==
-        'Camera:CAMERA|Cube:MESH|Light:LIGHT' ||
+        expectedSceneObjects ||
       history[4]?.topology?.vertices !== 8 ||
       history[4]?.topology?.edges !== 12 ||
       history[4]?.topology?.polygons !== 6 ||
@@ -211,11 +271,12 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
       nativeHistory?.redoShortcut !== 'CTRL+SHIFT+Z' ||
       expectedHistoryEvents(undoEvents, false) !== true ||
       expectedHistoryEvents(redoEvents, true) !== true ||
-      nativeHistory?.factoryCubeGeometryRestored !== true ||
-      nativeHistory?.factoryStartupStateRestored !== true ||
+      nativeHistory?.baselineProfile !== expectedBaselineProfile ||
+      nativeHistory?.baselineGeometryRestored !== true ||
+      nativeHistory?.baselineStateRestored !== true ||
       nativeHistory?.parameterizedGeometryRestored !== true ||
-      nativeHistory?.factoryStartupStateSha256 !== history[4]?.stateSha256 ||
-      nativeHistory?.baselineStateSha256 !== history[4]?.stateSha256 ||
+      nativeHistory?.expectedBaselineStateSha256 !== history[4]?.stateSha256 ||
+      nativeHistory?.restoredBaselineStateSha256 !== history[4]?.stateSha256 ||
       nativeHistory?.appliedStateSha256 !== history[0]?.stateSha256 ||
       nativeHistory?.finalStateSha256 !== history[8]?.stateSha256 ||
       nativeHistory?.parameterEvidence?.operatorId !== 'MESH_OT_subdivide' ||
@@ -223,7 +284,8 @@ for (const { actionArguments, blender, firstLine } of testRuns) {
       nativeHistory?.parameterEvidence?.properties?.smoothness !== actionArguments.smoothness ||
       nativeHistory?.parameterEvidence?.redoGeometrySha256 !== history[8]?.geometrySha256 ||
       nativeHistory?.meshIdentityUnchanged !== true ||
-      nativeHistory?.meshDatablockCountUnchanged !== true
+      nativeHistory?.meshDatablockCountUnchanged !== true ||
+      !candidateMenuEvidenceIsValid(payload.candidateMenuEvidence, payload.blenderVersion)
     ) {
       throw new Error(
         `Blender returned an invalid Subdivide F9 UI result: ${JSON.stringify(payload)}`,

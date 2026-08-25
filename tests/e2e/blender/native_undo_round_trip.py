@@ -38,17 +38,31 @@ from operating_line_native_undo_e2e.operating_line.domain import (  # noqa: E402
     load_task_tree_data,
 )
 from operating_line_native_undo_e2e.operating_line.infrastructure import (  # noqa: E402
+    GuidedGeometryAtomicityError,
     action_registry,
     native_history_error,
+    native_history_requires_native_undo,
     resolve_resource,
 )
 from operating_line_native_undo_e2e.operating_line.infrastructure.native_history import (  # noqa: E402
     NATIVE_HISTORY_MARKER_KEY,
     NativeHistoryCheckpoint,
     NativeHistoryController,
+    _CONTROLLER,
+)
+from operating_line_native_undo_e2e.operating_line.infrastructure.snowman_actions import (  # noqa: E402
+    common as common_actions,
+    model as model_actions,
 )
 from operating_line_native_undo_e2e.operating_line.infrastructure.snowman_actions.common import (  # noqa: E402
     resolve_data_block,
+)
+from operating_line_native_undo_e2e.operating_line.presentation.native_menu_guidance import (  # noqa: E402
+    focus_next_leaf_operation,
+    leaf_guidance_snapshot,
+)
+from operating_line_native_undo_e2e.operating_line.presentation import (  # noqa: E402
+    operators as guided_operators,
 )
 OBJECT_NAME = "OperatingLine.NativeUndoCube"
 BEVEL_NAME = "OperatingLine.NativeUndo.Bevel"
@@ -58,6 +72,9 @@ GEOMETRY_NODES_NAME = "OperatingLine.NativeUndo.GeometryNodes"
 USER_OBJECT_NAME = "OperatingLine.NativeUndo.UserObject"
 BLUE_MATERIAL_NAME = "OperatingLine.NativeUndo.Blue"
 USER_MATERIAL_NAME = "OperatingLine.NativeUndo.UserMaterial"
+ABORT_PARTIAL_MESH_NAME = "OperatingLine.NativeUndo.AbortPartialMesh"
+ATOMIC_GATE_PARTIAL_MESH_NAME = "OperatingLine.NativeUndo.AtomicGatePartialMesh"
+ATOMIC_GATE_EXTERNAL_OBJECT_NAME = "OperatingLine.NativeUndo.AtomicGateExternal"
 
 
 def _step(
@@ -78,6 +95,7 @@ def _step(
 
 
 PLAN = {
+    "protocolVersion": "1.6.0",
     "rootStepId": "root",
     "steps": [
         _step("root", 0, None),
@@ -245,6 +263,27 @@ PLAN = {
     ],
 }
 
+geometry_nodes_step = next(
+    step for step in PLAN["steps"] if step["id"] == "native.geometry_nodes"
+)
+geometry_nodes_step["expectedObservations"] = [
+    {"kind": "native_geometry_nodes_complete", "parameters": {}}
+]
+geometry_nodes_step["observationPolicy"] = {
+    "mode": "success_gate",
+    "failureStrategy": "rollback_step",
+}
+material_step = next(
+    step for step in PLAN["steps"] if step["id"] == "native.material_blue"
+)
+material_step["expectedObservations"] = [
+    {"kind": "native_material_assignment_complete", "parameters": {}}
+]
+material_step["observationPolicy"] = {
+    "mode": "success_gate",
+    "failureStrategy": "rollback_step",
+}
+
 
 class OPERATINGLINE_OT_external_undo_probe(bpy.types.Operator):
     bl_idname = "operating_line.external_undo_probe"
@@ -273,6 +312,39 @@ def _undo() -> None:
 def _redo() -> None:
     with _history_override():
         assert bpy.ops.ed.redo() == {"FINISHED"}
+
+
+def _focus_leaf_operation(step, ordinal: int):
+    snapshot = leaf_guidance_snapshot(step)
+    assert snapshot is not None
+    while snapshot.focused_ordinal < ordinal:
+        focused = snapshot.focused_operation
+        assert focus_next_leaf_operation(
+            step,
+            focused.operation_id,
+            focused.ordinal,
+            snapshot.cursor_token,
+        )
+        snapshot = leaf_guidance_snapshot(step)
+        assert snapshot is not None
+    assert snapshot.focused_ordinal == ordinal
+    return snapshot
+
+
+def _execute_guided_geometry_operation(session: DemoSession, ordinal: int) -> None:
+    step = session.guidance_step
+    assert step is not None and step.action is not None
+    snapshot = _focus_leaf_operation(step, ordinal)
+    operation = snapshot.focused_operation
+    run = session.pending_leaf_operation_run
+    run_id = run.run_id if run is not None else ""
+    assert bpy.ops.operating_line.execute_guided_geometry_operation(
+        step_id=step.id,
+        operation_id=operation.operation_id,
+        ordinal=operation.ordinal,
+        cursor_token=snapshot.cursor_token,
+        run_id=run_id,
+    ) == {"FINISHED"}
 
 
 def _push(message: str) -> None:
@@ -331,6 +403,7 @@ def _checkpoint(
             started=False,
             execution_id=None,
             receipts=(),
+            leaf_operation_runs=(),
             observation_gate=None,
             last_success_gate_result=None,
             last_success_gate_retry=None,
@@ -380,18 +453,130 @@ def run() -> None:
     _assert_artifact_transactions()
     extension.register()
     bpy.utils.register_class(OPERATINGLINE_OT_external_undo_probe)
+
+    # The shared creation helper must remove an ID when tag_resource fails
+    # after a partial custom-property write but before receipt insertion.
+    journal_probe_name = "OperatingLine.NativeUndo.JournalProbe"
+    journal_probe = bpy.data.meshes.new(journal_probe_name)
+    journaled_probe_resources = []
+    original_common_tag_resource = common_actions.tag_resource
+
+    def fail_partial_probe_tag(resource, *_args):
+        resource["operating_line_fault_injected"] = True
+        raise RuntimeError("injected partial journal probe tag")
+
+    common_actions.tag_resource = fail_partial_probe_tag
+    try:
+        try:
+            common_actions.journal_created_resource(
+                journaled_probe_resources,
+                journal_probe,
+                "native.journal_probe.mesh",
+                "native-journal-probe-receipt",
+                "native.journal_probe",
+                "blender.mesh.create_cube",
+            )
+        except RuntimeError as error:
+            assert "injected partial journal probe tag" in str(error)
+        else:
+            raise AssertionError("Partial resource tagging failure must propagate")
+    finally:
+        common_actions.tag_resource = original_common_tag_resource
+    assert journaled_probe_resources == []
+    assert bpy.data.meshes.get(journal_probe_name) is None
+
     root = load_task_tree_data(PLAN)
+    geometry_gate = {"satisfied": True}
+
+    def evaluate_observations(expectations, _receipts):
+        return [
+            {
+                "kind": expectation["kind"],
+                "satisfied": geometry_gate["satisfied"],
+                "details": {"source": "native-undo-e2e"},
+            }
+            for expectation in expectations
+        ]
+
     session = DemoSession(
         root,
         action_registry(root),
         plan_id="native-undo-e2e",
         revision=1,
+        observation_evaluator=evaluate_observations,
     )
     extension.operating_line.replace_session(session)
 
     _push("OperatingLine native Undo baseline")
     assert bpy.ops.operating_line.start() == {"FINISHED"}
     _push("OperatingLine native Undo after Start")
+
+    # A Blender ID can be created before its receipt identity is journaled.  A
+    # failure in the middle of tagging that ID is therefore not proven atomic,
+    # even when rollback_partial successfully deletes everything it knows
+    # about.  The operator must preserve the residual mesh in an Undo boundary,
+    # quarantine further mutation, and unlock only after that exact boundary is
+    # undone.
+    original_journal_created_resource = model_actions.journal_created_resource
+
+    def fail_mid_mesh_journal(
+        created,
+        resource,
+        logical_id,
+        receipt_id,
+        step_id,
+        action_name,
+    ):
+        if logical_id != "native.cube.mesh":
+            return original_journal_created_resource(
+                created,
+                resource,
+                logical_id,
+                receipt_id,
+                step_id,
+                action_name,
+            )
+        resource["operating_line_fault_injected"] = True
+        raise RuntimeError("injected failure during mesh resource tagging")
+
+    model_actions.journal_created_resource = fail_mid_mesh_journal
+    try:
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+    finally:
+        model_actions.journal_created_resource = original_journal_created_resource
+    fault_mesh_name = f"{OBJECT_NAME}.Mesh"
+    assert session.active_index == -1
+    assert bpy.data.meshes.get(fault_mesh_name) is not None
+    assert native_history_requires_native_undo()
+    try:
+        blocked_result = bpy.ops.operating_line.next()
+    except RuntimeError as error:
+        assert "native Undo" in str(error)
+    else:
+        assert blocked_result == {"CANCELLED"}
+
+    _push("OperatingLine unjournaled mesh tagging failure boundary")
+    _undo()
+    assert native_history_error() == ""
+    assert not native_history_requires_native_undo()
+    assert session.active_index == -1
+    assert bpy.data.meshes.get(fault_mesh_name) is None
+    _redo()
+    try:
+        blocked_result = bpy.ops.operating_line.next()
+    except RuntimeError as error:
+        assert "native Undo" in str(error)
+    else:
+        assert blocked_result in ({"CANCELLED"}, {"FINISHED"})
+        # An unlinked orphan is not guaranteed to participate in Blender Redo.
+        # If Redo omits it, native history remains at the clean baseline and a
+        # fresh cube execution is safe; otherwise the failure checkpoint blocks.
+        assert session.active_index in (-1, 0)
+    _undo()
+    assert not native_history_requires_native_undo()
+    assert session.active_index == -1
+    assert bpy.data.meshes.get(fault_mesh_name) is None
+
     assert bpy.ops.operating_line.next() == {"FINISHED"}
     _push("OperatingLine native Undo after Cube")
     assert bpy.ops.operating_line.next() == {"FINISHED"}
@@ -634,17 +819,303 @@ def run() -> None:
         is cube
     )
 
-    assert bpy.ops.operating_line.next() == {"FINISHED"}
-    _push("OperatingLine native Undo after Geometry Nodes")
+    _execute_guided_geometry_operation(session, 1)
+    _push("OperatingLine native Undo after guided Geometry operation 01")
+
+    original_execute_geometry_operation = (
+        guided_operators.execute_transform_geometry_operation
+    )
+
+    def leave_unproven_operation_02(**kwargs):
+        result = original_execute_geometry_operation(**kwargs)
+        if kwargs["operation_ordinal"] != 2:
+            return result
+        assert (
+            bpy.data.node_groups.get("OperatingLine.NativeUndo.TransformNodes")
+            is not None
+        ), "operation 02 did not leave the injected host mutation"
+        raise GuidedGeometryAtomicityError(
+            "injected operation 02 compensation uncertainty"
+        )
+
+    guided_operators.execute_transform_geometry_operation = (
+        leave_unproven_operation_02
+    )
+    try:
+        step = session.guidance_step
+        assert step is not None
+        failed_snapshot = _focus_leaf_operation(step, 2)
+        failed_operation = failed_snapshot.focused_operation
+        run = session.pending_leaf_operation_run
+        assert run is not None and run.next_ordinal == 2
+        try:
+            result = bpy.ops.operating_line.execute_guided_geometry_operation(
+                step_id=step.id,
+                operation_id=failed_operation.operation_id,
+                ordinal=failed_operation.ordinal,
+                cursor_token=failed_snapshot.cursor_token,
+                run_id=run.run_id,
+            )
+        except RuntimeError as error:
+            assert "native Undo" in str(error)
+        else:
+            assert result == {"FINISHED"}
+    finally:
+        guided_operators.execute_transform_geometry_operation = (
+            original_execute_geometry_operation
+        )
+    _push("OperatingLine quarantined guided Geometry operation 02")
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 2
+    assert bpy.data.node_groups.get("OperatingLine.NativeUndo.TransformNodes") is not None
+
+    blocked_snapshot = _focus_leaf_operation(session.guidance_step, 2)
+    blocked_operation = blocked_snapshot.focused_operation
+    try:
+        blocked_result = bpy.ops.operating_line.execute_guided_geometry_operation(
+            step_id=session.guidance_step.id,
+            operation_id=blocked_operation.operation_id,
+            ordinal=blocked_operation.ordinal,
+            cursor_token=blocked_snapshot.cursor_token,
+            run_id=session.pending_leaf_operation_run.run_id,
+        )
+    except RuntimeError as error:
+        assert "native Undo" in str(error)
+    else:
+        assert blocked_result == {"CANCELLED"}
+
+    _undo()
+    assert native_history_error() == ""
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 2
+    assert bpy.data.node_groups.get("OperatingLine.NativeUndo.TransformNodes") is None
+    _redo()
+    assert bpy.data.node_groups.get("OperatingLine.NativeUndo.TransformNodes") is not None
+    blocked_snapshot = _focus_leaf_operation(session.guidance_step, 2)
+    blocked_operation = blocked_snapshot.focused_operation
+    try:
+        blocked_result = bpy.ops.operating_line.execute_guided_geometry_operation(
+            step_id=session.guidance_step.id,
+            operation_id=blocked_operation.operation_id,
+            ordinal=blocked_operation.ordinal,
+            cursor_token=blocked_snapshot.cursor_token,
+            run_id=session.pending_leaf_operation_run.run_id,
+        )
+    except RuntimeError as error:
+        assert "native Undo" in str(error)
+    else:
+        assert blocked_result == {"CANCELLED"}
+    _undo()
+    assert bpy.data.node_groups.get("OperatingLine.NativeUndo.TransformNodes") is None
+
+    for ordinal in range(2, 5):
+        _execute_guided_geometry_operation(session, ordinal)
+        _push(
+            f"OperatingLine native Undo after guided Geometry operation {ordinal:02d}"
+        )
+    assert session.active_index == 7
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 5
+    partial_tree = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in partial_tree.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+    }
+    _undo()
+    assert native_history_error() == ""
+    assert session.active_index == 7
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 4
+    partial_tree = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in partial_tree.nodes} == {"NodeGroupInput"}
+    _redo()
+    assert native_history_error() == ""
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 5
+    partial_tree = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in partial_tree.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+    }
+
+    step = session.guidance_step
+    run = session.pending_leaf_operation_run
+    assert step is not None and run is not None and run.next_ordinal == 5
+    abort_snapshot = leaf_guidance_snapshot(step)
+    assert abort_snapshot is not None
+    original_actions = session._actions[step.id]
+
+    def partially_rollback_then_fail(_receipt):
+        bpy.data.meshes.new(ABORT_PARTIAL_MESH_NAME)
+        assert bpy.data.meshes.get(ABORT_PARTIAL_MESH_NAME) is not None
+        raise GuidedGeometryAtomicityError(
+            "injected Abort rollback failure after datablock mutation"
+        )
+
+    session._actions[step.id] = (original_actions[0], partially_rollback_then_fail)
+    try:
+        assert bpy.ops.operating_line.abort_guided_geometry_operations(
+            step_id=step.id,
+            cursor_token=abort_snapshot.cursor_token,
+            run_id=run.run_id,
+        ) == {"FINISHED"}
+    finally:
+        session._actions[step.id] = original_actions
+    _push("OperatingLine quarantined partial Abort rollback")
+    assert native_history_error() == ""
+    assert native_history_requires_native_undo()
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 5
+    assert bpy.data.meshes.get(ABORT_PARTIAL_MESH_NAME) is not None
+    partial_tree = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in partial_tree.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+    }
+
+    blocked_snapshot = _focus_leaf_operation(step, 5)
+    blocked_operation = blocked_snapshot.focused_operation
+    try:
+        blocked_result = bpy.ops.operating_line.execute_guided_geometry_operation(
+            step_id=step.id,
+            operation_id=blocked_operation.operation_id,
+            ordinal=blocked_operation.ordinal,
+            cursor_token=blocked_snapshot.cursor_token,
+            run_id=session.pending_leaf_operation_run.run_id,
+        )
+    except RuntimeError as error:
+        assert "native Undo" in str(error)
+    else:
+        assert blocked_result == {"CANCELLED"}
+
+    _undo()
+    assert native_history_error() == ""
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 5
+    assert bpy.data.meshes.get(ABORT_PARTIAL_MESH_NAME) is None
+    partial_tree = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in partial_tree.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+    }
+    _redo()
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 5
+    assert bpy.data.meshes.get(ABORT_PARTIAL_MESH_NAME) is not None
+    partial_tree = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in partial_tree.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+    }
+    blocked_snapshot = _focus_leaf_operation(step, 5)
+    blocked_operation = blocked_snapshot.focused_operation
+    try:
+        blocked_result = bpy.ops.operating_line.execute_guided_geometry_operation(
+            step_id=step.id,
+            operation_id=blocked_operation.operation_id,
+            ordinal=blocked_operation.ordinal,
+            cursor_token=blocked_snapshot.cursor_token,
+            run_id=session.pending_leaf_operation_run.run_id,
+        )
+    except RuntimeError as error:
+        assert "native Undo" in str(error)
+    else:
+        assert blocked_result == {"CANCELLED"}
+    _undo()
+    assert native_history_error() == ""
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 5
+    assert bpy.data.meshes.get(ABORT_PARTIAL_MESH_NAME) is None
+    partial_tree = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in partial_tree.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+    }
+
+    for ordinal in range(5, 11):
+        _execute_guided_geometry_operation(session, ordinal)
+        _push(
+            f"OperatingLine native Undo after guided Geometry operation {ordinal:02d}"
+        )
+    assert session.active_index == 7
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 11
+    assert tuple(
+        receipt.ordinal
+        for receipt in session.pending_leaf_operation_run.operation_receipts
+    ) == tuple(range(1, 11))
+    complete_prefix = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in complete_prefix.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+        "NodeGroupOutput",
+    }
+    assert len(complete_prefix.links) == 2
+
+    geometry_gate["satisfied"] = False
+    prepared_marker = _CONTROLLER._marker(bpy.context.scene)
+    original_marker_reader = _CONTROLLER._marker
+
+    def reject_new_marker(scene):
+        actual = original_marker_reader(scene)
+        return prepared_marker if actual != prepared_marker else actual
+
+    _CONTROLLER._marker = reject_new_marker
+    step = session.guidance_step
+    assert step is not None
+    failed_snapshot = _focus_leaf_operation(step, 11)
+    failed_operation = failed_snapshot.focused_operation
+    try:
+        try:
+            failed_result = bpy.ops.operating_line.execute_guided_geometry_operation(
+                step_id=step.id,
+                operation_id=failed_operation.operation_id,
+                ordinal=failed_operation.ordinal,
+                cursor_token=failed_snapshot.cursor_token,
+                run_id=session.pending_leaf_operation_run.run_id,
+            )
+        except RuntimeError as error:
+            assert "operation restored" in str(error)
+        else:
+            assert failed_result == {"CANCELLED"}
+    finally:
+        del _CONTROLLER._marker
+        geometry_gate["satisfied"] = True
+
+    assert native_history_error() == ""
+    assert not native_history_requires_native_undo()
+    assert original_marker_reader(bpy.context.scene) == prepared_marker
+    assert session.active_index == 7
+    assert session.observation_gate is None
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 11
+    assert tuple(
+        receipt.ordinal
+        for receipt in session.pending_leaf_operation_run.operation_receipts
+    ) == tuple(range(1, 11))
+    replayed_prefix = bpy.data.node_groups["OperatingLine.NativeUndo.TransformNodes"]
+    assert {node.bl_idname for node in replayed_prefix.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+        "NodeGroupOutput",
+    }
+    assert len(replayed_prefix.links) == 2
+
+    _execute_guided_geometry_operation(session, 11)
+    _push("OperatingLine native Undo after guided Geometry operation 11 retry")
     assert session.active_index == 8
+    assert session.pending_leaf_operation_run is None
     cube = bpy.data.objects[OBJECT_NAME]
     geometry_nodes = cube.modifiers[GEOMETRY_NODES_NAME]
     geometry_nodes_pointer = geometry_nodes.as_pointer()
     _undo()
     assert session.active_index == 7
-    assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is None
+    assert session.pending_leaf_operation_run is not None
+    assert session.pending_leaf_operation_run.next_ordinal == 11
+    assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is not None
     _redo()
     assert session.active_index == 8
+    assert session.pending_leaf_operation_run is None
     cube = bpy.data.objects[OBJECT_NAME]
     geometry_nodes = cube.modifiers[GEOMETRY_NODES_NAME]
     assert _modifier_state(session, "native.geometry_nodes").pointer == (
@@ -672,6 +1143,70 @@ def run() -> None:
     user_material = bpy.data.materials.new(USER_MATERIAL_NAME)
     bpy.data.objects[OBJECT_NAME].data.materials.append(user_material)
     _push("OperatingLine native Undo external material")
+
+    atomic_step = session.guidance_step
+    assert atomic_step is not None and atomic_step.id == "native.material_blue"
+    original_atomic_actions = session._actions[atomic_step.id]
+    prepared_marker = _CONTROLLER._marker(bpy.context.scene)
+    original_marker_reader = _CONTROLLER._marker
+
+    def partial_atomic_rollback_then_fail(_receipt):
+        bpy.data.meshes.new(ATOMIC_GATE_PARTIAL_MESH_NAME)
+        raise RuntimeError("injected atomic success-gate rollback failure")
+
+    def reject_atomic_checkpoint(scene):
+        actual = original_marker_reader(scene)
+        return prepared_marker if actual != prepared_marker else actual
+
+    geometry_gate["satisfied"] = False
+    session._actions[atomic_step.id] = (
+        original_atomic_actions[0],
+        partial_atomic_rollback_then_fail,
+    )
+    _CONTROLLER._marker = reject_atomic_checkpoint
+    try:
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+    finally:
+        del _CONTROLLER._marker
+        session._actions[atomic_step.id] = original_atomic_actions
+        geometry_gate["satisfied"] = True
+
+    assert native_history_requires_native_undo()
+    assert "native Undo" in native_history_error()
+    assert bpy.data.meshes.get(ATOMIC_GATE_PARTIAL_MESH_NAME) is not None
+    assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == BLUE_MATERIAL_NAME
+    assert session.active_index == 8
+
+    _push("OperatingLine unjournaled atomic failure boundary")
+    unrelated_mesh = bpy.data.meshes.new(f"{ATOMIC_GATE_EXTERNAL_OBJECT_NAME}.Mesh")
+    unrelated_object = bpy.data.objects.new(
+        ATOMIC_GATE_EXTERNAL_OBJECT_NAME,
+        unrelated_mesh,
+    )
+    bpy.context.scene.collection.objects.link(unrelated_object)
+    _push("OperatingLine unrelated action after unjournaled atomic failure")
+    _undo()
+    assert native_history_requires_native_undo()
+    assert bpy.data.objects.get(ATOMIC_GATE_EXTERNAL_OBJECT_NAME) is None
+    assert bpy.data.meshes.get(ATOMIC_GATE_PARTIAL_MESH_NAME) is not None
+    _undo()
+    assert native_history_error() == ""
+    assert not native_history_requires_native_undo()
+    assert bpy.data.meshes.get(ATOMIC_GATE_PARTIAL_MESH_NAME) is None
+    assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
+    assert session.active_index == 8
+
+    _redo()
+    assert native_history_requires_native_undo()
+    assert "Redo restored" in native_history_error()
+    assert bpy.data.meshes.get(ATOMIC_GATE_PARTIAL_MESH_NAME) is not None
+    assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == BLUE_MATERIAL_NAME
+    _undo()
+    assert native_history_error() == ""
+    assert not native_history_requires_native_undo()
+    assert bpy.data.meshes.get(ATOMIC_GATE_PARTIAL_MESH_NAME) is None
+    assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
+
     assert bpy.ops.operating_line.next() == {"FINISHED"}
     _push("OperatingLine native Undo after Blue material")
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == BLUE_MATERIAL_NAME
