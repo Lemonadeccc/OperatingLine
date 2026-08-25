@@ -20,6 +20,7 @@ from .common import (
     ensure_name_available,
     ensure_receipts_intact,
     integer,
+    journal_created_resource,
     logical_id,
     make_receipt,
     mesh_content_signature,
@@ -30,7 +31,6 @@ from .common import (
     require_keys,
     require_object,
     rollback_partial,
-    tag_resource,
     text,
     vector,
 )
@@ -417,7 +417,8 @@ def _ensure_collection(
     ensure_name_available(bpy.data.collections, COLLECTION_NAME, "collection")
     collection = bpy.data.collections.new(COLLECTION_NAME)
     collection_identity = replace(
-        tag_resource(
+        journal_created_resource(
+            created,
             collection,
             COLLECTION_LOGICAL_ID,
             receipt_id,
@@ -426,7 +427,7 @@ def _ensure_collection(
         ),
         parent_links=(parent_identity(bpy.context.scene),),
     )
-    created.append(collection_identity)
+    created[-1] = collection_identity
     bpy.context.scene.collection.children.link(collection)
     return collection_identity, collection
 
@@ -533,14 +534,14 @@ def execute_geometry(
         anchor = None
         for primitive in primitives:
             mesh = bpy.data.meshes.new(f"{primitive.object_name}.Mesh")
-            mesh_identity = tag_resource(
+            mesh_identity = journal_created_resource(
+                created,
                 mesh,
                 f"{primitive.logical_id}.mesh",
                 receipt_id,
                 step_id,
                 action.name,
             )
-            created.append(mesh_identity)
             _fill_mesh(mesh, primitive)
             mutations.append(
                 MutationRecord(
@@ -551,14 +552,14 @@ def execute_geometry(
                 )
             )
             obj = bpy.data.objects.new(primitive.object_name, mesh)
-            object_identity = tag_resource(
+            object_identity = journal_created_resource(
+                created,
                 obj,
                 primitive.logical_id,
                 receipt_id,
                 step_id,
                 action.name,
             )
-            created.append(object_identity)
             mutations.append(
                 MutationRecord(
                     object_identity,

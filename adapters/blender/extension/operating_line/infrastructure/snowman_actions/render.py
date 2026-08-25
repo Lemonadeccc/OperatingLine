@@ -20,6 +20,7 @@ from .common import (
     ensure_name_available,
     ensure_receipts_intact,
     integer,
+    journal_created_resource,
     logical_id,
     make_receipt,
     new_receipt_id,
@@ -30,7 +31,6 @@ from .common import (
     require_object,
     resolve_resource,
     rollback_partial,
-    tag_resource,
     text,
     vector,
 )
@@ -359,23 +359,23 @@ def execute_scene(
     mutations: list[MutationRecord] = []
     try:
         scene = bpy.data.scenes.new(definition.scene_name)
-        scene_identity = tag_resource(
+        scene_identity = journal_created_resource(
+            created,
             scene,
             definition.scene_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(scene_identity)
         world = bpy.data.worlds.new(definition.world_name)
-        world_identity = tag_resource(
+        world_identity = journal_created_resource(
+            created,
             world,
             definition.world_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(world_identity)
         _configure_world(world, definition)
         scene.world = world
         scene.collection.children.link(collection)
@@ -428,27 +428,27 @@ def execute_rig(
     try:
         for item in definition.lights:
             data = bpy.data.lights.new(item.data_name, "AREA")
-            data_identity = tag_resource(
+            data_identity = journal_created_resource(
+                created,
                 data,
                 f"{item.logical_id}.data",
                 receipt_id,
                 step_id,
                 action.name,
             )
-            created.append(data_identity)
             data.color = item.color
             data.energy = item.energy
             data.shape = "DISK"
             data.size = item.size
             obj = bpy.data.objects.new(item.object_name, data)
-            object_identity = tag_resource(
+            object_identity = journal_created_resource(
+                created,
                 obj,
                 item.logical_id,
                 receipt_id,
                 step_id,
                 action.name,
             )
-            created.append(object_identity)
             obj.location = item.location
             direction = Vector(item.target) - Vector(item.location)
             obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
@@ -462,24 +462,24 @@ def execute_rig(
                 )
             )
         camera_data = bpy.data.cameras.new(definition.camera.data_name)
-        camera_data_identity = tag_resource(
+        camera_data_identity = journal_created_resource(
+            created,
             camera_data,
             f"{definition.camera.logical_id}.data",
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(camera_data_identity)
         camera_data.lens = definition.camera.lens
         camera = bpy.data.objects.new(definition.camera.object_name, camera_data)
-        camera_identity = tag_resource(
+        camera_identity = journal_created_resource(
+            created,
             camera,
             definition.camera.logical_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(camera_identity)
         camera.location = definition.camera.location
         camera_direction = Vector(definition.camera.target) - Vector(
             definition.camera.location

@@ -4,7 +4,10 @@ import bpy
 import uuid
 
 from .application import DemoSession
-from .application.companion import CompanionController
+from .application.companion import (
+    MAX_COMPANION_REPORT_SEQUENCE,
+    CompanionController,
+)
 from .domain import (
     SNOWMAN_PLAN_ID,
     SNOWMAN_PLAN_REVISION,
@@ -24,7 +27,11 @@ from .infrastructure import (
     unregister_shortcut_history,
 )
 from .infrastructure.observations import evaluate_observations
-from .presentation import CLASSES
+from .presentation import (
+    CLASSES,
+    register_outliner_header_entry,
+    unregister_outliner_header_entry,
+)
 from .presentation.native_menu_guidance import (
     disable_native_menu_guidance,
     enable_native_menu_guidance,
@@ -39,6 +46,7 @@ _COMPANION_SESSION_ID_SLOT = "operating_line_companion_session_id"
 _COMPANION_DOCUMENT_INCARNATION_ID_SLOT = (
     "operating_line_companion_document_incarnation_id"
 )
+_COMPANION_REPORT_SEQUENCE_SLOT = "operating_line_companion_report_sequence"
 _process_session_id = str(uuid.uuid4())
 
 
@@ -66,8 +74,10 @@ def _companion_instance_id(*, rotate: bool = False) -> str:
     return _companion_runtime_id(_COMPANION_INSTANCE_ID_SLOT, rotate=rotate)
 
 
-def _companion_session_id() -> str:
+def _companion_session_id(*, rotate: bool = False) -> str:
     global _process_session_id
+    if rotate:
+        _process_session_id = str(uuid.uuid4())
     try:
         parsed = uuid.UUID(_process_session_id)
         if str(parsed) != _process_session_id:
@@ -84,6 +94,52 @@ def _companion_document_incarnation_id(*, rotate: bool = False) -> str:
         _COMPANION_DOCUMENT_INCARNATION_ID_SLOT,
         rotate=rotate,
     )
+
+
+def _companion_report_sequence(
+    instance_id: str, *, observed_sequence: int | None = None
+) -> int:
+    """Keep report numbers monotonic across same-document controller reloads."""
+
+    if (
+        observed_sequence is not None
+        and (
+            isinstance(observed_sequence, bool)
+            or not isinstance(observed_sequence, int)
+            or observed_sequence < 0
+            or observed_sequence > MAX_COMPANION_REPORT_SEQUENCE
+        )
+    ):
+        raise ValueError("Companion report sequence must be a non-negative safe integer")
+    namespace = _runtime_namespace()
+    stored = namespace.get(_COMPANION_REPORT_SEQUENCE_SLOT)
+    sequence = 0
+    if stored is not None:
+        if (
+            not isinstance(stored, dict)
+            or set(stored) != {"instanceId", "sequence"}
+            or not isinstance(stored.get("instanceId"), str)
+        ):
+            raise RuntimeError("Blender process Companion report sequence is invalid")
+        if stored["instanceId"] == instance_id:
+            stored_sequence = stored.get("sequence")
+            if (
+                isinstance(stored_sequence, bool)
+                or not isinstance(stored_sequence, int)
+                or stored_sequence < 0
+                or stored_sequence > MAX_COMPANION_REPORT_SEQUENCE
+            ):
+                raise RuntimeError(
+                    "Blender process Companion report sequence is outside protocol bounds"
+                )
+            sequence = stored_sequence
+    if observed_sequence is not None:
+        sequence = max(sequence, observed_sequence)
+    namespace[_COMPANION_REPORT_SEQUENCE_SLOT] = {
+        "instanceId": instance_id,
+        "sequence": sequence,
+    }
+    return sequence
 
 
 def get_session() -> DemoSession:
@@ -103,9 +159,9 @@ def get_session() -> DemoSession:
 def replace_session(replacement: DemoSession) -> None:
     """Install a validated session without mutating the Blender scene."""
     global _session
-    if _session is not None and _session.receipts:
+    if _session is not None and _session.has_execution_state:
         raise ValueError(
-            "A plan update is pending; use Back to roll the walkthrough to its start first"
+            "A plan update is pending; finish/abort leaf operations and use Back first"
         )
     discard_native_history()
     _session = replacement
@@ -115,10 +171,12 @@ def replace_session(replacement: DemoSession) -> None:
 def get_companion() -> CompanionController:
     global _companion
     if _companion is None:
+        instance_id = _companion_instance_id()
         _companion = CompanionController(
-            _companion_instance_id(),
+            instance_id,
             session_id=_companion_session_id(),
             document_incarnation_id=_companion_document_incarnation_id(),
+            initial_report_sequence=_companion_report_sequence(instance_id),
         )
     return _companion
 
@@ -145,8 +203,20 @@ def _native_history_restored(restore: NativeHistoryRestore) -> None:
                 window_manager.operating_line_overlay_enabled = False
 
     try:
+        if after == before:
+            # A quarantined host-only mutation changes Blender's undo boundary but
+            # intentionally leaves the managed Session snapshot untouched.
+            return
         if after.execution_id != before.execution_id:
             companion.report("walkthrough_started" if after.started else "plan_loaded")
+            return
+        if (
+            after.active_index == before.active_index
+            and after.leaf_operation_runs != before.leaf_operation_runs
+            and after.observation_gate == before.observation_gate
+        ):
+            # Intermediate leaf-local checkpoints are Blender/UI state only;
+            # the companion protocol remains leaf-atomic until promotion.
             return
         gate = after.observation_gate
         if gate is not None and gate.status != "recovered":
@@ -206,6 +276,7 @@ def register() -> None:
     for cls in CLASSES:
         if not getattr(cls, "is_registered", False):
             bpy.utils.register_class(cls)
+    register_outliner_header_entry()
     if not hasattr(bpy.types.Scene, "operating_line_replace_factory_scene"):
         bpy.types.Scene.operating_line_replace_factory_scene = bpy.props.BoolProperty(
             name="Delete factory Cube/Camera/Light on Start",
@@ -313,8 +384,16 @@ def register() -> None:
 
 def unregister() -> None:
     global _companion, _session
+    # Remove the callback before any other teardown. If Blender refuses this
+    # step, the extension remains fully registered instead of leaving an
+    # Outliner callback that depends on already-removed state.
+    unregister_outliner_header_entry()
     if _companion is not None:
         _companion.unregister_timer()
+        _companion_report_sequence(
+            _companion.instance_id,
+            observed_sequence=_companion.report_sequence,
+        )
     unregister_shortcut_history()
     unregister_native_history()
     disable_native_menu_guidance()
@@ -351,3 +430,9 @@ def unregister() -> None:
     if reset_completed:
         _session = None
     _companion = None
+    # A completed controller lifetime teardown is a new Companion process-
+    # session boundary even when Python keeps this module loaded.
+    # Keep the Blender document/instance identities stable so Runtime can
+    # issue a same-document recovery challenge instead of leaving a delivered
+    # operation permanently locked.
+    _companion_session_id(rotate=True)

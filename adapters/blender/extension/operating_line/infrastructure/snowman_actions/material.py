@@ -14,16 +14,19 @@ from .common import (
     ensure_logical_ids_available,
     ensure_name_available,
     ensure_receipts_intact,
+    journal_created_resource,
     logical_id,
     make_receipt,
-    reference_data_block,
+    mesh_content_signature,
     new_receipt_id,
     number,
     owned_resource,
+    reference_data_block,
     require_keys,
     require_object,
+    resolve_resource,
     rollback_partial,
-    tag_resource,
+    snapshot_material_surface,
     text,
     vector,
 )
@@ -74,9 +77,15 @@ def _definition(raw: Mapping[str, Any], label: str) -> MaterialDefinition:
 
 
 def validate_single(arguments: Mapping[str, Any]) -> tuple[MaterialDefinition, ...]:
-    definitions = (_definition(arguments, "arguments"),)
-    _validate_logical_ids(definitions)
+    definitions = (validate_single_definition(arguments),)
     return definitions
+
+
+def validate_single_definition(arguments: Mapping[str, Any]) -> MaterialDefinition:
+    definition = _definition(arguments, "arguments")
+    definitions = (definition,)
+    _validate_logical_ids(definitions)
+    return definition
 
 
 def validate_palette(arguments: Mapping[str, Any]) -> tuple[MaterialDefinition, ...]:
@@ -113,10 +122,14 @@ def _validate_logical_ids(definitions: tuple[MaterialDefinition, ...]) -> None:
         )
 
 
-ValidatedMaterial = tuple[
-    MaterialDefinition,
-    list[tuple[ResourceIdentity, bpy.types.Object]],
+ValidatedTarget = tuple[
+    ResourceIdentity,
+    bpy.types.Object,
+    ResourceIdentity,
+    bpy.types.Mesh,
 ]
+
+ValidatedMaterial = tuple[MaterialDefinition, list[ValidatedTarget]]
 
 
 def _configure_material_nodes(
@@ -162,12 +175,24 @@ def _validate(
     )
     for definition in definitions:
         ensure_name_available(bpy.data.materials, definition.name, "material")
-        targets: list[tuple[ResourceIdentity, bpy.types.Object]] = []
+        targets: list[ValidatedTarget] = []
         for target_id in definition.targets:
             identity, obj = owned_resource(registry, target_id, "OBJECT")
             if not isinstance(obj, bpy.types.Object) or obj.type != "MESH":
                 raise ValueError(f"Material target is not an owned mesh object: {target_id}")
-            targets.append((identity, obj))
+            mesh = obj.data
+            mesh_identities = tuple(
+                candidate
+                for candidate in registry.values()
+                if candidate.resource_type == "MESH"
+                and resolve_resource(candidate) is mesh
+            )
+            if len(mesh_identities) != 1:
+                raise RuntimeError(
+                    "Material target must bind exactly one owned mesh data-block: "
+                    f"{target_id}"
+                )
+            targets.append((identity, obj, mesh_identities[0], mesh))
         validated.append((definition, targets))
     return validated
 
@@ -188,33 +213,56 @@ def execute_materials(
     try:
         for definition, targets in validated:
             material = bpy.data.materials.new(definition.name)
-            identity = tag_resource(
+            identity = journal_created_resource(
+                created,
                 material,
                 definition.logical_id,
                 receipt_id,
                 step_id,
                 action.name,
             )
-            created.append(identity)
             material.diffuse_color = definition.base_color
             material.roughness = definition.roughness
             material.metallic = definition.metallic
             _configure_material_nodes(material, definition)
-            for object_identity, obj in targets:
+            mutations.append(
+                MutationRecord(
+                    identity,
+                    "material_surface",
+                    None,
+                    snapshot_material_surface(material),
+                )
+            )
+            for object_identity, obj, mesh_identity, mesh in targets:
                 before = tuple(
                     reference_data_block(slot.material)
                     if slot.material is not None
                     else None
                     for slot in obj.material_slots
                 )
+                source_content = mesh_content_signature(mesh)
                 obj.data.materials.clear()
                 obj.data.materials.append(material)
-                mutations.append(
-                    MutationRecord(
-                        object_identity,
-                        "material_slots",
-                        before,
-                        (identity,),
+                mutations.extend(
+                    (
+                        MutationRecord(
+                            object_identity,
+                            "data",
+                            mesh_identity,
+                            mesh_identity,
+                        ),
+                        MutationRecord(
+                            mesh_identity,
+                            "mesh_content",
+                            source_content,
+                            source_content,
+                        ),
+                        MutationRecord(
+                            object_identity,
+                            "material_slots",
+                            before,
+                            (identity,),
+                        ),
                     )
                 )
                 anchor = anchor or object_identity

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from copy import deepcopy
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any
@@ -42,6 +43,22 @@ class ExecutionTrackOverrideSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class CandidateMenuProjectionSpec:
+    projection: str
+    interaction_catalog_version: str
+    id: str
+    modality: str
+    equivalence: str
+    execution_authority: str
+    title: str
+    reason: str
+    preconditions: tuple[dict[str, Any], ...]
+    operations: tuple[dict[str, Any], ...]
+    omitted_action_arguments: tuple[dict[str, str], ...]
+    native_evidence: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TaskNode:
     id: str
     number: str
@@ -53,7 +70,256 @@ class TaskNode:
     expected_observations: tuple[dict[str, Any], ...] = ()
     observation_policy: ObservationPolicySpec | None = None
     execution_track_override: ExecutionTrackOverrideSpec | None = None
+    candidate_menu_projection: CandidateMenuProjectionSpec | None = None
     children: tuple["TaskNode", ...] = ()
+
+
+def _is_json_value(value: Any) -> bool:
+    if value is None or isinstance(value, (str, bool, int)):
+        return True
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_is_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and bool(key) and _is_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def validate_candidate_menu_projection_data(
+    value: Any,
+) -> CandidateMenuProjectionSpec:
+    """Strictly parse display-only Guide 1.7 native-menu candidate metadata."""
+
+    required_fields = {
+        "projection",
+        "interactionCatalogVersion",
+        "id",
+        "modality",
+        "equivalence",
+        "executionAuthority",
+        "title",
+        "reason",
+        "preconditions",
+        "operations",
+        "omittedActionArguments",
+    }
+    if (
+        not isinstance(value, dict)
+        or not required_fields.issubset(value)
+        or set(value) - (required_fields | {"nativeEvidence"})
+    ):
+        raise ValueError("Invalid candidateMenuProjection")
+    if (
+        value.get("projection") != "candidate_only"
+        or value.get("modality") != "menu"
+        or value.get("equivalence") != "not_equivalent_to_managed_action"
+        or value.get("executionAuthority") != "none"
+    ):
+        raise ValueError("Invalid candidateMenuProjection authority")
+    catalog_version = value.get("interactionCatalogVersion")
+    projection_id = value.get("id")
+    if (
+        not isinstance(catalog_version, str)
+        or CATALOG_VERSION_PATTERN.fullmatch(catalog_version) is None
+        or not isinstance(projection_id, str)
+        or STEP_ID_PATTERN.fullmatch(projection_id) is None
+    ):
+        raise ValueError("Invalid candidateMenuProjection identity")
+    for field in ("title", "reason"):
+        if not isinstance(value.get(field), str) or not value[field]:
+            raise ValueError("Invalid candidateMenuProjection text")
+
+    preconditions = value.get("preconditions")
+    precondition_kinds = {
+        "workspace",
+        "editor",
+        "mode",
+        "selection",
+        "keymap",
+        "modal_state",
+        "scene_state",
+    }
+    if not isinstance(preconditions, list) or not preconditions:
+        raise ValueError("Invalid candidateMenuProjection preconditions")
+    for precondition in preconditions:
+        if (
+            not isinstance(precondition, dict)
+            or set(precondition) != {"kind", "label", "value"}
+            or precondition.get("kind") not in precondition_kinds
+            or any(
+                not isinstance(precondition.get(field), str)
+                or not precondition[field]
+                for field in ("label", "value")
+            )
+        ):
+            raise ValueError("Invalid candidateMenuProjection preconditions")
+
+    operations = value.get("operations")
+    operation_fields = {
+        "id",
+        "order",
+        "semanticRefs",
+        "description",
+        "evidenceRefs",
+        "intent",
+        "target",
+        "path",
+        "parameters",
+    }
+    target_kinds = {
+        "workspace",
+        "editor",
+        "mode",
+        "menu",
+        "menu_item",
+        "operator",
+        "control",
+        "panel",
+        "node",
+        "socket",
+        "canvas",
+        "semantic",
+    }
+    operation_ids: list[str] = []
+    if not isinstance(operations, list) or not operations:
+        raise ValueError("Invalid candidateMenuProjection operations")
+    for index, operation in enumerate(operations, start=1):
+        if not isinstance(operation, dict) or set(operation) != operation_fields:
+            raise ValueError("Invalid candidateMenuProjection operation")
+        operation_id = operation.get("id")
+        if (
+            not isinstance(operation_id, str)
+            or STEP_ID_PATTERN.fullmatch(operation_id) is None
+            or operation_id in operation_ids
+            or isinstance(operation.get("order"), bool)
+            or operation.get("order") != index
+            or not isinstance(operation.get("description"), str)
+            or not operation["description"]
+            or operation.get("intent")
+            not in {"navigate", "configure", "execute", "verify"}
+        ):
+            raise ValueError("Invalid candidateMenuProjection operation")
+        operation_ids.append(operation_id)
+        for refs_field, minimum in (("semanticRefs", 1), ("evidenceRefs", 0)):
+            refs = operation.get(refs_field)
+            if (
+                not isinstance(refs, list)
+                or len(refs) < minimum
+                or any(
+                    not isinstance(reference, str)
+                    or STEP_ID_PATTERN.fullmatch(reference) is None
+                    for reference in refs
+                )
+            ):
+                raise ValueError("Invalid candidateMenuProjection operation references")
+        target = operation.get("target")
+        if (
+            not isinstance(target, dict)
+            or not {"kind", "hostId"}.issubset(target)
+            or set(target) - {"kind", "hostId", "connection"}
+            or target.get("kind") not in target_kinds
+            or not isinstance(target.get("hostId"), str)
+            or not target["hostId"]
+        ):
+            raise ValueError("Invalid candidateMenuProjection operation target")
+        connection = target.get("connection")
+        if "connection" in target:
+            connection_fields = {"fromNode", "fromSocket", "toNode", "toSocket"}
+            if (
+                target["kind"] != "semantic"
+                or not isinstance(connection, dict)
+                or set(connection) != connection_fields
+                or any(
+                    not isinstance(connection.get(field), str) or not connection[field]
+                    for field in connection_fields
+                )
+            ):
+                raise ValueError("Invalid candidateMenuProjection node connection")
+        path = operation.get("path")
+        if (
+            not isinstance(path, list)
+            or not path
+            or any(not isinstance(segment, str) or not segment for segment in path)
+        ):
+            raise ValueError("Invalid candidateMenuProjection operation path")
+        parameters = operation.get("parameters")
+        if not isinstance(parameters, dict) or not _is_json_value(parameters):
+            raise ValueError("Invalid candidateMenuProjection operation parameters")
+
+    omissions = value.get("omittedActionArguments")
+    if not isinstance(omissions, list):
+        raise ValueError("Invalid candidateMenuProjection omissions")
+    for omission in omissions:
+        if (
+            not isinstance(omission, dict)
+            or set(omission) != {"argumentName", "reason"}
+            or any(
+                not isinstance(omission.get(field), str) or not omission[field]
+                for field in ("argumentName", "reason")
+            )
+        ):
+            raise ValueError("Invalid candidateMenuProjection omissions")
+
+    native_evidence = value.get("nativeEvidence")
+    if "nativeEvidence" in value:
+        evidence_fields = {
+            "kind",
+            "executorId",
+            "hostVersions",
+            "managedActionExecuted",
+            "managedReceiptCreated",
+            "managedReplacementMeshCreated",
+            "nativeMutationKind",
+            "operationIds",
+            "nativeUndoCheckpointRequired",
+            "nativeUndoDepth",
+            "nativeRedoDepth",
+        }
+        if not isinstance(native_evidence, dict) or set(native_evidence) != evidence_fields:
+            raise ValueError("Invalid candidateMenuProjection native evidence")
+        host_versions = native_evidence.get("hostVersions")
+        if (
+            native_evidence.get("kind") != "bounded_blender_ui_probe"
+            or not isinstance(native_evidence.get("executorId"), str)
+            or not native_evidence["executorId"]
+            or not isinstance(native_evidence.get("nativeMutationKind"), str)
+            or not native_evidence["nativeMutationKind"]
+            or not isinstance(host_versions, list)
+            or not host_versions
+            or any(not isinstance(version, str) or not version for version in host_versions)
+            or len(set(host_versions)) != len(host_versions)
+            or native_evidence.get("managedActionExecuted") is not False
+            or native_evidence.get("managedReceiptCreated") is not False
+            or native_evidence.get("managedReplacementMeshCreated") is not False
+            or native_evidence.get("nativeUndoCheckpointRequired") is not True
+            or native_evidence.get("operationIds") != operation_ids
+            or any(
+                isinstance(native_evidence.get(field), bool)
+                or not isinstance(native_evidence.get(field), int)
+                or native_evidence[field] <= 0
+                for field in ("nativeUndoDepth", "nativeRedoDepth")
+            )
+        ):
+            raise ValueError("Invalid candidateMenuProjection native evidence")
+
+    return CandidateMenuProjectionSpec(
+        projection="candidate_only",
+        interaction_catalog_version=catalog_version,
+        id=projection_id,
+        modality="menu",
+        equivalence="not_equivalent_to_managed_action",
+        execution_authority="none",
+        title=value["title"],
+        reason=value["reason"],
+        preconditions=tuple(deepcopy(preconditions)),
+        operations=tuple(deepcopy(operations)),
+        omitted_action_arguments=tuple(deepcopy(omissions)),
+        native_evidence=deepcopy(native_evidence),
+    )
 
 
 def load_task_tree(path: Path = RESOURCE_PATH) -> TaskNode:
@@ -196,6 +462,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
                 "1.4.0",
                 "1.5.0",
                 "1.6.0",
+                "1.7.0",
             }:
                 raise ValueError("Observation policies require guide protocol 1.2+")
             if action is None:
@@ -219,7 +486,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
                 if "retryPolicy" in observation_policy_raw:
                     retry_policy = observation_policy_raw.get("retryPolicy")
                     if (
-                        protocol_version not in {"1.5.0", "1.6.0"}
+                        protocol_version not in {"1.5.0", "1.6.0", "1.7.0"}
                         or failure_strategy != "rollback_step"
                         or not isinstance(retry_policy, dict)
                         or set(retry_policy) != {"mode", "maxAttempts"}
@@ -255,7 +522,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
                 "trackContentSha256",
                 "proofExecutionContentSha256",
             }
-            if protocol_version != "1.6.0":
+            if protocol_version not in {"1.6.0", "1.7.0"}:
                 raise ValueError("Execution track overrides require guide protocol 1.6")
             if action is None:
                 raise ValueError(
@@ -308,6 +575,21 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
                     "proofExecutionContentSha256"
                 ],
             )
+        candidate_menu_projection = None
+        if "candidateMenuProjection" in raw:
+            if protocol_version != "1.7.0":
+                raise ValueError("Candidate menu projections require guide protocol 1.7")
+            if action is None:
+                raise ValueError(
+                    f"Only executable steps can carry a candidate menu projection: {step_id}"
+                )
+            if children:
+                raise ValueError(
+                    f"Only leaf steps can carry a candidate menu projection: {step_id}"
+                )
+            candidate_menu_projection = validate_candidate_menu_projection_data(
+                raw.get("candidateMenuProjection")
+            )
         return TaskNode(
             id=step_id,
             number=number,
@@ -319,6 +601,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
             expected_observations=tuple(dict(item) for item in expected_observations),
             observation_policy=observation_policy,
             execution_track_override=execution_track_override,
+            candidate_menu_projection=candidate_menu_projection,
             children=children,
         )
 

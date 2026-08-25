@@ -18,18 +18,19 @@ from .common import (
     ensure_name_available,
     ensure_receipts_intact,
     integer,
+    journal_created_resource,
     logical_id,
     make_receipt,
     mesh_content_signature,
     new_receipt_id,
     node_tree_signature,
+    node_tree_semantic_signature,
     number,
     owned_resource,
     require_keys,
     resolve_resource,
     rollback_partial,
     snapshot_modifier,
-    tag_resource,
     text,
     vector,
 )
@@ -160,6 +161,27 @@ class GeometryNodesTransformDefinition:
     translation: tuple[float, float, float]
     rotation: tuple[float, float, float]
     scale: tuple[float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryNodesLightTrailsDefinition:
+    target_id: str
+    modifier_id: str
+    modifier_name: str
+    node_group_id: str
+    node_group_name: str
+    trail_count: int
+    points_per_trail: int
+    tile_length: float
+    trail_spacing: float
+    noise_scale: float
+    noise_detail: float
+    noise_roughness: float
+    noise_seed: float
+    height: float
+    profile_sides: int
+    profile_radius: float
+    tile_repeat_count: int
 
 
 def _normalized_squared_vector_length(
@@ -543,6 +565,132 @@ def validate_geometry_nodes_transform(
     )
 
 
+def validate_geometry_nodes_light_trails(
+    arguments: Mapping[str, Any],
+) -> GeometryNodesLightTrailsDefinition:
+    fields = {
+        "targetId",
+        "modifierId",
+        "modifierName",
+        "nodeGroupId",
+        "nodeGroupName",
+        "trailCount",
+        "pointsPerTrail",
+        "tileLength",
+        "trailSpacing",
+        "noiseScale",
+        "noiseDetail",
+        "noiseRoughness",
+        "noiseSeed",
+        "height",
+        "profileSides",
+        "profileRadius",
+        "tileRepeatCount",
+    }
+    require_keys(arguments, fields, fields, "arguments")
+    trail_count = integer(
+        arguments["trailCount"], "arguments.trailCount", minimum=1, maximum=128
+    )
+    points_per_trail = integer(
+        arguments["pointsPerTrail"],
+        "arguments.pointsPerTrail",
+        minimum=8,
+        maximum=512,
+    )
+    profile_sides = integer(
+        arguments["profileSides"],
+        "arguments.profileSides",
+        minimum=3,
+        maximum=8,
+    )
+    tile_repeat_count = integer(
+        arguments["tileRepeatCount"],
+        "arguments.tileRepeatCount",
+        minimum=1,
+        maximum=5,
+    )
+    evaluated_vertex_upper_bound = (
+        trail_count
+        * points_per_trail
+        * profile_sides
+        * tile_repeat_count
+        * 2
+    )
+    if evaluated_vertex_upper_bound > 3_000_000:
+        raise ValueError(
+            "arguments exceed the bounded light-trails evaluated vertex limit"
+        )
+    return GeometryNodesLightTrailsDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        modifier_id=logical_id(arguments["modifierId"], "arguments.modifierId"),
+        modifier_name=text(
+            arguments["modifierName"],
+            "arguments.modifierName",
+            prefix="OperatingLine.",
+        ),
+        node_group_id=logical_id(
+            arguments["nodeGroupId"], "arguments.nodeGroupId"
+        ),
+        node_group_name=text(
+            arguments["nodeGroupName"],
+            "arguments.nodeGroupName",
+            prefix="OperatingLine.",
+        ),
+        trail_count=trail_count,
+        points_per_trail=points_per_trail,
+        tile_length=number(
+            arguments["tileLength"],
+            "arguments.tileLength",
+            minimum=0.1,
+            maximum=1000.0,
+        ),
+        trail_spacing=number(
+            arguments["trailSpacing"],
+            "arguments.trailSpacing",
+            minimum=0.0001,
+            maximum=100.0,
+        ),
+        noise_scale=number(
+            arguments["noiseScale"],
+            "arguments.noiseScale",
+            minimum=0.0001,
+            maximum=1000.0,
+        ),
+        noise_detail=number(
+            arguments["noiseDetail"],
+            "arguments.noiseDetail",
+            minimum=0.0,
+            maximum=15.0,
+        ),
+        noise_roughness=number(
+            arguments["noiseRoughness"],
+            "arguments.noiseRoughness",
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        noise_seed=number(
+            arguments["noiseSeed"],
+            "arguments.noiseSeed",
+            minimum=-10000.0,
+            maximum=10000.0,
+        ),
+        height=number(
+            arguments["height"],
+            "arguments.height",
+            minimum=0.0,
+            maximum=100.0,
+        ),
+        profile_sides=profile_sides,
+        profile_radius=number(
+            arguments["profileRadius"],
+            "arguments.profileRadius",
+            minimum=0.0001,
+            maximum=10.0,
+        ),
+        tile_repeat_count=tile_repeat_count,
+    )
+
+
 def _owned_mesh_target(
     registry: Mapping[str, ResourceIdentity], target_id: str
 ) -> tuple[ResourceIdentity, bpy.types.Object, ResourceIdentity]:
@@ -820,14 +968,14 @@ def execute_subdivide(
     try:
         result_mesh = target.data.copy()
         result_mesh.name = definition.result_mesh_name
-        result_identity = tag_resource(
+        result_identity = journal_created_resource(
+            created,
             result_mesh,
             definition.result_mesh_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(result_identity)
         bm = bmesh.new()
         try:
             bm.from_mesh(result_mesh)
@@ -1084,14 +1232,14 @@ def execute_edit_inset_faces(
     try:
         result_mesh = target.data.copy()
         result_mesh.name = definition.result_mesh_name
-        result_identity = tag_resource(
+        result_identity = journal_created_resource(
+            created,
             result_mesh,
             definition.result_mesh_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(result_identity)
         bm = bmesh.new()
         try:
             bm.from_mesh(result_mesh)
@@ -1197,14 +1345,14 @@ def execute_edit_poke_faces(
     try:
         result_mesh = target.data.copy()
         result_mesh.name = definition.result_mesh_name
-        result_identity = tag_resource(
+        result_identity = journal_created_resource(
+            created,
             result_mesh,
             definition.result_mesh_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(result_identity)
         bm = bmesh.new()
         try:
             bm.from_mesh(result_mesh)
@@ -1305,14 +1453,14 @@ def execute_edit_bevel_edges(
     try:
         result_mesh = target.data.copy()
         result_mesh.name = definition.result_mesh_name
-        result_identity = tag_resource(
+        result_identity = journal_created_resource(
+            created,
             result_mesh,
             definition.result_mesh_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(result_identity)
         bm = bmesh.new()
         try:
             bm.from_mesh(result_mesh)
@@ -1547,6 +1695,7 @@ def execute_extrude_region(
         len(target.data.polygons),
     )
     _ensure_extrude_topology_is_bounded(source_topology, "source")
+    source_mesh_content = mesh_content_signature(target.data)
     ensure_logical_ids_available(registry, (definition.result_mesh_id,))
     ensure_name_available(bpy.data.meshes, definition.result_mesh_name, "mesh")
 
@@ -1556,14 +1705,14 @@ def execute_extrude_region(
     try:
         result_mesh = target.data.copy()
         result_mesh.name = definition.result_mesh_name
-        result_identity = tag_resource(
+        result_identity = journal_created_resource(
+            created,
             result_mesh,
             definition.result_mesh_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(result_identity)
         bm = bmesh.new()
         try:
             bm.from_mesh(result_mesh)
@@ -1649,6 +1798,14 @@ def execute_extrude_region(
         )
         mutations.append(
             MutationRecord(
+                source_mesh_identity,
+                "mesh_content",
+                source_mesh_content,
+                source_mesh_content,
+            )
+        )
+        mutations.append(
+            MutationRecord(
                 result_identity,
                 "mesh_content",
                 None,
@@ -1694,6 +1851,16 @@ def execute_triangulate(
     _ensure_triangulate_topology_is_bounded(source_topology, "source")
     if not any(len(polygon.vertices) != 3 for polygon in target.data.polygons):
         raise ValueError("Triangulate target must contain at least one non-triangle face")
+    source_loop_count = sum(
+        len(polygon.vertices) for polygon in target.data.polygons
+    )
+    expected_topology = (
+        source_topology[0],
+        source_topology[1] + source_loop_count - 3 * source_topology[2],
+        source_loop_count - 2 * source_topology[2],
+    )
+    _ensure_triangulate_topology_is_bounded(expected_topology, "result")
+    source_mesh_content = mesh_content_signature(target.data)
     ensure_logical_ids_available(registry, (definition.result_mesh_id,))
     ensure_name_available(bpy.data.meshes, definition.result_mesh_name, "mesh")
 
@@ -1703,14 +1870,14 @@ def execute_triangulate(
     try:
         result_mesh = target.data.copy()
         result_mesh.name = definition.result_mesh_name
-        result_identity = tag_resource(
+        result_identity = journal_created_resource(
+            created,
             result_mesh,
             definition.result_mesh_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(result_identity)
         bm = bmesh.new()
         try:
             bm.from_mesh(result_mesh)
@@ -1722,6 +1889,10 @@ def execute_triangulate(
             )
             predicted_topology = (len(bm.verts), len(bm.edges), len(bm.faces))
             _ensure_triangulate_topology_is_bounded(predicted_topology, "result")
+            if predicted_topology != expected_topology:
+                raise RuntimeError(
+                    "Triangulate topology does not match the supported exact formula"
+                )
             if not bm.faces or any(len(face.verts) != 3 for face in bm.faces):
                 raise RuntimeError("Triangulate did not produce only triangle faces")
             bm.to_mesh(result_mesh)
@@ -1734,6 +1905,8 @@ def execute_triangulate(
             len(result_mesh.polygons),
         )
         _ensure_triangulate_topology_is_bounded(actual_topology, "actual result")
+        if actual_topology != predicted_topology:
+            raise RuntimeError("Triangulate topology changed during mesh conversion")
         if not result_mesh.polygons or any(
             len(polygon.vertices) != 3 for polygon in result_mesh.polygons
         ):
@@ -1745,6 +1918,14 @@ def execute_triangulate(
                 "data",
                 source_mesh_identity,
                 result_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                source_mesh_identity,
+                "mesh_content",
+                source_mesh_content,
+                source_mesh_content,
             )
         )
         mutations.append(
@@ -1777,7 +1958,7 @@ def execute_bevel(
 ) -> ActionReceipt:
     ensure_receipts_intact(receipts)
     registry = build_resource_registry(receipts)
-    target_identity, target, _mesh_identity = _owned_mesh_target(
+    target_identity, target, mesh_identity = _owned_mesh_target(
         registry, definition.target_id
     )
     ensure_modifier_id_available(receipts, definition.modifier_id)
@@ -1809,6 +1990,23 @@ def execute_bevel(
                 f"modifier:{definition.modifier_id}",
                 None,
                 state,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                mesh_identity,
+                mesh_identity,
+            )
+        )
+        mesh_content = mesh_content_signature(target.data)
+        mutations.append(
+            MutationRecord(
+                mesh_identity,
+                "mesh_content",
+                mesh_content,
+                mesh_content,
             )
         )
         return make_receipt(
@@ -2028,7 +2226,7 @@ def execute_subdivision_surface(
 ) -> ActionReceipt:
     ensure_receipts_intact(receipts)
     registry = build_resource_registry(receipts)
-    target_identity, target, _mesh_identity = _owned_mesh_target(
+    target_identity, target, mesh_identity = _owned_mesh_target(
         registry, definition.target_id
     )
     _ensure_subdivision_surface_input_is_bounded(
@@ -2039,6 +2237,7 @@ def execute_subdivision_surface(
         raise RuntimeError(
             f"Cannot replace existing modifier: {definition.modifier_name}"
         )
+    source_mesh_content = mesh_content_signature(target.data)
     receipt_id = new_receipt_id()
     mutations: list[MutationRecord] = []
     modifier = None
@@ -2073,6 +2272,22 @@ def execute_subdivision_surface(
                 f"modifier:{definition.modifier_id}",
                 None,
                 state,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                mesh_identity,
+                mesh_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                mesh_identity,
+                "mesh_content",
+                source_mesh_content,
+                source_mesh_content,
             )
         )
         return make_receipt(
@@ -2128,14 +2343,14 @@ def execute_geometry_nodes_transform(
         node_group = bpy.data.node_groups.new(
             definition.node_group_name, "GeometryNodeTree"
         )
-        node_group_identity = tag_resource(
+        node_group_identity = journal_created_resource(
+            created,
             node_group,
             definition.node_group_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(node_group_identity)
         group_input_interface = node_group.interface.new_socket(
             name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
         )
@@ -2144,10 +2359,13 @@ def execute_geometry_nodes_transform(
         )
         input_node = node_group.nodes.new("NodeGroupInput")
         input_node.name = "OperatingLine Input"
+        input_node.location = (-320.0, 0.0)
         transform_node = node_group.nodes.new("GeometryNodeTransform")
         transform_node.name = "OperatingLine Transform"
+        transform_node.location = (0.0, 0.0)
         output_node = node_group.nodes.new("NodeGroupOutput")
         output_node.name = "OperatingLine Output"
+        output_node.location = (320.0, 0.0)
         _socket(transform_node.inputs, "Translation").default_value = (
             definition.translation
         )
@@ -2189,6 +2407,295 @@ def execute_geometry_nodes_transform(
                 "node_tree_signature",
                 None,
                 node_tree_signature(node_group),
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            created,
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        if modifier is not None and not mutations:
+            target.modifiers.remove(modifier)
+        rollback_partial(receipt_id, step_id, action.name, created, mutations, [])
+        raise
+
+
+def execute_geometry_nodes_light_trails(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: GeometryNodesLightTrailsDefinition,
+) -> ActionReceipt:
+    """Create one bounded mirrored/repeated curve-trails node recipe.
+
+    This recipe intentionally has no Simulation Input/Output or Bake node. The
+    mirrored half-tile and fixed-distance repeats provide a procedural loop
+    without disk caches.
+    """
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, _mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    ensure_logical_ids_available(registry, (definition.node_group_id,))
+    ensure_modifier_id_available(receipts, definition.modifier_id)
+    ensure_name_available(
+        bpy.data.node_groups, definition.node_group_name, "node group"
+    )
+    if target.modifiers.get(definition.modifier_name) is not None:
+        raise RuntimeError(
+            f"Cannot replace existing modifier: {definition.modifier_name}"
+        )
+
+    receipt_id = new_receipt_id()
+    created: list[ResourceIdentity] = []
+    mutations: list[MutationRecord] = []
+    modifier = None
+    try:
+        node_group = bpy.data.node_groups.new(
+            definition.node_group_name, "GeometryNodeTree"
+        )
+        node_group_identity = journal_created_resource(
+            created,
+            node_group,
+            definition.node_group_id,
+            receipt_id,
+            step_id,
+            action.name,
+        )
+        node_group.interface.new_socket(
+            name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
+        )
+        group_output_interface = node_group.interface.new_socket(
+            name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry"
+        )
+
+        input_node = node_group.nodes.new("NodeGroupInput")
+        input_node.name = "OperatingLine Input"
+        output_node = node_group.nodes.new("NodeGroupOutput")
+        output_node.name = "OperatingLine Output"
+
+        half_line = node_group.nodes.new("GeometryNodeCurvePrimitiveLine")
+        half_line.name = "OperatingLine Half Tile Line"
+        half_line.mode = "POINTS"
+        _socket(half_line.inputs, "Start").default_value = (
+            -definition.tile_length / 2.0,
+            0.0,
+            0.0,
+        )
+        _socket(half_line.inputs, "End").default_value = (0.0, 0.0, 0.0)
+
+        resample = node_group.nodes.new("GeometryNodeResampleCurve")
+        resample.name = "OperatingLine Trail Resolution"
+        if hasattr(resample, "mode"):
+            resample.mode = "COUNT"
+        else:
+            _socket(resample.inputs, "Mode").default_value = "Count"
+        _socket(resample.inputs, "Count").default_value = definition.points_per_trail
+        node_group.links.new(
+            _socket(half_line.outputs, "Curve"),
+            _socket(resample.inputs, "Curve"),
+        )
+
+        trail_points = node_group.nodes.new("GeometryNodeMeshLine")
+        trail_points.name = "OperatingLine Trail Rows"
+        trail_points.mode = "OFFSET"
+        _socket(trail_points.inputs, "Count").default_value = definition.trail_count
+        _socket(trail_points.inputs, "Start Location").default_value = (
+            0.0,
+            -((definition.trail_count - 1) * definition.trail_spacing) / 2.0,
+            0.0,
+        )
+        _socket(trail_points.inputs, "Offset").default_value = (
+            0.0,
+            definition.trail_spacing,
+            0.0,
+        )
+
+        trail_instances = node_group.nodes.new("GeometryNodeInstanceOnPoints")
+        trail_instances.name = "OperatingLine Trail Instances"
+        node_group.links.new(
+            _socket(trail_points.outputs, "Mesh"),
+            _socket(trail_instances.inputs, "Points"),
+        )
+        node_group.links.new(
+            _socket(resample.outputs, "Curve"),
+            _socket(trail_instances.inputs, "Instance"),
+        )
+
+        realize_trails = node_group.nodes.new("GeometryNodeRealizeInstances")
+        realize_trails.name = "OperatingLine Realize Trails"
+        node_group.links.new(
+            _socket(trail_instances.outputs, "Instances"),
+            _socket(realize_trails.inputs, "Geometry"),
+        )
+
+        position = node_group.nodes.new("GeometryNodeInputPosition")
+        position.name = "OperatingLine Trail Position"
+        noise = node_group.nodes.new("ShaderNodeTexNoise")
+        noise.name = "OperatingLine Terrain Noise"
+        noise.noise_dimensions = "4D"
+        _socket(noise.inputs, "Scale").default_value = definition.noise_scale
+        _socket(noise.inputs, "Detail").default_value = definition.noise_detail
+        _socket(noise.inputs, "Roughness").default_value = definition.noise_roughness
+        _socket(noise.inputs, "W").default_value = definition.noise_seed
+        node_group.links.new(
+            _socket(position.outputs, "Position"),
+            _socket(noise.inputs, "Vector"),
+        )
+
+        center_noise = node_group.nodes.new("ShaderNodeMath")
+        center_noise.name = "OperatingLine Center Noise"
+        center_noise.operation = "SUBTRACT"
+        _socket(center_noise.inputs, "Value_001").default_value = 0.5
+        node_group.links.new(
+            _socket(noise.outputs, "Fac"),
+            _socket(center_noise.inputs, "Value"),
+        )
+
+        scale_height = node_group.nodes.new("ShaderNodeMath")
+        scale_height.name = "OperatingLine Scale Height"
+        scale_height.operation = "MULTIPLY"
+        _socket(scale_height.inputs, "Value_001").default_value = definition.height
+        node_group.links.new(
+            _socket(center_noise.outputs, "Value"),
+            _socket(scale_height.inputs, "Value"),
+        )
+
+        z_offset = node_group.nodes.new("ShaderNodeCombineXYZ")
+        z_offset.name = "OperatingLine Z Offset"
+        node_group.links.new(
+            _socket(scale_height.outputs, "Value"),
+            _socket(z_offset.inputs, "Z"),
+        )
+
+        displace = node_group.nodes.new("GeometryNodeSetPosition")
+        displace.name = "OperatingLine Displace Trails"
+        node_group.links.new(
+            _socket(realize_trails.outputs, "Geometry"),
+            _socket(displace.inputs, "Geometry"),
+        )
+        node_group.links.new(
+            _socket(z_offset.outputs, "Vector"),
+            _socket(displace.inputs, "Offset"),
+        )
+
+        mirror = node_group.nodes.new("GeometryNodeTransform")
+        mirror.name = "OperatingLine Mirror Half Tile"
+        _socket(mirror.inputs, "Scale").default_value = (-1.0, 1.0, 1.0)
+        node_group.links.new(
+            _socket(displace.outputs, "Geometry"),
+            _socket(mirror.inputs, "Geometry"),
+        )
+
+        mirrored_tile = node_group.nodes.new("GeometryNodeJoinGeometry")
+        mirrored_tile.name = "OperatingLine Mirrored Tile"
+        node_group.links.new(
+            _socket(displace.outputs, "Geometry"),
+            _socket(mirrored_tile.inputs, "Geometry"),
+        )
+        node_group.links.new(
+            _socket(mirror.outputs, "Geometry"),
+            _socket(mirrored_tile.inputs, "Geometry"),
+        )
+
+        profile = node_group.nodes.new("GeometryNodeCurvePrimitiveCircle")
+        profile.name = "OperatingLine Trail Profile"
+        profile.mode = "RADIUS"
+        _socket(profile.inputs, "Resolution").default_value = definition.profile_sides
+        _socket(profile.inputs, "Radius").default_value = definition.profile_radius
+
+        curve_to_mesh = node_group.nodes.new("GeometryNodeCurveToMesh")
+        curve_to_mesh.name = "OperatingLine Curve To Mesh"
+        node_group.links.new(
+            _socket(mirrored_tile.outputs, "Geometry"),
+            _socket(curve_to_mesh.inputs, "Curve"),
+        )
+        node_group.links.new(
+            _socket(profile.outputs, "Curve"),
+            _socket(curve_to_mesh.inputs, "Profile Curve"),
+        )
+
+        tile_points = node_group.nodes.new("GeometryNodeMeshLine")
+        tile_points.name = "OperatingLine Loop Tiles"
+        tile_points.mode = "OFFSET"
+        _socket(tile_points.inputs, "Count").default_value = (
+            definition.tile_repeat_count
+        )
+        _socket(tile_points.inputs, "Start Location").default_value = (
+            -((definition.tile_repeat_count - 1) * definition.tile_length) / 2.0,
+            0.0,
+            0.0,
+        )
+        _socket(tile_points.inputs, "Offset").default_value = (
+            definition.tile_length,
+            0.0,
+            0.0,
+        )
+
+        tile_instances = node_group.nodes.new("GeometryNodeInstanceOnPoints")
+        tile_instances.name = "OperatingLine Tile Instances"
+        node_group.links.new(
+            _socket(tile_points.outputs, "Mesh"),
+            _socket(tile_instances.inputs, "Points"),
+        )
+        node_group.links.new(
+            _socket(curve_to_mesh.outputs, "Mesh"),
+            _socket(tile_instances.inputs, "Instance"),
+        )
+
+        realize_tiles = node_group.nodes.new("GeometryNodeRealizeInstances")
+        realize_tiles.name = "OperatingLine Realize Tiles"
+        node_group.links.new(
+            _socket(tile_instances.outputs, "Instances"),
+            _socket(realize_tiles.inputs, "Geometry"),
+        )
+        node_group.links.new(
+            _socket(realize_tiles.outputs, "Geometry"),
+            _socket(output_node.inputs, group_output_interface.identifier),
+        )
+
+        forbidden_node_types = {
+            "GeometryNodeBake",
+            "GeometryNodeSimulationInput",
+            "GeometryNodeSimulationOutput",
+        }
+        actual_node_types = {node.bl_idname for node in node_group.nodes}
+        if actual_node_types.intersection(forbidden_node_types):
+            raise RuntimeError("Light-trails recipe cannot contain bake or simulation nodes")
+
+        modifier = target.modifiers.new(definition.modifier_name, "NODES")
+        modifier.node_group = node_group
+        if len(modifier.bakes) != 0 or modifier.bake_directory != "":
+            raise RuntimeError("Light-trails modifier unexpectedly exposes bake state")
+        modifier_state = snapshot_modifier(
+            target,
+            modifier,
+            definition.modifier_id,
+            receipt_id,
+            step_id,
+            action.name,
+            {"node_group": node_group_identity},
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                f"modifier:{definition.modifier_id}",
+                None,
+                modifier_state,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                node_group_identity,
+                "node_tree_semantic_signature_v2",
+                None,
+                node_tree_semantic_signature(node_group),
             )
         )
         return make_receipt(

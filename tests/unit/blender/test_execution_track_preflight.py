@@ -38,6 +38,15 @@ sys.modules[observations.__name__] = observations
 shortcut_history = ModuleType(f"{PACKAGE_NAME}.infrastructure.shortcut_history")
 shortcut_history.shortcut_history_mutation_locked = lambda: False
 sys.modules[shortcut_history.__name__] = shortcut_history
+edit_subdivide_shortcut_history = ModuleType(
+    f"{PACKAGE_NAME}.infrastructure.edit_subdivide_shortcut_history"
+)
+edit_subdivide_shortcut_history.edit_subdivide_shortcut_history_mutation_locked = (
+    lambda: False
+)
+sys.modules[edit_subdivide_shortcut_history.__name__] = (
+    edit_subdivide_shortcut_history
+)
 
 companion_module = import_module(f"{PACKAGE_NAME}.application.companion")
 domain = import_module(f"{PACKAGE_NAME}.domain")
@@ -70,7 +79,7 @@ class _Transport:
 
 
 class _Session:
-    def __init__(self, source_step: dict) -> None:
+    def __init__(self, source_step: dict, protocol_version: str = "1.6.0") -> None:
         self.plan_id = "tutorial.eye"
         self.revision = 2
         self.plan_content_sha256 = "1" * 64
@@ -78,12 +87,12 @@ class _Session:
         self.started = True
         self.active_index = -1
         self.steps = (domain.load_task_tree_data({
-            "protocolVersion": "1.6.0",
+            "protocolVersion": protocol_version,
             "rootStepId": source_step["id"],
             "steps": [source_step],
         }),)
         self._source = {
-            "protocolVersion": "1.6.0",
+            "protocolVersion": protocol_version,
             "id": self.plan_id,
             "revision": self.revision,
             "rootStepId": source_step["id"],
@@ -181,6 +190,8 @@ class ExecutionTrackPreflightTests(unittest.TestCase):
         self.controller.execution_track_preflight_request = None
         self.controller.execution_track_preflight_status = None
         self.controller.execution_track_preflight_message = ""
+        self.controller._execution_track_driver = None
+        self.controller._execution_track_delivery = None
         self.controller._shortcut_proof_driver = None
         self.controller._menu_control_proof_driver = None
         self.controller._menu_control_history = SimpleNamespace(mutation_locked=False)
@@ -208,7 +219,7 @@ class ExecutionTrackPreflightTests(unittest.TestCase):
         }
         decision = self.controller._last_accepted_proposal_decision
         accepted_decision = {
-            "protocolVersion": "1.6.0",
+            "protocolVersion": request["plan"]["protocolVersion"],
             "decisionId": decision["decisionId"],
             "proposalId": decision["proposalId"],
             "instanceId": decision["instanceId"],
@@ -281,6 +292,70 @@ class ExecutionTrackPreflightTests(unittest.TestCase):
         })
         self.assertEqual(request["override"], self.override)
         self.assertEqual(self.controller._transport.creates, [request])
+
+    def test_guide_1_7_candidate_does_not_change_execution_track_authority(self) -> None:
+        self.source_step["candidateMenuProjection"] = {
+            "projection": "candidate_only",
+            "interactionCatalogVersion": "1.49.0",
+            "id": "candidate.eye.menu",
+            "modality": "menu",
+            "equivalence": "not_equivalent_to_managed_action",
+            "executionAuthority": "none",
+            "title": "Candidate eye menu",
+            "reason": "Display only.",
+            "preconditions": [
+                {"kind": "workspace", "label": "Workspace", "value": "Layout"}
+            ],
+            "operations": [
+                {
+                    "id": "candidate.menu.add",
+                    "order": 1,
+                    "semanticRefs": ["semantic.create-eye"],
+                    "description": "Open Add.",
+                    "evidenceRefs": [],
+                    "intent": "navigate",
+                    "target": {"kind": "menu", "hostId": "VIEW3D_MT_add"},
+                    "path": ["Layout", "Add"],
+                    "parameters": {},
+                }
+            ],
+            "omittedActionArguments": [],
+        }
+        self.session = _Session(self.source_step, "1.7.0")
+        package.get_session = lambda: self.session
+        self.controller._transport.session_snapshot.negotiated_guide_protocol_version = (
+            "1.7.0"
+        )
+        self.controller.last_report["protocolVersion"] = "1.7.0"
+
+        request = self.controller.request_execution_track_preflight()
+        self.assertEqual(request["plan"]["protocolVersion"], "1.7.0")
+        self.assertEqual(request["override"], self.override)
+        self.assertNotIn("candidateMenuProjection", request)
+
+        self.controller._handle_execution_track_preflight_delivery(self._delivery())
+        result = self.controller._transport.results[-1]
+        self.assertEqual(result["status"], "verified_unavailable")
+        self.assertTrue(result["authorityVerified"])
+
+    def test_guide_1_7_status_report_preserves_negotiated_protocol(self) -> None:
+        self.controller._transport.session_snapshot.negotiated_guide_protocol_version = (
+            "1.7.0"
+        )
+        self.session.active_step = None
+        self.session.completed_step_ids = ()
+        self.session.observation_blocked = False
+        self.session.observation_gate = None
+        self.session.receipts = {}
+        self.controller._sequence = 0
+        self.controller._artifact_attestation_execution_id = None
+        self.controller._artifact_attestation = None
+
+        report = self.controller.report("connected", submit=False)
+
+        self.assertEqual(report["protocolVersion"], "1.7.0")
+        self.assertIsNone(report["observationGate"])
+        self.assertIsNone(report["artifactAttestation"])
 
     def test_refuses_create_until_acceptance_ack(self) -> None:
         decision = self.controller._last_accepted_proposal_decision

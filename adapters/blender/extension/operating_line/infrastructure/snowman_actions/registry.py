@@ -5,7 +5,11 @@ from typing import Any
 
 from ...application import ActionReceipt
 from ...domain import ActionSpec, TaskNode, executable_steps
-from .common import COLLECTION_LOGICAL_ID, rollback_receipt, validate_adapter
+from .common import (
+    COLLECTION_LOGICAL_ID,
+    rollback_receipt,
+    validate_adapter,
+)
 from .editing import (
     execute_bevel,
     execute_edit_bevel_edges,
@@ -13,6 +17,7 @@ from .editing import (
     execute_edit_poke_faces,
     execute_extrude_region,
     execute_geometry_nodes_transform,
+    execute_geometry_nodes_light_trails,
     execute_mirror,
     execute_solidify,
     execute_subdivision_surface,
@@ -24,6 +29,7 @@ from .editing import (
     validate_edit_poke_faces,
     validate_extrude_region,
     validate_geometry_nodes_transform,
+    validate_geometry_nodes_light_trails,
     validate_mirror,
     validate_solidify,
     validate_subdivision_surface,
@@ -31,6 +37,10 @@ from .editing import (
     validate_triangulate,
 )
 from .material import execute_materials, validate_palette, validate_single
+from .light_trails_scene import (
+    execute_light_trails_scene,
+    validate_light_trails_scene,
+)
 from .model import (
     execute_geometry,
     legacy_sphere_arguments,
@@ -95,6 +105,11 @@ def _bind_action(
     definition: Any,
 ) -> Execute:
     def execute(receipts: Mapping[str, ActionReceipt]) -> ActionReceipt:
+        # A handler can fail between a Blender RNA write and the corresponding
+        # receipt journal entry.  The operator boundary must therefore treat an
+        # unproved exception as potentially mutating and quarantine it for
+        # native Undo.  Only narrow preflight/rollback code that can prove the
+        # host was not changed may attach a restored-state attestation.
         return handler(step_id, action, receipts, definition)
 
     return execute
@@ -204,6 +219,40 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             )
             execute = _bind_action(
                 execute_geometry_nodes_transform,
+                step.id,
+                action,
+                definition,
+            )
+        elif action.name == "blender.geometry_nodes.create_light_trails":
+            definition = validate_geometry_nodes_light_trails(arguments)
+            reserve(
+                step.id,
+                (definition.modifier_id, definition.node_group_id),
+            )
+            execute = _bind_action(
+                execute_geometry_nodes_light_trails,
+                step.id,
+                action,
+                definition,
+            )
+        elif action.name == "blender.lookdev.create_light_trails_scene":
+            definition = validate_light_trails_scene(arguments)
+            reserve(
+                step.id,
+                (
+                    definition.scene_id,
+                    definition.world_id,
+                    definition.camera_id,
+                    f"{definition.camera_id}.data",
+                    definition.controller_id,
+                    definition.trail_material_id,
+                    definition.floor_material_id,
+                    definition.camera_action_id,
+                    f"{definition.scene_id}.compositor",
+                ),
+            )
+            execute = _bind_action(
+                execute_light_trails_scene,
                 step.id,
                 action,
                 definition,

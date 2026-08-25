@@ -25,6 +25,7 @@ InitialPlanRunState = application.InitialPlanRunState
 DemoSession = application.DemoSession
 ActionReceipt = application.ActionReceipt
 ObservationGateError = application.ObservationGateError
+ObservationGateState = application.ObservationGateState
 RevisionLineage = application.RevisionLineage
 ReplanRunState = application.ReplanRunState
 lineage_from_proposal = application.lineage_from_proposal
@@ -810,6 +811,151 @@ class ExecutableStepOrderTests(unittest.TestCase):
             [step.id for step in domain.executable_steps(root)],
             ["leaf.first-group", "leaf.second-group"],
         )
+
+
+class SessionTreeFocusTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.leaf_a1 = action_node("leaf.a1", "1.1.1", 0)
+        self.leaf_a2 = action_node("leaf.a2", "1.1.2", 1)
+        self.leaf_b1 = action_node("leaf.b1", "1.2.1", 0)
+        self.group_a = TaskNode(
+            id="group.a",
+            number="1.1",
+            title="Group A",
+            order=0,
+            children=(self.leaf_a1, self.leaf_a2),
+        )
+        self.group_b = TaskNode(
+            id="group.b",
+            number="1.2",
+            title="Group B",
+            order=1,
+            children=(self.leaf_b1,),
+        )
+        self.root = TaskNode(
+            id="root",
+            number="1",
+            title="Root",
+            order=0,
+            children=(self.group_a, self.group_b),
+        )
+
+        def action_pair(step: TaskNode):
+            def execute(_receipts):
+                return ActionReceipt(
+                    f"receipt-{step.id}",
+                    step.id,
+                    step.action.name,
+                )
+
+            return execute, lambda _receipt: None
+
+        self.session = DemoSession(
+            self.root,
+            {
+                step.id: action_pair(step)
+                for step in (self.leaf_a1, self.leaf_a2, self.leaf_b1)
+            },
+        )
+
+    def test_default_expansion_contains_only_root_to_next_leaf_path(self) -> None:
+        self.assertEqual(
+            self.session.expanded_node_ids,
+            {"root", "group.a"},
+        )
+        self.assertTrue(self.session.is_expanded("root"))
+        self.assertFalse(self.session.is_expanded("group.b"))
+
+    def test_current_guidance_path_cannot_be_collapsed(self) -> None:
+        self.session.toggle_expanded("group.a")
+        self.session.toggle_expanded("root")
+
+        self.assertTrue(self.session.is_expanded("root"))
+        self.assertTrue(self.session.is_expanded("group.a"))
+
+    def test_blocking_gate_keeps_middle_failed_leaf_and_ancestors_active(self) -> None:
+        self.session.active_index = 1
+        self.session.observation_gate = ObservationGateState(
+            step_id=self.leaf_a2.id,
+            status="repair_required",
+            failure_strategy="retain_for_repair",
+            message="repair the failed leaf",
+            observations=(),
+        )
+        self.session._ensure_guidance_path_expanded()
+
+        self.assertIs(self.session.guidance_step, self.leaf_a2)
+        self.assertTrue(self.session.is_expanded("root"))
+        self.assertTrue(self.session.is_expanded("group.a"))
+        self.session.toggle_expanded("group.a")
+        self.assertTrue(self.session.is_expanded("group.a"))
+        self.assertFalse(self.session.is_expanded("group.b"))
+
+    def test_blocking_gate_keeps_final_failed_leaf_and_ancestors_active(self) -> None:
+        self.session.active_index = 2
+        self.session.observation_gate = ObservationGateState(
+            step_id=self.leaf_b1.id,
+            status="rollback_failed",
+            failure_strategy="rollback_step",
+            message="rollback failed",
+            observations=(),
+        )
+        self.session._ensure_guidance_path_expanded()
+
+        self.assertIs(self.session.guidance_step, self.leaf_b1)
+        self.assertTrue(self.session.is_expanded("root"))
+        self.assertTrue(self.session.is_expanded("group.b"))
+        self.session.toggle_expanded("group.b")
+        self.assertTrue(self.session.is_expanded("group.b"))
+
+    def test_nonblocking_guidance_still_points_to_the_next_leaf(self) -> None:
+        self.session.active_index = 0
+
+        self.assertIs(self.session.guidance_step, self.leaf_a2)
+
+    def test_step_migration_reopens_required_path_and_preserves_user_branches(self) -> None:
+        self.session.toggle_expanded("group.b")
+        self.assertTrue(self.session.is_expanded("group.b"))
+        self.session.toggle_expanded("group.b")
+        self.assertFalse(self.session.is_expanded("group.b"))
+
+        self.assertEqual(self.session.next(), self.leaf_a1)
+        self.assertTrue(self.session.is_expanded("group.a"))
+
+        self.session.toggle_expanded("group.b")
+        self.assertEqual(self.session.next(), self.leaf_a2)
+        self.session.toggle_expanded("group.a")
+        self.assertFalse(self.session.is_expanded("group.a"))
+        self.assertTrue(self.session.is_expanded("group.b"))
+
+        self.assertEqual(self.session.back(), self.leaf_a2)
+        self.assertTrue(self.session.is_expanded("group.a"))
+        self.assertTrue(self.session.is_expanded("group.b"))
+
+    def test_restore_reset_and_completed_plan_refocus_without_snapshot_changes(self) -> None:
+        self.session.next()
+        snapshot = self.session.snapshot_state()
+        self.assertFalse(hasattr(snapshot, "expanded_node_ids"))
+
+        self.session.toggle_expanded("group.a")
+        self.session.restore_state(snapshot)
+        self.assertTrue(self.session.is_expanded("group.a"))
+
+        self.session.toggle_expanded("group.b")
+        self.session.reset()
+        self.assertTrue(self.session.is_expanded("group.a"))
+        self.assertTrue(self.session.is_expanded("group.b"))
+
+        self.session.next()
+        self.session.next()
+        self.session.next()
+        self.session.toggle_expanded("group.a")
+        self.assertFalse(self.session.is_expanded("group.a"))
+        self.session.toggle_expanded("group.b")
+        self.assertTrue(self.session.is_expanded("group.b"))
+        self.assertIsNone(self.session.next())
+        self.assertIsNone(self.session.guidance_step)
+        self.assertTrue(self.session.is_expanded("group.b"))
 
 
 class ProviderHandoffTests(unittest.TestCase):

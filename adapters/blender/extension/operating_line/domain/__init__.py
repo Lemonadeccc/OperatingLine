@@ -20,6 +20,7 @@ from .task_tree import (
     SNOWMAN_PLAN_REVISION,
     SNOWMAN_TASK_TREE,
     ActionSpec,
+    CandidateMenuProjectionSpec,
     ExecutionTrackOverrideSpec,
     ObservationPolicySpec,
     TaskNode,
@@ -28,6 +29,7 @@ from .task_tree import (
     executable_steps,
     load_task_tree,
     load_task_tree_data,
+    validate_candidate_menu_projection_data,
 )
 
 __all__ = (
@@ -45,6 +47,7 @@ __all__ = (
     "SNOWMAN_TASK_TREE",
     "SUPPORTED_PROTOCOL_VERSIONS",
     "ActionSpec",
+    "CandidateMenuProjectionSpec",
     "ExecutionTrackOverrideSpec",
     "ObservationPolicySpec",
     "TaskNode",
@@ -57,4 +60,5 @@ __all__ = (
     "is_action_level_mcp_recipe",
     "load_task_tree",
     "load_task_tree_data",
+    "validate_candidate_menu_projection_data",
 )

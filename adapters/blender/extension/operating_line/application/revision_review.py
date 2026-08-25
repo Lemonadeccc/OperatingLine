@@ -17,8 +17,15 @@ STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 CATALOG_VERSION_PATTERN = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$")
 CONTENT_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REVISION_PROTOCOL_VERSIONS = frozenset(
-    {"1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", PROTOCOL_VERSION}
+    {"1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", PROTOCOL_VERSION}
 )
+STRUCTURED_REVISION_PROTOCOL_VERSIONS = frozenset(
+    {"1.3.0", "1.4.0", "1.5.0", "1.6.0", PROTOCOL_VERSION}
+)
+EXPLICIT_REVISION_OPERATION_PROTOCOL_VERSIONS = frozenset(
+    {"1.4.0", "1.5.0", "1.6.0", PROTOCOL_VERSION}
+)
+EXECUTION_TRACK_EDIT_PROTOCOL_VERSIONS = frozenset({"1.6.0", PROTOCOL_VERSION})
 PLAN_FIELDS = frozenset({"title", "rootStepId"})
 STEP_FIELDS = frozenset(
     {
@@ -436,12 +443,15 @@ def _validate_history_request(
     if set(value) != expected_fields:
         raise ValueError("Revision history request does not match the protocol")
     if (
-        protocol_version not in {"1.3.0", "1.4.0", "1.5.0", PROTOCOL_VERSION}
+        protocol_version not in STRUCTURED_REVISION_PROTOCOL_VERSIONS
         and "parameterEdits" in value
     ):
         raise ValueError("Structured revision edits require protocol 1.3+")
-    if protocol_version != PROTOCOL_VERSION and "executionTrackEdits" in value:
-        raise ValueError("Execution track edits require protocol 1.6")
+    if (
+        protocol_version not in EXECUTION_TRACK_EDIT_PROTOCOL_VERSIONS
+        and "executionTrackEdits" in value
+    ):
+        raise ValueError("Execution track edits require protocol 1.6+")
     request_id = _require_uuid(value.get("requestId"), "Revision history request id")
     if value.get("adapterId") != "blender" or value.get("instanceId") != instance_id:
         raise ValueError("Revision history request is outside this Blender instance")
@@ -449,7 +459,7 @@ def _validate_history_request(
     if thread["threadId"] != thread_id or thread["turn"] != turn:
         raise ValueError("Revision history request uses the wrong thread turn")
     operation = value.get("revisionOperation")
-    if protocol_version in {"1.4.0", "1.5.0", PROTOCOL_VERSION}:
+    if protocol_version in EXPLICIT_REVISION_OPERATION_PROTOCOL_VERSIONS:
         validate_revision_operation(operation, thread=thread)
     elif operation is not None:
         raise ValueError("Explicit revision operations require protocol 1.4+")

@@ -65,8 +65,17 @@ FROZEN_ACTION_CATALOG_116_PATH = (
     / "v1"
     / "action-catalog-1.16.0.json"
 )
+FROZEN_ACTION_CATALOG_122_PATH = (
+    REPO_ROOT
+    / "adapters"
+    / "blender"
+    / "catalog"
+    / "v1"
+    / "action-catalog-1.22.0.json"
+)
 load_interaction_catalog = catalog_module.load_interaction_catalog
 parse_mcp_materialization = catalog_module._parse_mcp_materialization
+OPERATION_LEVEL_MCP_PROFILES = catalog_module.OPERATION_LEVEL_MCP_PROFILES
 
 
 class InteractionCatalogTests(unittest.TestCase):
@@ -319,13 +328,13 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.44.0")
-        self.assertEqual(catalog.action_catalog_version, "1.22.0")
+        self.assertEqual(catalog.catalog_version, "1.69.0")
+        self.assertEqual(catalog.action_catalog_version, "1.27.0")
         self.assertEqual(
             catalog.host_version_range,
             ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
         )
-        self.assertEqual(len(catalog.recipes), 27)
+        self.assertEqual(len(catalog.recipes), 29)
         native = tuple(
             recipe.action_name
             for recipe in catalog.recipes
@@ -355,7 +364,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 recipe.guidance.kind is InteractionPathKind.SEMANTIC
                 for recipe in catalog.recipes
             ),
-            20,
+            22,
         )
         subdivision_surface = next(
             recipe
@@ -524,8 +533,54 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             ("targetId", "modifierId", "modifierName"),
         )
+        subdivision_mcp = subdivision_materialization.mcp
         self.assertEqual(
-            subdivision_materialization.mcp.availability, "unavailable"
+            (
+                subdivision_mcp.availability,
+                subdivision_mcp.source,
+                subdivision_mcp.semantic_binding,
+                subdivision_mcp.parameter_binding,
+                subdivision_mcp.server_name,
+                subdivision_mcp.tool_name,
+                subdivision_mcp.authorization,
+                subdivision_mcp.result_binding,
+            ),
+            (
+                "available",
+                "catalog.operation_level_mcp",
+                "ordered_leaf_operations",
+                "ordered_parameter_operations",
+                "operating-line",
+                "operatingline.blender.modifier.subdivision-surface.execute-next",
+                "accepted_replay_next_step",
+                "companion_leaf_operation_progress",
+            ),
+        )
+        self.assertIsNotNone(subdivision_mcp.mcp_operations)
+        assert subdivision_mcp.mcp_operations is not None
+        self.assertEqual(
+            tuple(
+                operation.source_operation_id
+                for operation in subdivision_mcp.mcp_operations
+            ),
+            (
+                "workspace.layout",
+                "semantic.select_owned_mesh",
+                "operator.subdivision_set",
+                "semantic.subdivision_surface_contract",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter.name for parameter in operation.parameters)
+                for operation in subdivision_mcp.mcp_operations
+            ),
+            (
+                ("targetId", "modifierId"),
+                (),
+                (),
+                ("modifierName", "viewportLevel"),
+            ),
         )
         solidify = next(
             recipe
@@ -554,13 +609,99 @@ class InteractionCatalogTests(unittest.TestCase):
                 solidify_mcp.result_binding,
             ),
             (
-                "catalog.action_level_mcp",
-                "all_leaf_operations",
-                "accepted_action_arguments",
+                "catalog.operation_level_mcp",
+                "ordered_leaf_operations",
+                "ordered_parameter_operations",
                 "operating-line",
-                "operatingline.blender.action.execute",
+                "operatingline.blender.modifier.solidify.execute-next",
                 "accepted_replay_next_step",
-                "companion_state_report",
+                "companion_leaf_operation_progress",
+            ),
+        )
+        assert solidify_mcp.mcp_operations is not None
+        self.assertEqual(
+            tuple(
+                operation.source_operation_id
+                for operation in solidify_mcp.mcp_operations
+            ),
+            (
+                "workspace.layout",
+                "panel.modifier_properties",
+                "control.add_modifier",
+                "semantic.solidify_parameters",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter.name for parameter in operation.parameters)
+                for operation in solidify_mcp.mcp_operations
+            ),
+            (
+                ("targetId", "modifierId"),
+                (),
+                (),
+                ("modifierName", "thickness", "offset"),
+            ),
+        )
+        bevel_modifier = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.modifier.add_bevel"
+        )
+        self.assertIsNotNone(bevel_modifier.procedure_materialization)
+        assert bevel_modifier.procedure_materialization is not None
+        self.assertEqual(
+            (
+                bevel_modifier.procedure_materialization.menu.availability,
+                bevel_modifier.procedure_materialization.shortcut.availability,
+                bevel_modifier.procedure_materialization.mcp.availability,
+            ),
+            ("unavailable", "unavailable", "available"),
+        )
+        bevel_modifier_mcp = bevel_modifier.procedure_materialization.mcp
+        self.assertEqual(
+            (
+                bevel_modifier_mcp.source,
+                bevel_modifier_mcp.semantic_binding,
+                bevel_modifier_mcp.parameter_binding,
+                bevel_modifier_mcp.server_name,
+                bevel_modifier_mcp.tool_name,
+                bevel_modifier_mcp.authorization,
+                bevel_modifier_mcp.result_binding,
+            ),
+            (
+                "catalog.operation_level_mcp",
+                "ordered_leaf_operations",
+                "ordered_parameter_operations",
+                "operating-line",
+                "operatingline.blender.modifier.bevel.execute-next",
+                "accepted_replay_next_step",
+                "companion_leaf_operation_progress",
+            ),
+        )
+        assert bevel_modifier_mcp.mcp_operations is not None
+        self.assertEqual(
+            tuple(
+                operation.source_operation_id
+                for operation in bevel_modifier_mcp.mcp_operations
+            ),
+            (
+                "workspace.layout",
+                "panel.modifier_properties",
+                "control.add_modifier",
+                "semantic.bevel_parameters",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter.name for parameter in operation.parameters)
+                for operation in bevel_modifier_mcp.mcp_operations
+            ),
+            (
+                ("targetId", "modifierId"),
+                (),
+                (),
+                ("modifierName", "width", "segments", "angleLimit"),
             ),
         )
         mirror = next(
@@ -595,6 +736,58 @@ class InteractionCatalogTests(unittest.TestCase):
                 ("semantic", "operatingline.blender.mirror_modifier"),
             ),
         )
+        self.assertIsNotNone(mirror.procedure_materialization)
+        assert mirror.procedure_materialization is not None
+        mirror_mcp = mirror.procedure_materialization.mcp
+        self.assertEqual(
+            (
+                mirror_mcp.availability,
+                mirror_mcp.source,
+                mirror_mcp.semantic_binding,
+                mirror_mcp.parameter_binding,
+                mirror_mcp.tool_name,
+                mirror_mcp.result_binding,
+            ),
+            (
+                "available",
+                "catalog.operation_level_mcp",
+                "ordered_leaf_operations",
+                "ordered_parameter_operations",
+                "operatingline.blender.modifier.mirror.execute-next",
+                "companion_leaf_operation_progress",
+            ),
+        )
+        assert mirror_mcp.mcp_operations is not None
+        self.assertEqual(
+            tuple(
+                operation.source_operation_id
+                for operation in mirror_mcp.mcp_operations
+            ),
+            (
+                "workspace.layout",
+                "semantic.select_owned_mesh",
+                "panel.modifier_properties",
+                "control.add_modifier",
+                "category.generate",
+                "modifier.mirror",
+                "semantic.mirror_contract",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter.name for parameter in operation.parameters)
+                for operation in mirror_mcp.mcp_operations
+            ),
+            (
+                ("targetId", "modifierId"),
+                (),
+                (),
+                (),
+                (),
+                (),
+                ("modifierName", "axis"),
+            ),
+        )
         self.assertIn("type=MIRROR", mirror.guidance.reason)
         self.assertEqual(
             mirror.guidance.manual_reference,
@@ -622,13 +815,13 @@ class InteractionCatalogTests(unittest.TestCase):
                 mirror_mcp.result_binding,
             ),
             (
-                "catalog.action_level_mcp",
-                "all_leaf_operations",
-                "accepted_action_arguments",
+                "catalog.operation_level_mcp",
+                "ordered_leaf_operations",
+                "ordered_parameter_operations",
                 "operating-line",
-                "operatingline.blender.action.execute",
+                "operatingline.blender.modifier.mirror.execute-next",
                 "accepted_replay_next_step",
-                "companion_state_report",
+                "companion_leaf_operation_progress",
             ),
         )
         self.assertIn(
@@ -1726,15 +1919,1947 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.edit_bevel_edges",
                     "blender.mesh.edit_inset_faces",
                     "blender.mesh.edit_poke_faces",
+                    "blender.geometry_nodes.create_transform",
+                    "blender.geometry_nodes.create_light_trails",
+                    "blender.lookdev.create_light_trails_scene",
+                    "blender.modifier.add_bevel",
                     "blender.modifier.add_solidify",
                     "blender.modifier.add_subdivision_surface",
                     "blender.modifier.add_mirror",
+                    "blender.material.create_and_assign",
+                    "blender.material.create_palette_and_assign",
                     "blender.rig.create_armature",
                     "blender.rig.bind_skin_weights",
                     "blender.animation.create_pose_keyframes",
                 }
             )
         )
+
+    def test_freezes_146_and_only_expands_transform_geometry_in_147(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.46.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "02623483bbdb0d68cfbd4cf3d47f95fbcada5a8175c9a4f32ca98cb7a923b98a",
+        )
+        frozen = json.loads(frozen_bytes)
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.47.0.json"
+        )
+        active = json.loads(active_path.read_text(encoding="utf-8"))
+        transform_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        transform = active["recipes"][transform_index]
+
+        self.assertEqual(
+            tuple(
+                (step["id"], step["order"], step["intent"])
+                for step in transform["guidance"]["steps"]
+            ),
+            (
+                (
+                    "semantic.preflight_transform_geometry_resources",
+                    1,
+                    "verify",
+                ),
+                ("semantic.new_geometry_modifier", 2, "execute"),
+                ("node.group_input", 3, "execute"),
+                ("node.transform_geometry", 4, "execute"),
+                ("node.group_output", 5, "execute"),
+                (
+                    "semantic.connect_group_input_geometry_to_transform",
+                    6,
+                    "execute",
+                ),
+                (
+                    "semantic.connect_transform_geometry_to_group_output",
+                    7,
+                    "execute",
+                ),
+                ("semantic.verify_node_links", 8, "verify"),
+            ),
+        )
+        preflight = transform["guidance"]["steps"][0]
+        self.assertEqual(preflight["label"], "Validate Transform Geometry Preconditions")
+        self.assertEqual(preflight["target"]["kind"], "semantic")
+        self.assertEqual(
+            preflight["target"]["hostId"],
+            "operatingline.blender.transform_geometry_resource_preflight",
+        )
+        materialization = transform["procedureMaterialization"]
+        self.assertEqual(
+            tuple(
+                step["target"].get("connection")
+                for step in transform["guidance"]["steps"][5:7]
+            ),
+            (
+                {
+                    "fromNode": "NodeGroupInput",
+                    "fromSocket": "Geometry",
+                    "toNode": "GeometryNodeTransform",
+                    "toSocket": "Geometry",
+                },
+                {
+                    "fromNode": "GeometryNodeTransform",
+                    "fromSocket": "Geometry",
+                    "toNode": "NodeGroupOutput",
+                    "toSocket": "Geometry",
+                },
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    projection["semanticAction"],
+                    projection["path"],
+                    projection["actionArgument"],
+                    projection["transform"],
+                )
+                for projection in materialization["semantic"]["projections"]
+            ),
+            (
+                (
+                    "node.transform_geometry",
+                    [{"kind": "field", "name": "translation"}],
+                    "translation",
+                    "identity",
+                ),
+                (
+                    "node.transform_geometry",
+                    [{"kind": "field", "name": "rotation"}],
+                    "rotation",
+                    "identity",
+                ),
+                (
+                    "node.transform_geometry",
+                    [{"kind": "field", "name": "scale"}],
+                    "scale",
+                    "identity",
+                ),
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                omission["argumentName"]
+                for omission in materialization["semantic"]["omittedActionArguments"]
+            ),
+            (
+                "targetId",
+                "modifierId",
+                "modifierName",
+                "nodeGroupId",
+                "nodeGroupName",
+            ),
+        )
+        self.assertTrue(
+            all(
+                materialization[channel]["availability"] == "unavailable"
+                and materialization[channel]["reason"]
+                for channel in ("menu", "shortcut", "mcp")
+            )
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][transform_index] = frozen["recipes"][transform_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_147_and_only_enables_subdivision_surface_mcp_in_148(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.47.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "9a2c9ff9e641f07bf4e44572e92f4a4783062872868e90bc434e27f9b44a65d2",
+        )
+        frozen = json.loads(frozen_bytes)
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.48.0.json"
+        )
+        active = json.loads(active_path.read_text(encoding="utf-8"))
+        frozen_subdivision = next(
+            recipe
+            for recipe in frozen["recipes"]
+            if recipe["actionName"]
+            == "blender.modifier.add_subdivision_surface"
+        )
+        active_subdivision = next(
+            recipe
+            for recipe in active["recipes"]
+            if recipe["actionName"]
+            == "blender.modifier.add_subdivision_surface"
+        )
+
+        self.assertEqual(
+            frozen_subdivision["procedureMaterialization"]["mcp"],
+            {
+                "availability": "unavailable",
+                "reason": "No approved action-level MCP tool is available.",
+            },
+        )
+        self.assertEqual(
+            active_subdivision["procedureMaterialization"]["mcp"],
+            {
+                "availability": "available",
+                "source": "catalog.action_level_mcp",
+                "semanticBinding": "all_leaf_operations",
+                "parameterBinding": "accepted_action_arguments",
+                "serverName": "operating-line",
+                "toolName": "operatingline.blender.action.execute",
+                "authorization": "accepted_replay_next_step",
+                "resultBinding": "companion_state_report",
+            },
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active_subdivision["procedureMaterialization"]["mcp"] = (
+            frozen_subdivision["procedureMaterialization"]["mcp"]
+        )
+        self.assertEqual(active, frozen)
+
+    def test_freezes_148_and_only_enables_transform_operation_mcp_in_149(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.48.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "2503b21804352dda57f71ca144288276eca21ff2c6925b4b930b0292234e3b61",
+        )
+        frozen = json.loads(frozen_bytes)
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.49.0.json"
+        )
+        active = json.loads(active_path.read_text(encoding="utf-8"))
+        frozen_transform = next(
+            recipe
+            for recipe in frozen["recipes"]
+            if recipe["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        active_transform = next(
+            recipe
+            for recipe in active["recipes"]
+            if recipe["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        frozen_mcp = frozen_transform["procedureMaterialization"]["mcp"]
+        active_mcp = active_transform["procedureMaterialization"]["mcp"]
+        self.assertEqual(frozen_mcp["availability"], "unavailable")
+        self.assertEqual(
+            {
+                key: active_mcp[key]
+                for key in (
+                    "availability",
+                    "source",
+                    "semanticBinding",
+                    "parameterBinding",
+                    "serverName",
+                    "toolName",
+                    "authorization",
+                    "resultBinding",
+                )
+            },
+            {
+                "availability": "available",
+                "source": "catalog.operation_level_mcp",
+                "semanticBinding": "ordered_leaf_operations",
+                "parameterBinding": "ordered_parameter_operations",
+                "serverName": "operating-line",
+                "toolName": (
+                    "operatingline.blender.geometry-nodes.transform.execute-next"
+                ),
+                "authorization": "accepted_replay_next_step",
+                "resultBinding": "companion_leaf_operation_progress",
+            },
+        )
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in active_mcp["operations"]),
+            catalog_module.TRANSFORM_GEOMETRY_OPERATION_LEVEL_MCP_IDS,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in active_mcp["operations"]
+            ),
+            catalog_module.TRANSFORM_GEOMETRY_OPERATION_LEVEL_MCP_PARAMETER_NAMES,
+        )
+
+        parsed = BUNDLED_INTERACTION_CATALOG.recipe_for(
+            "blender.geometry_nodes.create_transform"
+        )
+        assert parsed is not None and parsed.procedure_materialization is not None
+        parsed_mcp = parsed.procedure_materialization.mcp
+        assert parsed_mcp.mcp_operations is not None
+        self.assertEqual(
+            tuple(operation.source_operation_id for operation in parsed_mcp.mcp_operations),
+            catalog_module.TRANSFORM_GEOMETRY_OPERATION_LEVEL_MCP_IDS,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active_transform["procedureMaterialization"]["mcp"] = frozen_mcp
+        self.assertEqual(active, frozen)
+
+    def test_freezes_149_and_adds_only_non_executable_subdivide_menu_candidate_in_150(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.49.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "a306bc09ece08e06368f234265577f445e07b37179ac41d1a66e9440571d1fca",
+        )
+        frozen = json.loads(frozen_bytes)
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.50.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "2b2fa8821ce7cdf20c5e7f67dfc488818ca4c29558998fe9a1bd5df9fdc01f03",
+        )
+        active = json.loads(active_bytes)
+        frozen_subdivide = next(
+            recipe
+            for recipe in frozen["recipes"]
+            if recipe["actionName"] == "blender.mesh.edit_subdivide"
+        )
+        active_subdivide = next(
+            recipe
+            for recipe in active["recipes"]
+            if recipe["actionName"] == "blender.mesh.edit_subdivide"
+        )
+        self.assertNotIn(
+            "menuCandidate", frozen_subdivide["procedureMaterialization"]
+        )
+        self.assertEqual(
+            active_subdivide["procedureMaterialization"]["menu"]["availability"],
+            "unavailable",
+        )
+        candidate = active_subdivide["procedureMaterialization"]["menuCandidate"]
+        self.assertEqual(
+            (
+                candidate["source"],
+                candidate["projection"],
+                candidate["equivalence"],
+                candidate["executionAuthority"],
+            ),
+            (
+                "catalog.ordered_menu_candidate_operations",
+                "candidate_only",
+                "not_equivalent_to_managed_action",
+                "none",
+            ),
+        )
+        self.assertEqual(
+            tuple(operation["id"] for operation in candidate["operations"]),
+            (
+                "candidate.workspace_layout",
+                "candidate.use_accepted_active_mesh",
+                "candidate.enter_edit_mode",
+                "candidate.open_select_menu",
+                "candidate.select_all_mesh_elements",
+                "candidate.open_edge_menu",
+                "candidate.execute_subdivide",
+                "candidate.open_adjust_last_operation",
+                "candidate.set_number_of_cuts",
+                "candidate.set_smoothness",
+                "candidate.return_to_object_mode",
+            ),
+        )
+        native_evidence = candidate["nativeEvidence"]
+        self.assertEqual(
+            native_evidence,
+            {
+                "kind": "bounded_blender_ui_probe",
+                "executorId": "blender.mesh_edit_subdivide_candidate_menu_f9.event_simulate.v1",
+                "hostVersions": ["4.5.3", "5.1.1"],
+                "managedActionExecuted": False,
+                "managedReceiptCreated": False,
+                "managedReplacementMeshCreated": False,
+                "nativeMutationKind": "in_place_edit_mesh_subdivide",
+                "operationIds": [
+                    operation["id"] for operation in candidate["operations"]
+                ],
+                "nativeUndoCheckpointRequired": True,
+                "nativeUndoDepth": 4,
+                "nativeRedoDepth": 4,
+            },
+        )
+        self.assertEqual(
+            tuple(
+                item["argumentName"]
+                for item in candidate["omittedActionArguments"]
+            ),
+            ("targetId", "resultMeshId", "resultMeshName"),
+        )
+
+        parsed = BUNDLED_INTERACTION_CATALOG.recipe_for(
+            "blender.mesh.edit_subdivide"
+        )
+        assert parsed is not None and parsed.procedure_materialization is not None
+        parsed_candidate = parsed.procedure_materialization.menu_candidate
+        self.assertIsNotNone(parsed_candidate)
+        assert parsed_candidate is not None
+        self.assertEqual(parsed_candidate.execution_authority, "none")
+        self.assertIsNotNone(parsed_candidate.native_evidence)
+        assert parsed_candidate.native_evidence is not None
+        self.assertEqual(
+            parsed_candidate.native_evidence.executor_id,
+            "blender.mesh_edit_subdivide_candidate_menu_f9.event_simulate.v1",
+        )
+        self.assertEqual(
+            parsed_candidate.native_evidence.host_versions,
+            ("4.5.3", "5.1.1"),
+        )
+        self.assertEqual(parsed_candidate.native_evidence.native_undo_depth, 4)
+        self.assertEqual(parsed_candidate.native_evidence.native_redo_depth, 4)
+        self.assertEqual(
+            tuple(operation.target_id for operation in parsed_candidate.operations[8:10]),
+            ("mesh.subdivide.number_cuts", "mesh.subdivide.smoothness"),
+        )
+        self.assertEqual(
+            tuple(
+                operation.parameters[0].source.argument_name
+                for operation in parsed_candidate.operations[8:10]
+            ),
+            ("cuts", "smooth"),
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["description"] = frozen["description"]
+        del active_subdivide["procedureMaterialization"]["menuCandidate"]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_150_and_expands_named_light_trails_nodes_in_151(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.50.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "2b2fa8821ce7cdf20c5e7f67dfc488818ca4c29558998fe9a1bd5df9fdc01f03",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.51.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "1085553ae473a5c4287b2cf0bdb86bda113db794bdb13e5894898aab8f36c547",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.geometry_nodes.create_light_trails"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.geometry_nodes.create_light_trails"
+        )
+        light_trails = active["recipes"][active_index]
+        named_nodes = [
+            step
+            for step in light_trails["guidance"]["steps"]
+            if step["target"]["kind"] == "node"
+        ]
+        self.assertEqual(len(light_trails["guidance"]["steps"]), 23)
+        self.assertEqual(len(named_nodes), 20)
+        self.assertTrue(
+            all(
+                step["target"]["hostId"].startswith(
+                    "node-name:OperatingLine "
+                )
+                for step in named_nodes
+            )
+        )
+        self.assertEqual(
+            len(
+                light_trails["procedureMaterialization"]["semantic"][
+                    "projections"
+                ]
+            ),
+            12,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_151_and_expands_pose_values_in_152(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.51.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "1085553ae473a5c4287b2cf0bdb86bda113db794bdb13e5894898aab8f36c547",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.52.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "132225dd95006d790a6725fe54710a3b8ac435077a4a3838e67358889b67594c",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.animation.create_pose_keyframes"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.animation.create_pose_keyframes"
+        )
+        pose = active["recipes"][active_index]
+        self.assertEqual(len(pose["guidance"]["steps"]), 8)
+        self.assertEqual(
+            tuple(
+                (projection["actionArgument"], projection["transform"])
+                for projection in pose["procedureMaterialization"]["semantic"][
+                    "projections"
+                ]
+            ),
+            (
+                ("actionName", "identity"),
+                ("keyframes", "json_identity"),
+                ("interpolation", "identity"),
+                ("extrapolation", "identity"),
+            ),
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["actionCatalogVersion"] = frozen["actionCatalogVersion"]
+        active["description"] = frozen["description"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_152_and_adds_light_trails_links_in_153(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.52.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "132225dd95006d790a6725fe54710a3b8ac435077a4a3838e67358889b67594c",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.53.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "6e94b150caf3c71bcd6033445ca7ae6e74378ef60e05bd9e83c608474814a342",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.geometry_nodes.create_light_trails"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.geometry_nodes.create_light_trails"
+        )
+        light_trails = active["recipes"][active_index]
+        connections = [
+            step["target"]["connection"]
+            for step in light_trails["guidance"]["steps"]
+            if "connection" in step["target"]
+        ]
+        self.assertEqual(len(light_trails["guidance"]["steps"]), 42)
+        self.assertEqual(len(connections), 19)
+        self.assertEqual(
+            connections[0],
+            {
+                "fromNode": "node-name:OperatingLine Half Tile Line",
+                "fromSocket": "Curve",
+                "toNode": "node-name:OperatingLine Trail Resolution",
+                "toSocket": "Curve",
+            },
+        )
+        self.assertEqual(
+            connections[-1],
+            {
+                "fromNode": "node-name:OperatingLine Realize Tiles",
+                "fromSocket": "Geometry",
+                "toNode": "node-name:OperatingLine Output",
+                "toSocket": "Geometry",
+            },
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_153_and_binds_axis_angle_pose_guidance_in_154(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.53.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "6e94b150caf3c71bcd6033445ca7ae6e74378ef60e05bd9e83c608474814a342",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.54.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "85e0ffab9c4ed2cd5aed31926cfa19ac7dc65b1119960b85572f04571b890261",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.animation.create_pose_keyframes"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.animation.create_pose_keyframes"
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["actionCatalogVersion"] = frozen["actionCatalogVersion"]
+        active["description"] = frozen["description"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_154_and_binds_light_trails_operation_mcp_in_155(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.54.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "85e0ffab9c4ed2cd5aed31926cfa19ac7dc65b1119960b85572f04571b890261",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.55.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "90257a71462f58dd6bac5d6b898d7cb553f8fac8c682d8f39797a9a883d5879c",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.geometry_nodes.create_light_trails"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.geometry_nodes.create_light_trails"
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        self.assertEqual(
+            {
+                key: mcp[key]
+                for key in (
+                    "availability",
+                    "source",
+                    "semanticBinding",
+                    "parameterBinding",
+                    "toolName",
+                    "authorization",
+                    "resultBinding",
+                )
+            },
+            {
+                "availability": "available",
+                "source": "catalog.operation_level_mcp",
+                "semanticBinding": "ordered_leaf_operations",
+                "parameterBinding": "ordered_parameter_operations",
+                "toolName": (
+                    "operatingline.blender.geometry-nodes.light-trails.execute-next"
+                ),
+                "authorization": "accepted_replay_next_step",
+                "resultBinding": "companion_leaf_operation_progress",
+            },
+        )
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.geometry_nodes.create_light_trails.semantic"
+        ]
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_155_and_binds_pose_operation_mcp_in_156(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.55.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "90257a71462f58dd6bac5d6b898d7cb553f8fac8c682d8f39797a9a883d5879c",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.56.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "6cddec2ab02e0ba37a584fcc1e428f967ab0f3c7ce60e57bab1c63154356140a",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.animation.create_pose_keyframes"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.animation.create_pose_keyframes"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.animation.create_pose_keyframes.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+        keyframes = mcp["operations"][6]["parameters"][0]
+        self.assertEqual(keyframes["source"]["transform"], "json_identity")
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_156_and_binds_armature_operation_mcp_in_157(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.56.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "6cddec2ab02e0ba37a584fcc1e428f967ab0f3c7ce60e57bab1c63154356140a",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.57.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "fa5eb0e2998c5a6d319ad263d47438500a052f0818681297c9cfb1e9ccd4ace2",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.rig.create_armature"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.rig.create_armature"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.rig.create_armature.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+        self.assertEqual(
+            mcp["operations"][5]["parameters"][0]["source"]["transform"],
+            "json_identity",
+        )
+        self.assertEqual(
+            mcp["operations"][7]["parameters"][0]["source"]["transform"],
+            "json_identity",
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_157_and_binds_skin_weights_operation_mcp_in_158(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.57.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "fa5eb0e2998c5a6d319ad263d47438500a052f0818681297c9cfb1e9ccd4ace2",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.58.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "7540e60b068d93c4a29c6d9457dc742b1584cbbd4fd887c4822750a48ff57bc0",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.rig.bind_skin_weights"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.rig.bind_skin_weights"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.rig.bind_skin_weights.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+        self.assertEqual(
+            mcp["operations"][4]["parameters"][0]["source"]["transform"],
+            "json_identity",
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["actionCatalogVersion"] = frozen["actionCatalogVersion"]
+        active["description"] = frozen["description"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_158_and_binds_solidify_operation_mcp_in_159(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.58.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "7540e60b068d93c4a29c6d9457dc742b1584cbbd4fd887c4822750a48ff57bc0",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.59.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "27a047e645650e6e08c03a54f2ae90aa9a3a9ca5fcf6e7db76b28510932839fe",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_solidify"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_solidify"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.modifier.add_solidify.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_159_and_binds_mirror_operation_mcp_in_160(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.59.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "27a047e645650e6e08c03a54f2ae90aa9a3a9ca5fcf6e7db76b28510932839fe",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.60.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "41cc0159fa1452f5c0726f7a8dfc75d3c8ed0a5de3ff270110cc509632948f05",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_mirror"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_mirror"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.modifier.add_mirror.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_160_and_binds_subdivision_surface_operation_mcp_in_161(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.60.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "41cc0159fa1452f5c0726f7a8dfc75d3c8ed0a5de3ff270110cc509632948f05",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.61.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "4798ecc7d1943e23d1daa514d2ad952d3e64bdca034e80b0367fc98b439b7e89",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_subdivision_surface"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_subdivision_surface"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.modifier.add_subdivision_surface.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_161_and_binds_edit_bevel_edges_operation_mcp_in_162(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.61.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "4798ecc7d1943e23d1daa514d2ad952d3e64bdca034e80b0367fc98b439b7e89",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.62.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "d2b9cc77ac455c07aafc03855c24e19e9c346bbc81cff27ff44cade9162d4318",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_bevel_edges"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_bevel_edges"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.mesh.edit_bevel_edges.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_162_and_binds_edit_inset_faces_operation_mcp_in_163(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.62.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "d2b9cc77ac455c07aafc03855c24e19e9c346bbc81cff27ff44cade9162d4318",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.63.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "2b134289684480886c8c2ea1c46075895540f06611768f122a91c250cd5e2b3e",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_inset_faces"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_inset_faces"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.mesh.edit_inset_faces.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_163_and_binds_edit_poke_faces_operation_mcp_in_164(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.63.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "2b134289684480886c8c2ea1c46075895540f06611768f122a91c250cd5e2b3e",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.64.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "3876ef634380c67831cc841bb0f89e5ef9be0ab1f6e135b69f53770ccf72996b",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_poke_faces"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_poke_faces"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.mesh.edit_poke_faces.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_164_and_binds_edit_triangulate_operation_mcp_in_165(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.64.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "3876ef634380c67831cc841bb0f89e5ef9be0ab1f6e135b69f53770ccf72996b",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.65.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "cc94229cf1b1fe62ae024de6f9e08bcb2ff48077c309da38391772979c2803cb",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_triangulate"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_triangulate"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.mesh.edit_triangulate.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_165_and_binds_extrude_region_operation_mcp_in_166(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.65.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "cc94229cf1b1fe62ae024de6f9e08bcb2ff48077c309da38391772979c2803cb",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.66.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "40cf1b6e1818afe9517b33b6184b21f059dd61260e93d0fbe30f46859debaa18",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_extrude_region"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.mesh.edit_extrude_region"
+        )
+        self.assertEqual(
+            frozen["recipes"][frozen_index]["procedureMaterialization"]["mcp"][
+                "source"
+            ],
+            "catalog.action_level_mcp",
+        )
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.mesh.edit_extrude_region.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+        self.assertEqual(
+            mcp["operations"][3]["parameters"][0]["source"]["transform"],
+            "json_identity",
+        )
+        self.assertEqual(
+            mcp["operations"][4]["parameters"][0]["source"]["transform"],
+            "json_identity",
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_166_and_binds_bevel_modifier_operation_mcp_in_167(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.66.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "40cf1b6e1818afe9517b33b6184b21f059dd61260e93d0fbe30f46859debaa18",
+        )
+        active_bytes = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.67.0.json"
+        ).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "a52420815a7ff61e442674301542326bc9e7c41d3b6dc1f0481db8ca4e7b4024",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_bevel"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.modifier.add_bevel"
+        )
+        self.assertNotIn("procedureMaterialization", frozen["recipes"][frozen_index])
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.modifier.add_bevel.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_167_and_binds_single_material_operation_mcp_in_168(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.67.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "a52420815a7ff61e442674301542326bc9e7c41d3b6dc1f0481db8ca4e7b4024",
+        )
+        active_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.68.0.json"
+        )
+        active_bytes = active_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "688b8a3e0fd6942b3372559a61a99ce037fa9e73acc1e8c2af0fdd0733ee3313",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"] == "blender.material.create_and_assign"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"] == "blender.material.create_and_assign"
+        )
+        self.assertNotIn("procedureMaterialization", frozen["recipes"][frozen_index])
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.material.create_and_assign.semantic"
+        ]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(mcp["toolName"], tool_name)
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            parameter_names,
+        )
+        self.assertEqual(
+            mcp["operations"][3]["parameters"][1]["source"]["transform"],
+            "json_identity",
+        )
+        self.assertEqual(
+            mcp["operations"][3]["parameters"][4]["source"]["transform"],
+            "json_identity",
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_freezes_168_and_binds_material_palette_operation_mcp_in_169(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.68.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "688b8a3e0fd6942b3372559a61a99ce037fa9e73acc1e8c2af0fdd0733ee3313",
+        )
+        active_bytes = RESOURCE_PATH.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(active_bytes).hexdigest(),
+            "7a61ec921f1a61c884f515e3bba5e164a6e9d8686226031fd373f928574d4107",
+        )
+        frozen = json.loads(frozen_bytes)
+        active = json.loads(active_bytes)
+        frozen_index = next(
+            index
+            for index, recipe in enumerate(frozen["recipes"])
+            if recipe["actionName"]
+            == "blender.material.create_palette_and_assign"
+        )
+        active_index = next(
+            index
+            for index, recipe in enumerate(active["recipes"])
+            if recipe["actionName"]
+            == "blender.material.create_palette_and_assign"
+        )
+        self.assertNotIn("procedureMaterialization", frozen["recipes"][frozen_index])
+        mcp = active["recipes"][active_index]["procedureMaterialization"]["mcp"]
+        self.assertEqual(mcp["source"], "catalog.operation_level_mcp")
+        self.assertEqual(
+            mcp["toolName"],
+            "operatingline.blender.material.palette.execute-next",
+        )
+        self.assertEqual(
+            tuple(operation["sourceOperationId"] for operation in mcp["operations"]),
+            (
+                "workspace.shading",
+                "panel.material_properties",
+                "semantic.palette_entries",
+                "semantic.assign_targets",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter["name"] for parameter in operation["parameters"])
+                for operation in mcp["operations"]
+            ),
+            ((), (), ("materials",), ()),
+        )
+        self.assertEqual(
+            mcp["operations"][2]["parameters"][0]["source"]["transform"],
+            "json_identity",
+        )
+
+        active["catalogVersion"] = frozen["catalogVersion"]
+        active["recipes"][active_index] = frozen["recipes"][frozen_index]
+        self.assertEqual(active, frozen)
+
+    def test_rejects_menu_candidate_authority_elevation_and_ordered_evidence_drift(
+        self,
+    ) -> None:
+        def candidate(raw: dict) -> dict:
+            recipe = next(
+                item
+                for item in raw["recipes"]
+                if item["actionName"] == "blender.mesh.edit_subdivide"
+            )
+            return recipe["procedureMaterialization"]["menuCandidate"]
+
+        elevated = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        candidate(elevated)["executionAuthority"] = "accepted_replay_next_step"
+        with self.assertRaisesRegex(ValueError, "unsupported executionAuthority"):
+            self._load_raw(elevated)
+
+        duplicated = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        candidate(duplicated)["operations"][1]["id"] = candidate(duplicated)[
+            "operations"
+        ][0]["id"]
+        with self.assertRaisesRegex(ValueError, "duplicate operation id"):
+            self._load_raw(duplicated)
+
+        drifted = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        declaration = candidate(drifted)
+        declaration["nativeEvidence"] = {
+            "kind": "bounded_blender_ui_probe",
+            "executorId": "blender.mesh_edit_subdivide_menu.event_simulate.v1",
+            "hostVersions": ["4.5.3", "5.1.1"],
+            "managedActionExecuted": False,
+            "managedReceiptCreated": False,
+            "managedReplacementMeshCreated": False,
+            "nativeMutationKind": "in_place_edit_mesh_subdivide",
+            "operationIds": [
+                operation["id"] for operation in declaration["operations"][1:]
+            ],
+            "nativeUndoCheckpointRequired": True,
+            "nativeUndoDepth": 1,
+            "nativeRedoDepth": 1,
+        }
+        with self.assertRaisesRegex(ValueError, "bind every ordered operation"):
+            self._load_raw(drifted)
+
+    def test_rejects_tampered_transform_operation_level_mcp(self) -> None:
+        raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+
+        def transform_mcp(candidate: dict) -> dict:
+            return next(
+                recipe
+                for recipe in candidate["recipes"]
+                if recipe["actionName"] == "blender.geometry_nodes.create_transform"
+            )["procedureMaterialization"]["mcp"]
+
+        cases: tuple[tuple[str, Callable[[dict], None], str], ...] = (
+            (
+                "operation order",
+                lambda candidate: transform_mcp(candidate)["operations"][0].__setitem__(
+                    "sourceOperationId", "node.group_input"
+                ),
+                "exact Transform Geometry order",
+            ),
+            (
+                "tool",
+                lambda candidate: transform_mcp(candidate).__setitem__(
+                    "toolName", "operatingline.blender.action.execute"
+                ),
+                "unsupported toolName",
+            ),
+            (
+                "parameter placement",
+                lambda candidate: transform_mcp(candidate)["operations"][1].__setitem__(
+                    "parameters",
+                    deepcopy(transform_mcp(candidate)["operations"][0]["parameters"]),
+                ),
+                "parameters do not match",
+            ),
+            (
+                "unknown field",
+                lambda candidate: transform_mcp(candidate).__setitem__(
+                    "python", "import bpy"
+                ),
+                "unknown field python",
+            ),
+        )
+        for label, tamper, expected_error in cases:
+            with self.subTest(label=label):
+                candidate = deepcopy(raw)
+                tamper(candidate)
+                with self.assertRaisesRegex(ValueError, expected_error):
+                    self._load_raw(candidate)
+
+    def test_parses_complete_node_connections_and_rejects_malformed_targets(self) -> None:
+        recipe = BUNDLED_INTERACTION_CATALOG.recipe_for(
+            "blender.geometry_nodes.create_transform"
+        )
+        assert recipe is not None
+        input_link, output_link = recipe.guidance.steps[5:7]
+        assert input_link.connection is not None
+        assert output_link.connection is not None
+        self.assertEqual(
+            (
+                input_link.connection.from_node,
+                input_link.connection.from_socket,
+                input_link.connection.to_node,
+                input_link.connection.to_socket,
+            ),
+            ("NodeGroupInput", "Geometry", "GeometryNodeTransform", "Geometry"),
+        )
+        self.assertEqual(
+            (
+                output_link.connection.from_node,
+                output_link.connection.from_socket,
+                output_link.connection.to_node,
+                output_link.connection.to_socket,
+            ),
+            ("GeometryNodeTransform", "Geometry", "NodeGroupOutput", "Geometry"),
+        )
+
+        raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        transform = next(
+            candidate
+            for candidate in raw["recipes"]
+            if candidate["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        input_target = transform["guidance"]["steps"][5]["target"]
+        del input_target["connection"]["toSocket"]
+        with self.assertRaisesRegex(ValueError, "missing toSocket"):
+            self._load_raw(raw)
+
+        wrong_kind = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        transform = next(
+            candidate
+            for candidate in wrong_kind["recipes"]
+            if candidate["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        transform["guidance"]["steps"][5]["target"]["kind"] = "node"
+        with self.assertRaisesRegex(ValueError, "requires a semantic target"):
+            self._load_raw(wrong_kind)
+
+        dangling = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        transform = next(
+            candidate
+            for candidate in dangling["recipes"]
+            if candidate["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        transform["guidance"]["steps"][5]["target"]["connection"][
+            "fromNode"
+        ] = "MissingNode"
+        with self.assertRaisesRegex(
+            ValueError,
+            "fromNode MissingNode must reference exactly one declared node target",
+        ):
+            self._load_raw(dangling)
+
+        wrong_intent = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        transform = next(
+            candidate
+            for candidate in wrong_intent["recipes"]
+            if candidate["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        transform["guidance"]["steps"][5]["intent"] = "configure"
+        with self.assertRaisesRegex(ValueError, "must use execute intent"):
+            self._load_raw(wrong_intent)
+
+        duplicate_node = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        transform = next(
+            candidate
+            for candidate in duplicate_node["recipes"]
+            if candidate["actionName"] == "blender.geometry_nodes.create_transform"
+        )
+        transform["guidance"]["steps"][2]["target"][
+            "hostId"
+        ] = "GeometryNodeTransform"
+        transform["guidance"]["steps"][5]["target"]["connection"][
+            "fromNode"
+        ] = "GeometryNodeTransform"
+        with self.assertRaisesRegex(
+            ValueError,
+            "must reference exactly one declared node target",
+        ):
+            self._load_raw(duplicate_node)
 
     def test_rejects_invalid_or_foreign_menu_proof_execution(self) -> None:
         def menu(raw: dict, action_name: str = "blender.mesh.create_uv_sphere") -> dict:
@@ -1903,6 +4028,53 @@ class InteractionCatalogTests(unittest.TestCase):
         materialization = recipe.procedure_materialization
         self.assertEqual(materialization.menu.availability, "unavailable")
         self.assertEqual(materialization.mcp.availability, "available")
+        mcp = materialization.mcp
+        self.assertEqual(
+            (
+                mcp.source,
+                mcp.semantic_binding,
+                mcp.parameter_binding,
+                mcp.server_name,
+                mcp.tool_name,
+                mcp.authorization,
+                mcp.result_binding,
+            ),
+            (
+                "catalog.operation_level_mcp",
+                "ordered_leaf_operations",
+                "ordered_parameter_operations",
+                "operating-line",
+                "operatingline.blender.mesh.edit-bevel-edges.execute-next",
+                "accepted_replay_next_step",
+                "companion_leaf_operation_progress",
+            ),
+        )
+        assert mcp.mcp_operations is not None
+        self.assertEqual(
+            tuple(operation.source_operation_id for operation in mcp.mcp_operations),
+            (
+                "workspace.layout",
+                "semantic.select_owned_mesh",
+                "mode.edit_mesh",
+                "menu.edge",
+                "operator.bevel_edges",
+                "semantic.managed_bevel_edges_contract",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter.name for parameter in operation.parameters)
+                for operation in mcp.mcp_operations
+            ),
+            (
+                ("targetId", "resultMeshId"),
+                (),
+                (),
+                (),
+                ("width", "segments", "profile"),
+                ("resultMeshName",),
+            ),
+        )
         shortcut = materialization.shortcut
         self.assertEqual(
             (
@@ -2205,6 +4377,24 @@ class InteractionCatalogTests(unittest.TestCase):
             tuple(item.argument_name for item in shortcut.omitted_action_arguments),
             ("targetId", "resultMeshId", "resultMeshName"),
         )
+        mcp = materialization.mcp
+        _, operation_ids, parameter_names, tool_name = OPERATION_LEVEL_MCP_PROFILES[
+            "blender.mesh.edit_poke_faces.semantic"
+        ]
+        self.assertEqual(mcp.source, "catalog.operation_level_mcp")
+        self.assertEqual(mcp.tool_name, tool_name)
+        assert mcp.mcp_operations is not None
+        self.assertEqual(
+            tuple(operation.source_operation_id for operation in mcp.mcp_operations),
+            operation_ids,
+        )
+        self.assertEqual(
+            tuple(
+                tuple(parameter.name for parameter in operation.parameters)
+                for operation in mcp.mcp_operations
+            ),
+            parameter_names,
+        )
 
     def test_loads_byte_frozen_single_action_level_mcp_catalog(self) -> None:
         frozen_path = (
@@ -2216,7 +4406,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.34.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -2243,7 +4433,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.35.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -2275,7 +4465,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.36.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -2308,7 +4498,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.37.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -2342,7 +4532,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.39.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -2370,7 +4560,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.40.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -2401,7 +4591,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.41.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -2425,7 +4615,7 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.43.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(frozen_path, FROZEN_ACTION_CATALOG_122_PATH)
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -4077,6 +6267,8 @@ class InteractionCatalogTests(unittest.TestCase):
             "blender.mesh.edit_bevel_edges.semantic",
             "blender.mesh.edit_inset_faces.semantic",
             "blender.mesh.edit_poke_faces.semantic",
+            "blender.geometry_nodes.create_light_trails.semantic",
+            "blender.lookdev.create_light_trails_scene.semantic",
             "blender.modifier.add_solidify.semantic",
             "blender.modifier.add_mirror.semantic",
             "blender.rig.create_armature.semantic",

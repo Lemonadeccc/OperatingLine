@@ -22,6 +22,27 @@ from ..domain import (
     bundled_action_catalog_data,
     load_task_tree_data,
 )
+from ..domain.guided_geometry_leaf_profiles import (
+    ARMATURE_LEAF_OPERATION_ACTION,
+    BEVEL_MODIFIER_LEAF_OPERATION_ACTION,
+    EDIT_BEVEL_LEAF_OPERATION_ACTION,
+    EDIT_EXTRUDE_REGION_LEAF_OPERATION_ACTION,
+    EDIT_INSET_LEAF_OPERATION_ACTION,
+    EDIT_POKE_LEAF_OPERATION_ACTION,
+    EDIT_TRIANGULATE_LEAF_OPERATION_ACTION,
+    GUIDED_GEOMETRY_LEAF_OPERATION_PROFILES,
+    GUIDED_LEAF_OPERATION_OBSERVATION_PROFILES,
+    GUIDED_LEAF_OPERATION_PARAMETER_TRANSFORMS,
+    LIGHT_TRAILS_LEAF_OPERATION_ACTION,
+    MATERIAL_PALETTE_LEAF_OPERATION_ACTION,
+    MIRROR_LEAF_OPERATION_ACTION,
+    POSE_ANIMATION_LEAF_OPERATION_ACTION,
+    SKIN_WEIGHTS_LEAF_OPERATION_ACTION,
+    SINGLE_MATERIAL_LEAF_OPERATION_ACTION,
+    SOLIDIFY_LEAF_OPERATION_ACTION,
+    SUBDIVISION_SURFACE_LEAF_OPERATION_ACTION,
+    TRANSFORM_GEOMETRY_LEAF_OPERATION_ACTION,
+)
 from ..infrastructure.blender_actions import action_registry
 from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
@@ -48,6 +69,17 @@ from .revision_review import (
 
 COMPANION_VERSION = "0.1.0"
 MAX_DEFERRED_PROPOSALS = 8
+MAX_COMPANION_REPORT_SEQUENCE = 9_007_199_254_740_991
+OBSERVATION_POLICY_PROTOCOL_VERSIONS = frozenset(
+    {"1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0"}
+)
+NATIVE_UNDO_PROTOCOL_VERSIONS = frozenset({"1.5.0", "1.6.0", "1.7.0"})
+EXECUTION_TRACK_PROTOCOL_VERSIONS = frozenset({"1.6.0", "1.7.0"})
+EXECUTION_TRACK_MINIMUM_LEASE_VALIDITY_SECONDS = 5.0
+EXECUTION_TRACK_LEASE_REFRESH_TIMEOUT_SECONDS = 2.0
+REVISION_OPERATION_PROTOCOL_VERSIONS = frozenset(
+    {"1.4.0", "1.5.0", "1.6.0", "1.7.0"}
+)
 
 
 class ProposalQueueFullError(ValueError):
@@ -61,6 +93,7 @@ class CompanionController:
         *,
         session_id: str | None = None,
         document_incarnation_id: str | None = None,
+        initial_report_sequence: int = 0,
     ) -> None:
         self.instance_id = self._canonical_uuid(instance_id, "Companion instance id")
         self.session_id = self._canonical_uuid(session_id, "Companion session id")
@@ -75,7 +108,17 @@ class CompanionController:
         self._stopping_transports: list[CompanionTransport] = []
         self._timer_registered = False
         self._timer_callback = self.pump
-        self._sequence = 0
+        if (
+            isinstance(initial_report_sequence, bool)
+            or not isinstance(initial_report_sequence, int)
+            or initial_report_sequence < 0
+            or initial_report_sequence > MAX_COMPANION_REPORT_SEQUENCE
+        ):
+            raise ValueError(
+                "Initial Companion report sequence must be a non-negative safe integer"
+            )
+        self._sequence = initial_report_sequence
+        self._connected_session_reported = False
         self.last_report: dict[str, Any] | None = None
         self.last_delivered_sequence = 0
         self.pending_plan: dict[str, Any] | None = None
@@ -115,10 +158,21 @@ class CompanionController:
         self._pending_proposal_decisions: dict[str, dict[str, Any]] = {}
         self._last_accepted_proposal_id: str | None = None
         self._last_accepted_proposal_decision: dict[str, Any] | None = None
+        self._seen_leaf_operation_request_ids: set[str] = set()
+        self._pending_leaf_operation_recovery_witness_id: str | None = None
+        self._active_leaf_operation_recovery_challenge: dict[str, Any] | None = None
+        self._pending_leaf_operation_recovery_ack_id: str | None = None
+        self._leaf_operation_recovery_retry_signature: str | None = None
+        self._leaf_operation_recovery_retry_at = 0.0
         self.execution_track_preflight_request: dict[str, Any] | None = None
         self.execution_track_preflight_status: dict[str, Any] | None = None
         self.execution_track_preflight_message = ""
         self.execution_track_execution_message = ""
+        self._execution_track_driver: Any | None = None
+        self._execution_track_delivery: dict[str, Any] | None = None
+        self._execution_track_outbox_cache: dict[str, Any] | None = None
+        self._execution_track_restore_timer_registered = False
+        self._execution_track_managed_commit_token: str | None = None
         self._artifact_attestation_execution_id: str | None = None
         self._artifact_attestation: dict[str, Any] | None = None
         self._shortcut_proof_driver: Any | None = None
@@ -155,6 +209,12 @@ class CompanionController:
         return connected
 
     @property
+    def report_sequence(self) -> int:
+        """Return the last allocated report sequence for controller replacement."""
+
+        return self._sequence
+
+    @property
     def shortcut_mutation_blocked(self) -> bool:
         from ..infrastructure.edit_subdivide_shortcut_history import (
             edit_subdivide_shortcut_history_mutation_locked,
@@ -164,6 +224,8 @@ class CompanionController:
         return (
             self._shortcut_proof_driver is not None
             or self._menu_control_proof_driver is not None
+            or self._execution_track_driver is not None
+            or self._execution_track_delivery is not None
             or shortcut_history_mutation_locked()
             or edit_subdivide_shortcut_history_mutation_locked()
             or self._menu_control_history.mutation_locked
@@ -234,6 +296,10 @@ class CompanionController:
         if document_replaced:
             self._abandon_active_shortcut_proof()
             self._abandon_active_menu_control_proof()
+            self._cancel_active_execution_track(
+                "Execution-track Blender document was replaced",
+                replaced=True,
+            )
         self.disconnect(
             flush_timeout=0.0,
             wait_timeout=0.1,
@@ -317,6 +383,9 @@ class CompanionController:
         )
         self._cancel_active_menu_control_proof(
             "Companion disconnected while menu-control proof was executing"
+        )
+        self._cancel_active_execution_track(
+            "Companion disconnected during execution-track execution"
         )
         transport = self._transport
         self._transport = None
@@ -484,6 +553,31 @@ class CompanionController:
         if had_state:
             self.status = "Menu-control proof recovery required"
 
+    def _cancel_active_execution_track(self, reason: str, *, replaced: bool = False) -> None:
+        """Stop v2 native input without attempting an unauthorized replay."""
+
+        driver = self._execution_track_driver
+        if driver is not None:
+            abandon = getattr(driver, "abandon", None)
+            try:
+                if callable(abandon):
+                    abandon()
+                else:
+                    self._hard_stop_shortcut_driver(driver)
+            except Exception as error:
+                self._hard_stop_shortcut_driver(driver)
+                reason = f"{reason}; driver stop failed: {error}"
+        self._execution_track_driver = None
+        self._execution_track_restore_timer_registered = False
+        self._execution_track_managed_commit_token = None
+        if replaced:
+            self._execution_track_delivery = None
+            self._execution_track_outbox_cache = None
+        if driver is not None or self._execution_track_delivery is not None:
+            self.execution_track_execution_message = reason
+            self.error = reason
+            self.status = "Execution-track recovery required"
+
     @staticmethod
     def _hard_stop_shortcut_driver(driver: Any) -> None:
         """Best-effort no-Scene stop for a malformed legacy driver instance."""
@@ -506,8 +600,9 @@ class CompanionController:
     def _queue_proposal_decision(
         self, proposal_id: str, decision: str
     ) -> dict[str, Any]:
+        _connected, protocol_version = self._transport_connection_state()
         payload = {
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": protocol_version,
             "decisionId": str(uuid.uuid4()),
             "proposalId": proposal_id,
             "adapterId": "blender",
@@ -711,8 +806,10 @@ class CompanionController:
         if self.dialogue_handoff.blocks_plan_work:
             raise ValueError("Finish the streamed dialogue workflow before merging")
         session = get_session()
-        if session.receipts:
-            raise ValueError("Use Back to return the active walkthrough to its start")
+        if session.has_execution_state:
+            raise ValueError(
+                "Finish/abort leaf operations and use Back before merging"
+            )
         self.clear_revision_draft()
         self.add_revision_reference("active", session.root.id)
         self._revision_operation_kind = "merge"
@@ -1494,7 +1591,7 @@ class CompanionController:
         revision_operation = proposal.get("revisionOperation")
         if (
             revision_request_id is not None
-            and proposal_protocol_version in {"1.4.0", "1.5.0", PROTOCOL_VERSION}
+            and proposal_protocol_version in REVISION_OPERATION_PROTOCOL_VERSIONS
             and revision_operation is None
         ):
             raise ValueError(
@@ -1505,7 +1602,7 @@ class CompanionController:
                 raise ValueError(
                     "A standalone proposal cannot declare a revision operation"
                 )
-            if proposal_protocol_version not in {"1.4.0", "1.5.0", PROTOCOL_VERSION}:
+            if proposal_protocol_version not in REVISION_OPERATION_PROTOCOL_VERSIONS:
                 raise ValueError("Explicit revision operations require protocol 1.4+")
             validate_revision_operation(
                 revision_operation,
@@ -1955,10 +2052,10 @@ class CompanionController:
                 self.status = "Plan proposal base changed"
                 self.report("error", error=self.error)
                 return False
-        if get_session().receipts:
+        if get_session().has_execution_state:
             message = (
-                "Plan proposal is blocked; use Back to roll the active walkthrough "
-                "to its start first"
+                "Plan proposal is blocked; finish/abort leaf operations and use Back "
+                "to reach the start first"
             )
             self.error = message
             self.status = "Plan proposal blocked"
@@ -2141,6 +2238,58 @@ class CompanionController:
         return None
 
     @staticmethod
+    def _execution_track_lease_is_monotonic(
+        delivered: Any, current: Any
+    ) -> bool:
+        """Accept only an exact document lease whose heartbeat expiry advanced."""
+
+        keys = {
+            "leaseId",
+            "sessionId",
+            "target",
+            "documentIncarnationId",
+            "expiresAt",
+        }
+        if (
+            not isinstance(delivered, dict)
+            or not isinstance(current, dict)
+            or set(delivered) != keys
+            or set(current) != keys
+        ):
+            return False
+        if any(
+            delivered[field] != current[field]
+            for field in (
+                "leaseId",
+                "sessionId",
+                "target",
+                "documentIncarnationId",
+            )
+        ):
+            return False
+        try:
+            delivered_expiry = CompanionController._preflight_timestamp(
+                delivered["expiresAt"], "Delivered execution-track lease expiry"
+            )
+            current_expiry = CompanionController._preflight_timestamp(
+                current["expiresAt"], "Current execution-track lease expiry"
+            )
+        except (TypeError, ValueError):
+            return False
+        return current_expiry >= delivered_expiry
+
+    def _fresh_execution_track_lease(self) -> dict[str, Any]:
+        """Keep long native UI work inside one live document lease."""
+
+        transport = self._transport
+        if transport is None:
+            raise RuntimeError("Execution-track transport is unavailable")
+        return transport.document_lease_with_minimum_validity(
+            minimum_validity_seconds=EXECUTION_TRACK_MINIMUM_LEASE_VALIDITY_SECONDS,
+            timeout=EXECUTION_TRACK_LEASE_REFRESH_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
     def _execution_track_override_data(source_step: dict[str, Any]) -> dict[str, Any]:
         override = source_step.get("executionTrackOverride")
         if not isinstance(override, dict):
@@ -2156,7 +2305,10 @@ class CompanionController:
         transport = self._transport
         if transport is None or not transport.running or transport.session_snapshot is None:
             raise ValueError("Connect to the OperatingLine runtime before verifying the track")
-        if transport.session_snapshot.negotiated_guide_protocol_version != "1.6.0":
+        negotiated_protocol_version = (
+            transport.session_snapshot.negotiated_guide_protocol_version
+        )
+        if negotiated_protocol_version not in EXECUTION_TRACK_PROTOCOL_VERSIONS:
             raise ValueError("Execution-track preflight requires Guide protocol 1.6")
         decision = self._last_accepted_proposal_decision
         if self._last_accepted_proposal_id is None or decision is None:
@@ -2200,7 +2352,7 @@ class CompanionController:
             "target": {"adapterId": "blender", "instanceId": self.instance_id},
             "proposalId": self._last_accepted_proposal_id,
             "plan": {
-                "protocolVersion": "1.6.0",
+                "protocolVersion": negotiated_protocol_version,
                 "id": session.plan_id,
                 "revision": session.revision,
                 "contentSha256": session.plan_content_sha256,
@@ -2309,7 +2461,7 @@ class CompanionController:
             )
             local_decision = self._last_accepted_proposal_decision
             expected_decision = None if local_decision is None else {
-                "protocolVersion": "1.6.0",
+                "protocolVersion": request["plan"]["protocolVersion"],
                 "decisionId": local_decision["decisionId"],
                 "proposalId": local_decision["proposalId"],
                 "adapterId": local_decision["adapterId"],
@@ -2413,7 +2565,7 @@ class CompanionController:
                 self._preflight_sha256(value, f"Preflight {label} hash")
             session = get_session()
             expected_plan = {
-                "protocolVersion": "1.6.0", "id": session.plan_id,
+                "protocolVersion": request["plan"]["protocolVersion"], "id": session.plan_id,
                 "revision": session.revision, "contentSha256": session.plan_content_sha256,
             }
             last_report = self.last_report
@@ -2553,16 +2705,199 @@ class CompanionController:
             self.error = error_message
         transport.submit_execution_track_preflight_result(result)
 
+    def _validate_execution_track_execution_authority(
+        self,
+        delivery: Any,
+        *,
+        require_idle_driver: bool,
+        allow_owned_history: bool = False,
+    ) -> tuple[DemoSession, Any]:
+        """Rebind server-vetted v2 authority to the exact live Blender session."""
+
+        from .. import get_session
+        from ..infrastructure.edit_subdivide_shortcut_history import (
+            edit_subdivide_shortcut_history_mutation_locked,
+        )
+        from ..infrastructure.execution_track_execution import canonical_sha256
+        from ..infrastructure.menu_control_proof import (
+            EXECUTOR_ID,
+            OPERATION_IDS,
+            TARGET_PROFILE,
+            expected_arguments_payload,
+        )
+        from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
+
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Execution-track execution requires a live Companion lease")
+        delivery = self._preflight_exact_keys(
+            delivery,
+            {"binding", "deliveryId", "lease", "dispatchedAt"},
+            "Execution-track delivery",
+        )
+        binding = delivery["binding"]
+        if not isinstance(binding, dict) or binding.get("formatVersion") != "2.0.0":
+            raise ValueError("Execution-track binding is not v2")
+        binding_content = {
+            key: value for key, value in binding.items() if key != "bindingContentSha256"
+        }
+        if binding.get("bindingContentSha256") != canonical_sha256(binding_content):
+            raise ValueError("Execution-track binding canonical hash changed")
+        current_lease = transport.current_document_lease
+        if not self._execution_track_lease_is_monotonic(
+            delivery.get("lease"), current_lease
+        ):
+            raise ValueError("Execution-track delivery lease is not current")
+        target = {"adapterId": "blender", "instanceId": self.instance_id}
+        if binding.get("target") != target or current_lease.get("target") != target:
+            raise ValueError("Execution-track delivery targets another Companion")
+        dispatched_at = self._preflight_timestamp(
+            delivery["dispatchedAt"], "Execution-track dispatch time"
+        )
+        delivered_expires_at = self._preflight_timestamp(
+            delivery["lease"]["expiresAt"], "Execution-track delivery lease expiry"
+        )
+        expires_at = self._preflight_timestamp(
+            current_lease["expiresAt"], "Execution-track lease expiry"
+        )
+        if (
+            not dispatched_at < delivered_expires_at
+            or datetime.now(timezone.utc) >= expires_at
+        ):
+            raise ValueError("Execution-track delivery lease expired")
+        expected_executor = {
+            "executorId": "blender.uv_sphere_menu_proven_managed_commit.v2",
+            "proofExecutorId": EXECUTOR_ID,
+            "targetProfile": TARGET_PROFILE,
+            "executionBoundary": "proof_restore_then_managed_commit",
+            "authorization": "accepted_replay_next_step",
+            "proofOperationIds": list(OPERATION_IDS),
+            "nativeUndoDepth": 8,
+            "commitActionName": "blender.mesh.create_uv_sphere",
+            "automaticReplay": False,
+        }
+        if binding.get("executor") != expected_executor:
+            raise ValueError("Execution-track executor authority changed")
+        preflight = binding.get("preflightBinding")
+        if not isinstance(preflight, dict):
+            raise ValueError("Execution-track preflight binding is unavailable")
+        preflight_content = {
+            key: value
+            for key, value in preflight.items()
+            if key != "bindingContentSha256"
+        }
+        if preflight.get("bindingContentSha256") != canonical_sha256(preflight_content):
+            raise ValueError("Execution-track preflight binding hash changed")
+        if (
+            preflight.get("requestId") != binding.get("requestId")
+            or preflight.get("proposal", {}).get("id") != binding.get("proposalId")
+            or preflight.get("plan") != binding.get("plan")
+            or preflight.get("executionId") != binding.get("executionId")
+            or preflight.get("leafId") != binding.get("leafId")
+            or preflight.get("override") != binding.get("override")
+            or preflight.get("expectedState") != binding.get("expectedState")
+            or preflight.get("action", {}).get("name")
+            != expected_executor["commitActionName"]
+            or preflight.get("action", {}).get("arguments")
+            != expected_arguments_payload()
+        ):
+            raise ValueError("Execution-track binding changed preflight authority")
+        local_decision = self._last_accepted_proposal_decision
+        expected_decision = (
+            None
+            if local_decision is None
+            else {
+                "protocolVersion": preflight["plan"]["protocolVersion"],
+                "decisionId": local_decision["decisionId"],
+                "proposalId": local_decision["proposalId"],
+                "adapterId": local_decision["adapterId"],
+                "instanceId": local_decision["instanceId"],
+                "decision": local_decision["decision"],
+                "occurredAt": local_decision["decidedAt"],
+            }
+        )
+        if (
+            self._last_accepted_proposal_id != binding.get("proposalId")
+            or expected_decision != preflight.get("acceptance", {}).get("decision")
+            or expected_decision is None
+            or self.proposed_plan is not None
+            or self._proposal_candidates
+            or self.pending_plan is not None
+        ):
+            raise ValueError("Execution-track local acceptance authority changed")
+        session = get_session()
+        last_report = self.last_report
+        expected_plan = {
+            "protocolVersion": preflight["plan"]["protocolVersion"],
+            "id": session.plan_id,
+            "revision": session.revision,
+            "contentSha256": session.plan_content_sha256,
+        }
+        if (
+            not session.started
+            or session.execution_id is None
+            or session.observation_blocked
+            or binding.get("plan") != expected_plan
+            or binding.get("executionId") != session.execution_id
+            or not isinstance(last_report, dict)
+            or binding.get("expectedState")
+            != {
+                "reportId": last_report.get("reportId"),
+                "sequence": last_report.get("sequence"),
+            }
+            or binding.get("authorizedStartState", {}).get("reportContentSha256")
+            != canonical_sha256(last_report)
+        ):
+            raise ValueError("Execution-track active walkthrough state changed")
+        next_index = session.active_index + 1
+        candidate = session.steps[next_index] if 0 <= next_index < len(session.steps) else None
+        source_step = None if candidate is None else self._source_step(session, candidate.id)
+        if (
+            candidate is None
+            or source_step is None
+            or candidate.id != binding.get("leafId")
+            or source_step != preflight.get("step")
+            or source_step.get("action") != preflight.get("action")
+            or source_step.get("executionTrackOverride") != binding.get("override")
+        ):
+            raise ValueError("Execution-track exact next leaf changed")
+        checkpoint = last_report.get("nativeUndoCheckpoint")
+        authorized_checkpoint = binding.get("authorizedStartState", {}).get("checkpoint")
+        if (
+            not isinstance(checkpoint, dict)
+            or not isinstance(authorized_checkpoint, dict)
+            or checkpoint.get("checkpointId")
+            != authorized_checkpoint.get("checkpointId")
+            or canonical_sha256(checkpoint)
+            != authorized_checkpoint.get("contentSha256")
+        ):
+            raise ValueError("Execution-track native checkpoint changed")
+        if require_idle_driver and self._execution_track_driver is not None:
+            raise ValueError("Execution-track native input is already active")
+        if (
+            self._shortcut_proof_driver is not None
+            or self._menu_control_proof_driver is not None
+            or shortcut_history_mutation_locked()
+            or edit_subdivide_shortcut_history_mutation_locked()
+            or (
+                self._menu_control_history.mutation_locked
+                and not allow_owned_history
+            )
+            or self._menu_control_recovery_locked
+        ):
+            raise ValueError("Another native-input history owner is active")
+        return session, candidate
+
     def _handle_execution_track_execution_delivery(self, delivery: Any) -> None:
-        """Persist and submit a v2 baseline-attested, no-mutation terminal pair."""
+        """Persist the exact baseline before exposing or scheduling native input."""
         transport = self._transport
         if transport is None:
             return
         from ..infrastructure.execution_track_execution import (
-            EXECUTOR_GAP,
-            build_fail_closed_outbox,
+            build_active_outbox,
+            build_baseline_progress,
             load_outbox,
-            persist_outbox,
+            resubmit_outbox,
         )
 
         request_id = None
@@ -2571,24 +2906,41 @@ class CompanionController:
             request_id = binding.get("requestId") if isinstance(binding, dict) else None
             existing = load_outbox(bpy.context.scene)
             if existing is not None:
-                if existing["result"].get("requestId") != request_id:
+                durable_request_id = existing.get("progress", {}).get(
+                    "binding", {}
+                ).get("requestId")
+                if durable_request_id != request_id:
                     raise RuntimeError(
                         "another durable execution-track result awaits acknowledgement"
                     )
-                outbox = existing
+                self._execution_track_delivery = deepcopy(delivery)
+                self._execution_track_outbox_cache = deepcopy(existing)
+                transport.acknowledge_execution_track_execution_delivery(
+                    request_id, persisted=True
+                )
+                resubmit_outbox(transport, bpy.context.scene)
+                self.execution_track_execution_message = (
+                    "Durable execution-track state queued for reconciliation"
+                )
+                self.status = "Execution-track recovery pending"
+                return
             else:
-                outbox = build_fail_closed_outbox(
+                self._validate_execution_track_execution_authority(
+                    delivery, require_idle_driver=True
+                )
+                progress = build_baseline_progress(
                     delivery,
                     instance_id=self.instance_id,
                     last_report=self.last_report,
                     current_lease=transport.current_document_lease,
                 )
-                persist_outbox(bpy.context.scene, outbox)
+                outbox = build_active_outbox(progress)
+                self._persist_execution_track_outbox(outbox)
+                self._execution_track_delivery = deepcopy(delivery)
             transport.acknowledge_execution_track_execution_delivery(
                 request_id, persisted=True
             )
             transport.submit_execution_track_execution_progress(outbox["progress"])
-            transport.submit_execution_track_execution_result(outbox["result"])
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             if isinstance(request_id, str):
                 transport.acknowledge_execution_track_execution_delivery(
@@ -2598,9 +2950,755 @@ class CompanionController:
             self.error = self.execution_track_execution_message
             self.status = "Execution-track recovery required"
             return
-        self.execution_track_execution_message = EXECUTOR_GAP
-        self.error = EXECUTOR_GAP
-        self.status = "Execution-track stopped before mutation"
+        self.execution_track_execution_message = (
+            "Baseline persisted; waiting for runtime acknowledgement before native input"
+        )
+        self.error = ""
+        self.status = "Execution-track baseline attested"
+
+    def _persist_execution_track_outbox(self, outbox: dict[str, Any]) -> None:
+        from ..infrastructure.execution_track_execution import persist_outbox
+
+        persist_outbox(bpy.context.scene, outbox)
+        self._execution_track_outbox_cache = deepcopy(outbox)
+
+    def _execution_track_outbox(
+        self, request_id: Any | None = None
+    ) -> dict[str, Any]:
+        from ..infrastructure.execution_track_execution import load_outbox
+
+        outbox = load_outbox(bpy.context.scene)
+        cached = self._execution_track_outbox_cache
+        checkpoint = self._menu_control_history.current_checkpoint()
+        if isinstance(cached, dict) and checkpoint is not None:
+            outbox = deepcopy(cached)
+        if outbox is None:
+            raise RuntimeError("Durable execution-track outbox is unavailable")
+        durable_request_id = outbox.get("progress", {}).get("binding", {}).get(
+            "requestId"
+        )
+        if request_id is not None and durable_request_id != request_id:
+            raise RuntimeError("Durable execution-track request identity changed")
+        self._execution_track_outbox_cache = deepcopy(outbox)
+        return outbox
+
+    def _submit_execution_track_terminal(
+        self, result: dict[str, Any], *, recovery: bool
+    ) -> None:
+        transport = self._transport
+        if transport is None:
+            raise RuntimeError("Execution-track transport is unavailable")
+        outbox = self._execution_track_outbox(result.get("requestId"))
+        durable = deepcopy(outbox)
+        durable["result"] = deepcopy(result)
+        self._persist_execution_track_outbox(durable)
+        transport.submit_execution_track_execution_result(result)
+        if recovery:
+            transport.enable_execution_track_execution_recovery_poll()
+
+    def _terminate_execution_track_before_managed(
+        self,
+        error: str,
+        *,
+        no_mutation: bool = False,
+        reason: str = "proof_history_locked",
+    ) -> None:
+        from ..infrastructure.execution_track_execution import (
+            build_no_mutation_result,
+            build_recovery_required_result,
+        )
+
+        transport = self._transport
+        try:
+            outbox = self._execution_track_outbox()
+            progress = outbox["progress"]
+            current_lease = None if transport is None else transport.current_document_lease
+            if current_lease is None:
+                raise RuntimeError("current Companion lease is unavailable")
+            result = (
+                build_no_mutation_result(
+                    progress, current_lease=current_lease, error=error
+                )
+                if no_mutation
+                else build_recovery_required_result(
+                    progress,
+                    current_lease=current_lease,
+                    reason=reason,
+                    error=error,
+                )
+            )
+            self._submit_execution_track_terminal(
+                result, recovery=not no_mutation
+            )
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as reporting_error:
+            error = f"{error}; terminal persistence failed closed: {reporting_error}"
+            if transport is not None:
+                transport.enable_execution_track_execution_recovery_poll()
+        self._execution_track_driver = None
+        self._execution_track_managed_commit_token = None
+        self.execution_track_execution_message = error
+        self.error = error
+        self.status = (
+            "Execution-track stopped before mutation"
+            if no_mutation
+            else "Execution-track recovery required"
+        )
+        guidance_error = self._restore_menu_control_native_guidance()
+        if guidance_error is not None:
+            self.error = guidance_error
+            self.status = "Menu-control guidance recovery required"
+
+    def _start_execution_track_proof(self) -> None:
+        from ..infrastructure.menu_control_proof import UVSphereMenuControlProof
+
+        delivery = self._execution_track_delivery
+        if delivery is None:
+            raise RuntimeError("Execution-track delivery identity is unavailable")
+        self._fresh_execution_track_lease()
+        self._validate_execution_track_execution_authority(
+            delivery, require_idle_driver=True
+        )
+        driver = UVSphereMenuControlProof()
+        self._execution_track_driver = driver
+        self._suspend_menu_control_native_guidance()
+
+        def preflight() -> bool:
+            self._fresh_execution_track_lease()
+            self._validate_execution_track_execution_authority(
+                delivery, require_idle_driver=False
+            )
+            return (
+                self._execution_track_driver is driver
+                and self._execution_track_delivery == delivery
+            )
+
+        driver.start(
+            preflight_hook=preflight,
+            pre_mutation_hook=self._prepare_execution_track_proof_history,
+            on_complete=self._handle_execution_track_proof_complete,
+            on_failure=self._handle_execution_track_proof_failure,
+            continuation_guard=preflight,
+        )
+        if self._execution_track_driver is driver:
+            self.execution_track_execution_message = (
+                "Executing the reviewed seven-operation Blender menu/control proof"
+            )
+            self.error = ""
+            self.status = "Execution-track menu proof executing"
+
+    def _prepare_execution_track_proof_history(self) -> bool:
+        """Isolate the audited proof's Undo cycle from the managed Start checkpoint."""
+
+        self._supersede_restored_menu_history()
+        context = bpy.context
+        window = getattr(context, "window", None)
+        screen = None if window is None else getattr(window, "screen", None)
+        areas = () if screen is None else tuple(
+            area for area in screen.areas if area.type == "VIEW_3D"
+        )
+        if window is None or len(areas) != 1:
+            raise RuntimeError(
+                "Execution-track proof baseline guard requires one VIEW_3D"
+            )
+        area = areas[0]
+        regions = tuple(
+            region for region in area.regions if region.type == "WINDOW"
+        )
+        space = getattr(area.spaces, "active", None)
+        if len(regions) != 1 or space is None:
+            raise RuntimeError(
+                "Execution-track proof baseline guard context is unavailable"
+            )
+        try:
+            with context.temp_override(
+                window=window,
+                area=area,
+                region=regions[0],
+                space_data=space,
+            ):
+                result = bpy.ops.ed.undo_push(
+                    message="OperatingLine execution-track proof baseline guard"
+                )
+        except Exception as error:
+            raise RuntimeError(
+                "Execution-track proof baseline guard could not be pushed"
+            ) from error
+        if not isinstance(result, set) or "FINISHED" not in result:
+            raise RuntimeError(
+                "Execution-track proof baseline guard did not finish"
+            )
+        return True
+
+    def _handle_execution_track_proof_complete(
+        self, evidence: dict[str, Any]
+    ) -> None:
+        from ..infrastructure.execution_track_execution import (
+            build_proof_progress_pair,
+            canonical_sha256,
+        )
+
+        self._execution_track_driver = None
+        delivery = self._execution_track_delivery
+        transport = self._transport
+        try:
+            if delivery is None or transport is None:
+                raise RuntimeError("Execution-track proof authority disappeared")
+            current_lease = self._fresh_execution_track_lease()
+            self._validate_execution_track_execution_authority(
+                delivery, require_idle_driver=True
+            )
+            outbox = self._execution_track_outbox(
+                delivery["binding"]["requestId"]
+            )
+            baseline = outbox["baselineProgress"]
+            if outbox["progress"] != baseline:
+                raise RuntimeError("Execution-track proof completed from a stale phase")
+            observed_at = datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            )
+            binding = delivery["binding"]
+            replay_id = binding["preflightBinding"]["replayId"]
+
+            def build_internal_terminal(checkpoint: dict[str, Any]) -> dict[str, Any]:
+                return {
+                    "proofId": binding["proofId"],
+                    "replayId": replay_id,
+                    "status": "succeeded",
+                    "terminalEvidence": {
+                        "nativeUndoCheckpoint": {
+                            "checkpointId": checkpoint["checkpointId"],
+                            "undoLockId": checkpoint["undoLockId"],
+                            "baselineSceneFingerprintSha256": evidence[
+                                "baselineSceneFingerprintSha256"
+                            ],
+                            "finalSceneFingerprintSha256": evidence[
+                                "finalSceneFingerprintSha256"
+                            ],
+                        }
+                    },
+                }
+
+            checkpoint = self._menu_control_history.arm(
+                bpy.context.scene,
+                evidence,
+                proof_id=binding["proofId"],
+                replay_id=replay_id,
+                target_id=binding["leafId"],
+                terminal_result_builder=build_internal_terminal,
+            )
+            internal_terminal = self._menu_control_history.pending_terminal_result()
+            if internal_terminal is None:
+                raise RuntimeError("Execution-track proof terminal marker was not durable")
+            internal_terminal_hash = canonical_sha256(internal_terminal)
+            if not self._menu_control_history.acknowledge_terminal_result(
+                internal_terminal_hash
+            ):
+                raise RuntimeError("Execution-track proof terminal marker was not acknowledged")
+            occurred_at = datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            )
+            proof, observed = build_proof_progress_pair(
+                baseline,
+                evidence,
+                current_lease=current_lease,
+                checkpoint=checkpoint,
+                observed_at=observed_at,
+                occurred_at=occurred_at,
+            )
+            native = observed["evidence"]["nativeUndoCheckpoint"]
+            marker_identity = {
+                "formatVersion": "2.0.0",
+                "kind": "proof_terminal_marker",
+                "proofId": binding["proofId"],
+                "bindingContentSha256": binding["bindingContentSha256"],
+                "proofCheckpointId": native["checkpointId"],
+                "undoLockId": native["undoLockId"],
+                "baselineSceneFingerprintSha256": native[
+                    "baselineSceneFingerprintSha256"
+                ],
+                "finalSceneFingerprintSha256": native[
+                    "finalSceneFingerprintSha256"
+                ],
+                "proofEvidenceContentSha256": observed["evidence"][
+                    "proofEvidenceContentSha256"
+                ],
+            }
+            durable = deepcopy(outbox)
+            durable["progress"] = proof
+            durable["queuedProgress"] = observed
+            durable["restoreTransitions"] = []
+            durable["proofTerminalResultContentSha256"] = internal_terminal_hash
+            durable["proofTerminalMarker"] = {
+                **marker_identity,
+                "contentSha256": canonical_sha256(marker_identity),
+            }
+            self._persist_execution_track_outbox(durable)
+            transport.submit_execution_track_execution_progress(proof)
+            self.execution_track_execution_message = (
+                "Menu proof locked and persisted; waiting for proof progress ACK"
+            )
+            self.error = ""
+            self.status = "Execution-track proof observed"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._menu_control_recovery_locked = True
+            self._terminate_execution_track_before_managed(str(error))
+        finally:
+            guidance_error = self._restore_menu_control_native_guidance()
+            if guidance_error is not None:
+                self.error = guidance_error
+                self.status = "Menu-control guidance recovery required"
+
+    def _handle_execution_track_proof_failure(
+        self, evidence: dict[str, Any]
+    ) -> None:
+        self._execution_track_driver = None
+        error = str(evidence.get("error") or "Execution-track menu proof failed")
+        no_mutation = (
+            evidence.get("mutationStarted") is False
+            and evidence.get("failureStatus")
+            in {"preflight_rejected", "failed_no_mutation"}
+        )
+        if not no_mutation:
+            self._menu_control_recovery_locked = True
+        self._terminate_execution_track_before_managed(
+            error, no_mutation=no_mutation
+        )
+
+    def _schedule_execution_track_native_undo(self) -> None:
+        if self._execution_track_restore_timer_registered:
+            return
+        self._execution_track_restore_timer_registered = True
+
+        def execute_undo() -> None:
+            self._execution_track_restore_timer_registered = False
+            delivery = self._execution_track_delivery
+            try:
+                if delivery is None:
+                    raise RuntimeError("Execution-track restore authority disappeared")
+                self._fresh_execution_track_lease()
+                self._validate_execution_track_execution_authority(
+                    delivery,
+                    require_idle_driver=True,
+                    allow_owned_history=True,
+                )
+                context = bpy.context
+                window = getattr(context, "window", None)
+                screen = None if window is None else getattr(window, "screen", None)
+                areas = () if screen is None else tuple(
+                    area for area in screen.areas if area.type == "VIEW_3D"
+                )
+                if window is None or len(areas) != 1:
+                    raise RuntimeError("Execution-track native Undo requires one VIEW_3D")
+                area = areas[0]
+                regions = tuple(
+                    region for region in area.regions if region.type == "WINDOW"
+                )
+                if len(regions) != 1:
+                    raise RuntimeError("Execution-track native Undo region is unavailable")
+                with context.temp_override(
+                    window=window,
+                    area=area,
+                    region=regions[0],
+                    space_data=area.spaces.active,
+                ):
+                    result = bpy.ops.ed.undo()
+                if not isinstance(result, set) or "FINISHED" not in result:
+                    raise RuntimeError("Blender native Undo did not finish")
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+                self._menu_control_recovery_locked = True
+                self._terminate_execution_track_before_managed(str(error))
+
+        bpy.app.timers.register(execute_undo, first_interval=0.1)
+
+    def _handle_execution_track_history_transition(
+        self, transition: dict[str, Any]
+    ) -> None:
+        from ..infrastructure.execution_track_execution import (
+            build_baseline_identity,
+            build_baseline_restored_progress,
+            build_native_undo_transition,
+            build_restore_progress,
+            canonical_sha256,
+        )
+        from ..infrastructure.menu_control_proof import _scene_snapshot
+
+        transport = self._transport
+        try:
+            if transport is None:
+                raise RuntimeError("Execution-track restore transport disappeared")
+            current_lease = self._fresh_execution_track_lease()
+            outbox = self._execution_track_outbox()
+            commitments = self._menu_control_history.current_marker_commitments(
+                bpy.context.scene
+            )
+            existing = list(outbox.get("restoreTransitions") or [])
+            order = len(existing) + 1
+            converted = build_native_undo_transition(
+                transition,
+                stage_fingerprints=list(commitments["stageFingerprints"]),
+                order=order,
+            )
+            transitions = [*existing, converted]
+            durable = deepcopy(outbox)
+            durable["restoreTransitions"] = transitions
+            if order == 1:
+                progress = build_restore_progress(
+                    outbox["progress"],
+                    converted,
+                    current_lease=current_lease,
+                )
+                durable["progress"] = progress
+            elif order == 8:
+                baseline_progress = outbox["baselineProgress"]
+                baseline_identity = build_baseline_identity(
+                    baseline_progress, _scene_snapshot()
+                )
+                progress = build_baseline_restored_progress(
+                    outbox["progress"],
+                    transitions,
+                    baseline=baseline_identity,
+                    current_lease=current_lease,
+                    occurred_at=datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                )
+                durable["progress"] = progress
+            else:
+                progress = outbox["progress"]
+            self._persist_execution_track_outbox(durable)
+            self._menu_control_history.acknowledge_transition_results(
+                [canonical_sha256(transition)]
+            )
+            if order in {1, 8}:
+                transport.submit_execution_track_execution_progress(progress)
+            else:
+                self._schedule_execution_track_native_undo()
+            self.execution_track_execution_message = (
+                f"Native Undo {order}/8 persisted"
+            )
+            self.error = ""
+            self.status = "Execution-track baseline restore in progress"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._menu_control_recovery_locked = True
+            self._terminate_execution_track_before_managed(str(error))
+
+    def _finalize_execution_track_redo_barrier(self) -> None:
+        from ..infrastructure.execution_track_execution import (
+            build_commit_intent_progress,
+            canonical_sha256,
+            proof_terminal_marker_identity,
+        )
+
+        transport = self._transport
+        try:
+            if transport is None:
+                raise RuntimeError("Execution-track transport disappeared")
+            current_lease = self._fresh_execution_track_lease()
+            outbox = self._execution_track_outbox()
+            restored = outbox["progress"]
+            if restored.get("phase") != "baseline_restored":
+                raise RuntimeError("Execution-track baseline restore is not durable")
+            checkpoint = self._menu_control_history.current_checkpoint()
+            if (
+                not isinstance(checkpoint, dict)
+                or checkpoint.get("cursor") != 0
+                or checkpoint.get("checkpointId") != restored["proofCheckpointId"]
+                or checkpoint.get("undoLockId") != restored["undoLockId"]
+                or checkpoint.get("acknowledgedTerminalResultContentSha256")
+                != outbox.get("proofTerminalResultContentSha256")
+                or checkpoint.get("transitionResultContentSha256s")
+            ):
+                raise RuntimeError("Execution-track restored history marker changed")
+            expected_marker = {
+                **proof_terminal_marker_identity(restored),
+            }
+            expected_marker["contentSha256"] = canonical_sha256(expected_marker)
+            if outbox.get("proofTerminalMarker") != expected_marker:
+                raise RuntimeError("Execution-track proof terminal marker changed")
+            if not self._menu_control_history.confirm_restored():
+                raise RuntimeError("Execution-track restored baseline was not confirmed")
+            if not self._supersede_restored_menu_history():
+                raise RuntimeError("Execution-track restored proof was not superseded")
+            if self._menu_control_history.current_checkpoint() is not None:
+                raise RuntimeError("Execution-track proof controller survived the Redo barrier")
+            occurred_at = datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            )
+            commit = build_commit_intent_progress(
+                restored,
+                current_lease=current_lease,
+                occurred_at=occurred_at,
+            )
+            durable = deepcopy(outbox)
+            durable["progress"] = commit
+            durable.pop("queuedProgress", None)
+            self._persist_execution_track_outbox(durable)
+            transport.submit_execution_track_execution_progress(commit)
+            self.execution_track_execution_message = (
+                "Native Redo barrier verified; waiting for commit-intent ACK"
+            )
+            self.error = ""
+            self.status = "Execution-track commit intent recorded"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            try:
+                from ..infrastructure.execution_track_execution import (
+                    build_failed_restored_result,
+                )
+
+                outbox = self._execution_track_outbox()
+                current_lease = (
+                    None if transport is None else transport.current_document_lease
+                )
+                if (
+                    current_lease is None
+                    or outbox["progress"].get("phase") != "baseline_restored"
+                ):
+                    raise RuntimeError("restored terminal authority is unavailable")
+                result = build_failed_restored_result(
+                    outbox["progress"],
+                    current_lease=current_lease,
+                    error=str(error),
+                )
+                self._submit_execution_track_terminal(result, recovery=False)
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                self._menu_control_recovery_locked = True
+                self._terminate_execution_track_before_managed(str(error))
+                return
+            self.execution_track_execution_message = str(error)
+            self.error = str(error)
+            self.status = "Execution-track proof restored; managed commit skipped"
+
+    def _submit_execution_track_managed_start(self) -> None:
+        from ..infrastructure.execution_track_execution import (
+            build_managed_start_submission,
+        )
+
+        transport = self._transport
+        if transport is None:
+            raise RuntimeError("Execution-track managed-start lease is unavailable")
+        current_lease = self._fresh_execution_track_lease()
+        outbox = self._execution_track_outbox()
+        commit = outbox["progress"]
+        started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        submission = build_managed_start_submission(
+            commit,
+            current_lease=current_lease,
+            started_at=started_at,
+        )
+        durable = deepcopy(outbox)
+        durable["managedStartSubmission"] = submission
+        self._persist_execution_track_outbox(durable)
+        transport.submit_execution_track_execution_managed_start(submission)
+        self.execution_track_execution_message = (
+            "Managed start persisted; waiting for server ACK before creating the UV Sphere"
+        )
+        self.error = ""
+        self.status = "Execution-track managed start pending"
+
+    def _handle_execution_track_progress_ack(self, message: dict[str, Any]) -> None:
+        from ..infrastructure.execution_track_execution import (
+            record_progress_ack,
+            renew_progress_current_lease,
+        )
+
+        request_id = message.get("requestId")
+        try:
+            outbox = self._execution_track_outbox(request_id)
+            durable, first_ack = record_progress_ack(
+                outbox, message.get("progressContentSha256")
+            )
+            if not first_ack:
+                return
+            self._persist_execution_track_outbox(durable)
+            progress = durable["progress"]
+            outbox = durable
+            phase = progress.get("phase")
+            if phase == "baseline_attested":
+                self._start_execution_track_proof()
+            elif phase == "proof_in_progress":
+                observed = outbox.get("queuedProgress")
+                if not isinstance(observed, dict) or observed.get(
+                    "phase"
+                ) != "proof_observed_locked":
+                    raise RuntimeError("Execution-track locked proof progress is unavailable")
+                observed = renew_progress_current_lease(
+                    observed,
+                    current_lease=self._fresh_execution_track_lease(),
+                )
+                durable = deepcopy(outbox)
+                durable["progress"] = deepcopy(observed)
+                durable.pop("queuedProgress", None)
+                self._persist_execution_track_outbox(durable)
+                transport = self._transport
+                if transport is None:
+                    raise RuntimeError("Execution-track transport disappeared")
+                transport.submit_execution_track_execution_progress(observed)
+            elif phase == "proof_observed_locked":
+                self._schedule_execution_track_native_undo()
+            elif phase == "restore_in_progress":
+                self._schedule_execution_track_native_undo()
+            elif phase == "baseline_restored":
+                self._finalize_execution_track_redo_barrier()
+            elif phase == "commit_intent_recorded":
+                self._submit_execution_track_managed_start()
+            else:
+                raise RuntimeError("Execution-track ACK arrived in an unsupported phase")
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._menu_control_recovery_locked = True
+            self._terminate_execution_track_before_managed(str(error))
+
+    def _handle_execution_track_managed_start_ack(
+        self, message: dict[str, Any]
+    ) -> None:
+        from ..infrastructure.execution_track_execution import (
+            record_managed_start_ack,
+        )
+
+        request_id = message.get("requestId")
+        try:
+            outbox = self._execution_track_outbox(request_id)
+            durable, first_ack = record_managed_start_ack(
+                outbox, message.get("managedStartContentSha256")
+            )
+            if not first_ack:
+                return
+            self._persist_execution_track_outbox(durable)
+            delivery = self._execution_track_delivery
+            if delivery is None:
+                raise RuntimeError("Execution-track delivery disappeared before managed commit")
+            self._fresh_execution_track_lease()
+            self._validate_execution_track_execution_authority(
+                delivery, require_idle_driver=True
+            )
+            token = str(uuid.uuid4())
+            self._execution_track_managed_commit_token = token
+            result = bpy.ops.operating_line.execution_track_managed_commit(
+                authorization_token=token
+            )
+            if not isinstance(result, set) or "FINISHED" not in result:
+                raise RuntimeError("Execution-track managed commit operator did not finish")
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._execution_track_managed_commit_token = None
+            self._terminate_execution_track_managed_indeterminate(str(error))
+
+    def authorize_execution_track_managed_commit(
+        self, authorization_token: Any
+    ) -> bool:
+        """Consume the one-shot token issued only after the managed-start ACK."""
+
+        if (
+            not isinstance(authorization_token, str)
+            or authorization_token != self._execution_track_managed_commit_token
+        ):
+            return False
+        try:
+            outbox = self._execution_track_outbox()
+            submission = outbox.get("managedStartSubmission")
+            delivery = self._execution_track_delivery
+            if (
+                not isinstance(submission, dict)
+                or outbox["progress"].get("phase") != "commit_intent_recorded"
+                or submission.get("commitProgress") != outbox["progress"]
+                or delivery is None
+            ):
+                return False
+            self._fresh_execution_track_lease()
+            self._validate_execution_track_execution_authority(
+                delivery, require_idle_driver=True
+            )
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+            return False
+        self._execution_track_managed_commit_token = None
+        return True
+
+    def complete_execution_track_managed_commit(self) -> None:
+        """Persist the exact managed report/result pair before transport exposure."""
+
+        from ..infrastructure.execution_track_execution import (
+            build_persisted_managed_terminal_marker,
+            build_terminal_result,
+        )
+        from ..infrastructure.menu_control_proof import _scene_snapshot
+
+        transport = self._transport
+        try:
+            if transport is None:
+                raise RuntimeError("Managed terminal lease disappeared")
+            current_lease = self._fresh_execution_track_lease()
+            outbox = self._execution_track_outbox()
+            report = self.last_report
+            submission = outbox.get("managedStartSubmission")
+            if (
+                not isinstance(report, dict)
+                or report.get("transition")
+                not in {"step_succeeded", "step_observation_failed"}
+                or not isinstance(submission, dict)
+            ):
+                raise RuntimeError("Managed commit produced no terminal Companion report")
+            occurred_at = datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            )
+            result = build_terminal_result(
+                outbox["baselineProgress"],
+                outbox["progress"],
+                submission,
+                report,
+                current_lease=current_lease,
+                occurred_at=occurred_at,
+            )
+            marker = build_persisted_managed_terminal_marker(
+                result, _scene_snapshot()
+            )
+            durable = deepcopy(outbox)
+            durable["result"] = result
+            durable["terminalMarker"] = marker
+            self._persist_execution_track_outbox(durable)
+            transport.submit_execution_track_execution_result(result)
+            if result["status"] == "failed_managed":
+                transport.enable_execution_track_execution_recovery_poll()
+            self.execution_track_execution_message = (
+                "Managed UV Sphere committed with strong Observation evidence"
+                if result["status"] == "succeeded"
+                else "Managed UV Sphere retained behind the Observation repair gate"
+            )
+            self.error = "" if result["status"] == "succeeded" else result["error"]
+            self.status = (
+                "Execution-track succeeded"
+                if result["status"] == "succeeded"
+                else "Execution-track managed repair required"
+            )
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._terminate_execution_track_managed_indeterminate(str(error))
+
+    def _terminate_execution_track_managed_indeterminate(self, error: str) -> None:
+        from ..infrastructure.execution_track_execution import (
+            build_recovery_required_result,
+        )
+
+        transport = self._transport
+        try:
+            if transport is None or transport.current_document_lease is None:
+                raise RuntimeError("current managed recovery lease is unavailable")
+            outbox = self._execution_track_outbox()
+            submission = outbox.get("managedStartSubmission")
+            if not isinstance(submission, dict):
+                raise RuntimeError("durable managed start is unavailable")
+            result = build_recovery_required_result(
+                outbox["progress"],
+                current_lease=transport.current_document_lease,
+                reason="managed_state_indeterminate",
+                error=error,
+                managed_start=submission["managedStart"],
+            )
+            self._submit_execution_track_terminal(result, recovery=True)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as reporting_error:
+            error = f"{error}; managed recovery persistence failed: {reporting_error}"
+            if transport is not None:
+                transport.enable_execution_track_execution_recovery_poll()
+        self._execution_track_managed_commit_token = None
+        self.execution_track_execution_message = error
+        self.error = error
+        self.status = "Execution-track managed state requires recovery"
 
     def _handle_execution_track_execution_recovery(self, request: Any) -> None:
         transport = self._transport
@@ -2609,7 +3707,8 @@ class CompanionController:
         from ..infrastructure.execution_track_execution import (
             build_baseline_terminal_recovery_ack,
             build_managed_repair_recovery_ack,
-            build_persisted_failed_managed_recovery_ack,
+            build_persisted_managed_terminal_recovery_ack,
+            build_unresolved_recovery_ack,
             canonical_sha256,
             _identity_hashes,
             _scene_snapshot,
@@ -2774,18 +3873,32 @@ class CompanionController:
                     recovered_report=recovered_report,
                 )
                 outbox = persist_recovery_ack(bpy.context.scene, outbox, ack)
-            elif outbox.get("result", {}).get("status") == "failed_managed":
-                ack = build_persisted_failed_managed_recovery_ack(
+            elif outbox.get("result", {}).get("status") in {
+                "succeeded",
+                "failed_managed",
+            }:
+                ack = build_persisted_managed_terminal_recovery_ack(
+                    request,
+                    outbox=outbox,
+                    current_lease=transport.current_document_lease,
+                )
+                outbox = persist_recovery_ack(bpy.context.scene, outbox, ack)
+            elif outbox.get("result", {}).get("status") in {
+                "failed_no_mutation",
+                "failed_restored",
+            }:
+                ack = build_baseline_terminal_recovery_ack(
                     request,
                     outbox=outbox,
                     current_lease=transport.current_document_lease,
                 )
                 outbox = persist_recovery_ack(bpy.context.scene, outbox, ack)
             else:
-                ack = build_baseline_terminal_recovery_ack(
+                ack = build_unresolved_recovery_ack(
                     request,
                     outbox=outbox,
                     current_lease=transport.current_document_lease,
+                    current_report=self.last_report,
                 )
                 outbox = persist_recovery_ack(bpy.context.scene, outbox, ack)
             transport.submit_execution_track_execution_recovery_ack(ack)
@@ -3010,7 +4123,7 @@ class CompanionController:
             "sequence": last_report.get("sequence"),
         }:
             raise ValueError("Shortcut proof expected state is stale")
-        if last_report.get("protocolVersion") not in {"1.5.0", "1.6.0"}:
+        if last_report.get("protocolVersion") not in NATIVE_UNDO_PROTOCOL_VERSIONS:
             raise ValueError("Shortcut proof requires native Undo protocol 1.5+")
         expected_sequence = delivery["expectedState"]["sequence"]
         if expected_sequence > getattr(transport, "last_delivered_sequence", self.last_delivered_sequence):
@@ -3686,7 +4799,7 @@ class CompanionController:
                 "sequence": last_report.get("sequence"),
             }:
                 raise ValueError("Action execution expected state is stale")
-            if last_report.get("protocolVersion") not in {"1.5.0", "1.6.0"}:
+            if last_report.get("protocolVersion") not in NATIVE_UNDO_PROTOCOL_VERSIONS:
                 raise ValueError("Action execution requires native Undo protocol 1.5+")
             if (
                 isinstance(expected_state.get("sequence"), bool)
@@ -3785,6 +4898,1460 @@ class CompanionController:
         else:
             self.error = str(error_message)
             self.status = "Action execution failed"
+
+    @staticmethod
+    def _leaf_operation_timestamp_at_or_after(*values: Any) -> str:
+        candidate = datetime.now(timezone.utc)
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is not None and parsed > candidate:
+                candidate = parsed
+        return candidate.isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _leaf_operation_result_payload(
+        delivery: dict[str, Any],
+        *,
+        status: str,
+        progress: dict[str, Any] | None,
+        error: str | None,
+        recovery_reason: dict[str, Any] | None = None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        identity_fields = (
+            "formatVersion",
+            "requestId",
+            "replayId",
+            "deliveryId",
+            "target",
+            "proposalId",
+            "plan",
+            "planContentSha256",
+            "executionId",
+            "leafId",
+            "stepId",
+            "actionName",
+            "recipeId",
+            "catalogVersion",
+            "interactionCatalogContentSha256",
+            "materializationContentSha256",
+            "mcpTrackContentSha256",
+            "expectedState",
+            "operationIds",
+            "operationOrdinal",
+            "sourceOperationId",
+            "operationParameters",
+            "operationBindingSha256",
+            "requestedAt",
+            "dispatchedAt",
+        )
+        payload = {key: deepcopy(delivery[key]) for key in identity_fields}
+        payload.update(
+            {
+                "status": status,
+                "progress": deepcopy(progress),
+                "error": error,
+                "occurredAt": occurred_at
+                or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+        )
+        if recovery_reason is not None:
+            payload["recoveryReason"] = deepcopy(recovery_reason)
+        return payload
+
+    def _submit_leaf_operation_recovery_required(
+        self,
+        delivery: dict[str, Any],
+        message: str,
+        *,
+        reason: str,
+    ) -> None:
+        """Fail closed with a protocol-visible, non-replayable recovery signal."""
+
+        transport = self._transport
+        if transport is None:
+            return
+        recovery_reason: dict[str, Any] = {
+            "kind": reason,
+            "requiresExplicitRecovery": True,
+            "automaticReplay": False,
+        }
+        if reason == "native_undo_outcome_indeterminate":
+            from ..infrastructure.native_history import peek_native_undo_recovery_guard
+
+            guard = peek_native_undo_recovery_guard()
+            if guard is None:
+                reason = "operation_outcome_indeterminate"
+                recovery_reason["kind"] = reason
+            else:
+                recovery_reason["nativeUndoGuard"] = {
+                    "expectedRestoredCheckpointId": guard.expected_restored_checkpoint_id,
+                    "recoveryTokenSha256": guard.recovery_token_sha256,
+                }
+        transport.submit_leaf_operation_result(
+            self._leaf_operation_result_payload(
+                delivery,
+                status="recovery_required",
+                progress=None,
+                error=message,
+                recovery_reason=recovery_reason,
+            )
+        )
+        self.error = message
+        self.status = "Leaf operation recovery required"
+
+    def _reject_leaf_operation(self, delivery: Any, message: str) -> None:
+        transport = self._transport
+        if transport is not None and isinstance(delivery, dict):
+            try:
+                result = self._leaf_operation_result_payload(
+                    delivery, status="rejected", progress=None, error=message
+                )
+            except (KeyError, TypeError):
+                result = None
+            if result is not None:
+                transport.submit_leaf_operation_result(result)
+        self.error = message
+        self.status = "Leaf operation rejected"
+
+    @staticmethod
+    def _leaf_operation_catalog_authority(
+        source_step: dict[str, Any], operation_ordinal: int
+    ) -> tuple[dict[str, Any], tuple[str, ...], dict[str, Any]]:
+        raw_catalog = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        action = source_step.get("action")
+        arguments = action.get("arguments") if isinstance(action, dict) else None
+        action_name = action.get("name") if isinstance(action, dict) else None
+        profile = GUIDED_GEOMETRY_LEAF_OPERATION_PROFILES.get(action_name)
+        if profile is None:
+            raise ValueError("Accepted next leaf is not a fixed guided action")
+        recipe_id, expected_operation_ids, _parameter_names, _tool_name = profile
+        raw_recipe = next(
+            (
+                recipe
+                for recipe in raw_catalog.get("recipes", ())
+                if isinstance(recipe, dict)
+                and recipe.get("id") == recipe_id
+            ),
+            None,
+        )
+        recipe = BUNDLED_INTERACTION_CATALOG.recipe_for(action_name)
+        materialization = (
+            None if recipe is None else recipe.procedure_materialization
+        )
+        mcp = None if materialization is None else materialization.mcp
+        if (
+            raw_recipe is None
+            or mcp is None
+            or mcp.availability != "available"
+            or mcp.source != "catalog.operation_level_mcp"
+            or mcp.mcp_operations is None
+        ):
+            raise ValueError("Bundled guided operation-level MCP is unavailable")
+        operation_ids = tuple(
+            operation.source_operation_id for operation in mcp.mcp_operations
+        )
+        if (
+            operation_ids != expected_operation_ids
+            or not 1 <= operation_ordinal <= len(operation_ids)
+        ):
+            raise ValueError("Bundled guided operation sequence is invalid")
+        if (
+            not isinstance(action, dict)
+            or set(action) != {"adapterId", "name", "arguments"}
+            or action.get("adapterId") != "blender"
+            or action.get("name") != action_name
+            or not isinstance(arguments, dict)
+        ):
+            raise ValueError("Accepted next leaf changed its guided action")
+        operation = mcp.mcp_operations[operation_ordinal - 1]
+        parameters: dict[str, Any] = {}
+        for parameter in operation.parameters:
+            source = parameter.source
+            expected_transform = GUIDED_LEAF_OPERATION_PARAMETER_TRANSFORMS.get(
+                (recipe_id, operation.source_operation_id, parameter.name),
+                "identity",
+            )
+            if (
+                source.kind != "action_argument"
+                or source.argument_name != parameter.name
+                or source.transform != expected_transform
+                or parameter.name not in arguments
+            ):
+                raise ValueError("Bundled operation parameter binding is not exact")
+            parameters[parameter.name] = deepcopy(arguments[parameter.name])
+        return raw_catalog, operation_ids, parameters
+
+    def _handle_leaf_operation_execute_request(self, delivery: Any) -> None:
+        """Consume exactly one catalog-owned guided Geometry leaf operation."""
+        from .. import get_session
+
+        transport = self._transport
+        if transport is None:
+            return
+        if not isinstance(delivery, dict):
+            self.error = "Leaf-operation delivery must be an object"
+            self.status = "Leaf operation rejected"
+            return
+        request_id = delivery.get("requestId")
+        if isinstance(request_id, str) and request_id in self._seen_leaf_operation_request_ids:
+            return
+        if isinstance(request_id, str):
+            if len(self._seen_leaf_operation_request_ids) >= 256:
+                self._seen_leaf_operation_request_ids.pop()
+            self._seen_leaf_operation_request_ids.add(request_id)
+
+        try:
+            delivery = transport._validate_leaf_operation_delivery(delivery)
+            action_name = delivery["actionName"]
+            recipe_id = delivery["recipeId"]
+            session = get_session()
+            target = delivery["target"]
+            plan = delivery["plan"]
+            expected_state = delivery["expectedState"]
+            last_report = self.last_report
+            decision = self._last_accepted_proposal_decision
+            if target != {"adapterId": "blender", "instanceId": self.instance_id}:
+                raise ValueError("Leaf operation targets a different Companion")
+            if (
+                self._last_accepted_proposal_id != delivery["proposalId"]
+                or not isinstance(decision, dict)
+                or decision.get("proposalId") != delivery["proposalId"]
+                or decision.get("decision") != "accepted"
+                or decision.get("adapterId") != "blender"
+                or decision.get("instanceId") != self.instance_id
+            ):
+                raise ValueError("Leaf operation proposal was not accepted locally")
+            if self.proposed_plan is not None or self._proposal_candidates or self.pending_plan is not None:
+                raise ValueError("A plan or proposal is still pending review")
+            if session.observation_blocked:
+                raise ValueError("The current Observation success gate is blocked")
+            if self.shortcut_mutation_blocked:
+                raise ValueError("Native Undo must restore the active proof before leaf execution")
+            if not session.started or session.execution_id is None:
+                raise ValueError("The accepted walkthrough is not running")
+            if plan != {"id": session.plan_id, "revision": session.revision}:
+                raise ValueError("Leaf operation plan does not match the active session")
+            if delivery["planContentSha256"] != session.plan_content_sha256:
+                raise ValueError("Leaf operation plan hash does not match the active session")
+            if delivery["executionId"] != session.execution_id:
+                raise ValueError("Leaf operation execution id does not match the active session")
+            if not isinstance(last_report, dict) or expected_state != {
+                "reportId": last_report.get("reportId"),
+                "sequence": last_report.get("sequence"),
+            }:
+                raise ValueError("Leaf operation expected state is stale")
+            if last_report.get("protocolVersion") not in NATIVE_UNDO_PROTOCOL_VERSIONS:
+                raise ValueError("Leaf operation requires native Undo protocol 1.5+")
+            if expected_state["sequence"] > getattr(
+                transport, "last_delivered_sequence", self.last_delivered_sequence
+            ):
+                raise ValueError("Leaf operation expected state was not delivered")
+            next_index = session.active_index + 1
+            if next_index < 0 or next_index >= len(session.steps):
+                raise ValueError("The accepted walkthrough has no next leaf")
+            step = session.steps[next_index]
+            source_step = self._source_step(session, step.id)
+            if (
+                source_step is None
+                or delivery["leafId"] != step.id
+                or delivery["stepId"] != step.id
+            ):
+                raise ValueError("Leaf operation is not the exact accepted next leaf")
+            raw_catalog, operation_ids, expected_parameters = (
+                self._leaf_operation_catalog_authority(
+                    source_step, delivery["operationOrdinal"]
+                )
+            )
+            raw_recipe = next(
+                recipe
+                for recipe in raw_catalog["recipes"]
+                if recipe["id"] == recipe_id
+            )
+            raw_materialization = raw_recipe["procedureMaterialization"]
+            raw_mcp = raw_materialization["mcp"]
+            if (
+                delivery["catalogVersion"] != BUNDLED_INTERACTION_CATALOG.catalog_version
+                or delivery["interactionCatalogContentSha256"]
+                != CompanionTransport._canonical_sha256(raw_catalog)
+                or delivery["materializationContentSha256"]
+                != CompanionTransport._canonical_sha256(raw_materialization)
+                or delivery["mcpTrackContentSha256"]
+                != CompanionTransport._canonical_sha256(raw_mcp)
+                or tuple(delivery["operationIds"]) != operation_ids
+                or delivery["sourceOperationId"]
+                != operation_ids[delivery["operationOrdinal"] - 1]
+                or delivery["operationParameters"] != expected_parameters
+            ):
+                raise ValueError("Leaf operation does not match the bundled MCP materialization")
+            from ..presentation.native_menu_guidance import leaf_guidance_snapshot
+
+            snapshot = leaf_guidance_snapshot(step)
+            run = session.pending_leaf_operation_run
+            expected_ordinal = 1 if run is None else run.next_ordinal
+            if (
+                snapshot is None
+                or snapshot.recipe_id != recipe_id
+                or snapshot.catalog_version != delivery["catalogVersion"]
+                or tuple(item.operation_id for item in snapshot.operations) != operation_ids
+                or snapshot.focused_ordinal != expected_ordinal
+                or delivery["operationOrdinal"] != expected_ordinal
+            ):
+                raise ValueError("Leaf operation does not match the exact local run cursor")
+        except (IndexError, KeyError, OSError, StopIteration, TypeError, ValueError) as error:
+            self._reject_leaf_operation(delivery, str(error))
+            return
+
+        from .guided_geometry_command import (
+            GuidedGeometryCommandFailure,
+            GuidedGeometryCommandRejected,
+            GuidedGeometryCommandServices,
+            GuidedGeometryHistoryPort,
+            execute_guided_geometry_operation,
+        )
+        from ..infrastructure.guided_geometry_operations import (
+            GuidedGeometryAtomicityError,
+        )
+        from ..infrastructure.native_history import (
+            NativeHistoryRecovery,
+            NativeUndoRequiredError,
+            cancel_native_history,
+            commit_native_history,
+            native_history_requires_native_undo,
+            prepare_native_history,
+            prepared_native_history_changed,
+        )
+        from ..infrastructure.snowman_actions.common import (
+            ActionAtomicityError,
+            action_host_state_restored,
+        )
+        if action_name == TRANSFORM_GEOMETRY_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_geometry_operations import (
+                execute_transform_geometry_operation as execute_operation,
+                inverse_transform_geometry_operation as inverse_operation,
+                resume_transform_geometry_transaction as resume_transaction,
+                verify_transform_geometry_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_geometry_nodes_transform as validate_definition,
+            )
+        elif action_name == LIGHT_TRAILS_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_light_trails_operations import (
+                execute_light_trails_operation as execute_operation,
+                inverse_light_trails_operation as inverse_operation,
+                resume_light_trails_transaction as resume_transaction,
+                verify_light_trails_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_geometry_nodes_light_trails as validate_definition,
+            )
+        elif action_name == POSE_ANIMATION_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_pose_animation_operations import (
+                execute_pose_animation_operation as execute_operation,
+                inverse_pose_animation_operation as inverse_operation,
+                resume_pose_animation_transaction as resume_transaction,
+                verify_pose_animation_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.rigging import (
+                validate_pose_animation as validate_definition,
+            )
+        elif action_name == ARMATURE_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_armature_operations import (
+                execute_armature_operation as execute_operation,
+                inverse_armature_operation as inverse_operation,
+                resume_armature_transaction as resume_transaction,
+                verify_armature_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.rigging import (
+                validate_armature as validate_definition,
+            )
+        elif action_name == SKIN_WEIGHTS_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_skin_weights_operations import (
+                execute_skin_weights_operation as execute_operation,
+                inverse_skin_weights_operation as inverse_operation,
+                resume_skin_weights_transaction as resume_transaction,
+                verify_skin_weights_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.rigging import (
+                validate_skin_weights as validate_definition,
+            )
+        elif action_name == SOLIDIFY_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_solidify_operations import (
+                execute_solidify_operation as execute_operation,
+                inverse_solidify_operation as inverse_operation,
+                resume_solidify_transaction as resume_transaction,
+                verify_solidify_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_solidify as validate_definition,
+            )
+        elif action_name == BEVEL_MODIFIER_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_bevel_modifier_operations import (
+                execute_bevel_modifier_operation as execute_operation,
+                inverse_bevel_modifier_operation as inverse_operation,
+                resume_bevel_modifier_transaction as resume_transaction,
+                verify_bevel_modifier_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_bevel as validate_definition,
+            )
+        elif action_name == SINGLE_MATERIAL_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_single_material_operations import (
+                execute_single_material_operation as execute_operation,
+                inverse_single_material_operation as inverse_operation,
+                resume_single_material_transaction as resume_transaction,
+                verify_single_material_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.material import (
+                validate_single_definition as validate_definition,
+            )
+        elif action_name == MATERIAL_PALETTE_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_material_palette_operations import (
+                execute_material_palette_operation as execute_operation,
+                inverse_material_palette_operation as inverse_operation,
+                resume_material_palette_transaction as resume_transaction,
+                verify_material_palette_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.material import (
+                validate_palette as validate_definition,
+            )
+        elif action_name == SUBDIVISION_SURFACE_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_subdivision_surface_operations import (
+                execute_subdivision_surface_operation as execute_operation,
+                inverse_subdivision_surface_operation as inverse_operation,
+                resume_subdivision_surface_transaction as resume_transaction,
+                verify_subdivision_surface_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_subdivision_surface as validate_definition,
+            )
+        elif action_name == EDIT_BEVEL_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_edit_bevel_operations import (
+                execute_edit_bevel_operation as execute_operation,
+                inverse_edit_bevel_operation as inverse_operation,
+                resume_edit_bevel_transaction as resume_transaction,
+                verify_edit_bevel_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_edit_bevel_edges as validate_definition,
+            )
+        elif action_name == EDIT_INSET_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_edit_inset_operations import (
+                execute_edit_inset_operation as execute_operation,
+                inverse_edit_inset_operation as inverse_operation,
+                resume_edit_inset_transaction as resume_transaction,
+                verify_edit_inset_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_edit_inset_faces as validate_definition,
+            )
+        elif action_name == EDIT_TRIANGULATE_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_edit_triangulate_operations import (
+                execute_edit_triangulate_operation as execute_operation,
+                inverse_edit_triangulate_operation as inverse_operation,
+                resume_edit_triangulate_transaction as resume_transaction,
+                verify_edit_triangulate_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_triangulate as validate_definition,
+            )
+        elif action_name == EDIT_EXTRUDE_REGION_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_edit_extrude_region_operations import (
+                execute_edit_extrude_region_operation as execute_operation,
+                inverse_edit_extrude_region_operation as inverse_operation,
+                resume_edit_extrude_region_transaction as resume_transaction,
+                verify_edit_extrude_region_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_extrude_region as validate_definition,
+            )
+        elif action_name == EDIT_POKE_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_edit_poke_operations import (
+                execute_edit_poke_operation as execute_operation,
+                inverse_edit_poke_operation as inverse_operation,
+                resume_edit_poke_transaction as resume_transaction,
+                verify_edit_poke_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_edit_poke_faces as validate_definition,
+            )
+        elif action_name == MIRROR_LEAF_OPERATION_ACTION:
+            from ..infrastructure.guided_mirror_operations import (
+                execute_mirror_operation as execute_operation,
+                inverse_mirror_operation as inverse_operation,
+                resume_mirror_transaction as resume_transaction,
+                verify_mirror_stage as verify_stage,
+            )
+            from ..infrastructure.snowman_actions.editing import (
+                validate_mirror as validate_definition,
+            )
+        else:  # pragma: no cover - transport validation closes this branch
+            self._reject_leaf_operation(delivery, "Unsupported guided leaf profile")
+            return
+
+        services = GuidedGeometryCommandServices(
+            validate_definition=validate_definition,
+            execute_operation=execute_operation,
+            inverse_operation=inverse_operation,
+            resume_transaction=resume_transaction,
+            verify_stage=verify_stage,
+            history=GuidedGeometryHistoryPort(
+                prepare=lambda history_operation: prepare_native_history(
+                    session, bpy.context.scene, history_operation
+                ),
+                commit=commit_native_history,
+                cancel=cancel_native_history,
+                changed=prepared_native_history_changed,
+                make_recovery=lambda state, probe: NativeHistoryRecovery(state, probe),
+                requires_native_undo=native_history_requires_native_undo,
+                is_native_undo_required_error=lambda error: isinstance(
+                    error, NativeUndoRequiredError
+                ),
+            ),
+            is_guided_atomicity_error=lambda error: isinstance(
+                error, GuidedGeometryAtomicityError
+            ),
+            is_action_atomicity_error=lambda error: isinstance(error, ActionAtomicityError),
+            is_host_state_restored_error=action_host_state_restored,
+        )
+        try:
+            command_result = execute_guided_geometry_operation(
+                session=session,
+                step=step,
+                snapshot=snapshot,
+                step_id=step.id,
+                operation_id=delivery["sourceOperationId"],
+                ordinal=delivery["operationOrdinal"],
+                cursor_token=snapshot.cursor_token,
+                run_id="" if run is None else run.run_id,
+                action_name=action_name,
+                recipe_id=recipe_id,
+                services=services,
+            )
+        except GuidedGeometryCommandRejected as error:
+            self._reject_leaf_operation(delivery, str(error))
+            return
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._submit_leaf_operation_recovery_required(
+                delivery,
+                f"Leaf operation requires recovery: {error}",
+                reason=(
+                    "native_undo_outcome_indeterminate"
+                    if native_history_requires_native_undo()
+                    else "operation_outcome_indeterminate"
+                ),
+            )
+            return
+
+        if isinstance(command_result, GuidedGeometryCommandFailure):
+            if command_result.native_undo_required:
+                self._submit_leaf_operation_recovery_required(
+                    delivery,
+                    command_result.report_message or "Blender native Undo is required",
+                    reason="native_undo_outcome_indeterminate",
+                )
+                return
+            transport.submit_leaf_operation_result(
+                self._leaf_operation_result_payload(
+                    delivery,
+                    status="failed",
+                    progress=None,
+                    error=command_result.report_message,
+                )
+            )
+            self.error = command_result.report_message
+            self.status = "Leaf operation failed"
+            return
+
+        if command_result.native_undo_required:
+            self._submit_leaf_operation_recovery_required(
+                delivery,
+                command_result.report_message or "Blender native Undo is required",
+                reason="native_undo_outcome_indeterminate",
+            )
+            return
+
+        transition = command_result.report_transition
+        if transition is not None and transition.name == "step_observation_failed":
+            restored_run = session.pending_leaf_operation_run
+            restored_receipts = getattr(restored_run, "operation_receipts", ())
+            restored_prefix = tuple(
+                getattr(receipt, "operation_id", None) for receipt in restored_receipts
+            )
+            restored_to_prefix = (
+                delivery["operationOrdinal"] == len(operation_ids)
+                and run is not None
+                and restored_run is not None
+                and restored_run.run_id == run.run_id
+                and restored_run.binding_sha256 == run.binding_sha256
+                and restored_run.next_ordinal == len(operation_ids)
+                and restored_prefix == operation_ids[:-1]
+                and self.last_report is last_report
+                and self.last_report.get("reportId") == expected_state["reportId"]
+                and self.last_report.get("sequence") == expected_state["sequence"]
+                and command_result.leaf_completed is False
+            )
+            if restored_to_prefix:
+                reason = command_result.report_message or (
+                    "final guided leaf Observation gate failed; "
+                    f"the verified operation-{len(operation_ids) - 1:02d} prefix was restored"
+                )
+                message = f"retryable: {reason}"
+                transport.submit_leaf_operation_result(
+                    self._leaf_operation_result_payload(
+                        delivery,
+                        status="failed",
+                        progress=None,
+                        error=message,
+                    )
+                )
+                self.error = message
+                self.status = "Leaf operation failed; retry available"
+            else:
+                self._submit_leaf_operation_recovery_required(
+                    delivery,
+                    "Final leaf Observation failure did not prove restoration to its prior prefix",
+                    reason="observation_outcome_indeterminate",
+                )
+            return
+
+        observation = command_result.observation
+        observation_details = (
+            observation.get("details") if isinstance(observation, dict) else None
+        )
+        observation_profile = GUIDED_LEAF_OPERATION_OBSERVATION_PROFILES.get(
+            action_name
+        )
+        expected_observation_kind = (
+            None if observation_profile is None else observation_profile[0]
+        )
+        expected_completed = operation_ids[: delivery["operationOrdinal"]]
+        if (
+            getattr(command_result, "operation_id", None)
+            != delivery["sourceOperationId"]
+            or getattr(command_result, "ordinal", None)
+            != delivery["operationOrdinal"]
+            or getattr(command_result, "total", None) != len(operation_ids)
+            or getattr(command_result, "next_ordinal", None)
+            != delivery["operationOrdinal"] + 1
+            or tuple(getattr(command_result, "completed_operation_ids", ()))
+            != expected_completed
+            or getattr(command_result, "leaf_completed", None)
+            is not (delivery["operationOrdinal"] == len(operation_ids))
+            or not isinstance(observation_details, dict)
+            or observation.get("kind") != expected_observation_kind
+            or observation.get("satisfied") is not True
+            or observation_details.get("operationOrdinal")
+            != delivery["operationOrdinal"]
+            or observation_details.get("operationId") != delivery["sourceOperationId"]
+            or observation_details.get("runId") != getattr(command_result, "run_id", None)
+            or observation_details.get("stepId") != step.id
+            or observation_details.get("actionName") != action_name
+            or observation_details.get("recipeId") != recipe_id
+            or observation_details.get("catalogVersion") != delivery["catalogVersion"]
+            or (
+                run is not None
+                and (
+                    command_result.run_id != run.run_id
+                    or command_result.binding_sha256 != run.binding_sha256
+                )
+            )
+        ):
+            self._submit_leaf_operation_recovery_required(
+                delivery,
+                "Leaf operation command returned mismatched progress evidence",
+                reason="observation_outcome_indeterminate",
+            )
+            return
+
+        if command_result.report_transition is not None and not command_result.leaf_completed:
+            self._submit_leaf_operation_recovery_required(
+                delivery,
+                "Leaf operation returned an unsupported partial transition",
+                reason="observation_outcome_indeterminate",
+            )
+            return
+
+        final_report = None
+        if command_result.leaf_completed:
+            transition = command_result.report_transition
+            if transition is None or transition.name != "step_succeeded":
+                self._submit_leaf_operation_recovery_required(
+                    delivery,
+                    "Final leaf operation produced no verified step transition",
+                    reason="observation_outcome_indeterminate",
+                )
+                return
+            try:
+                final_report = self.report(transition.name, step=transition.step)
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+                self._submit_leaf_operation_recovery_required(
+                    delivery,
+                    f"Final leaf operation report requires recovery: {error}",
+                    reason="observation_outcome_indeterminate",
+                )
+                return
+            if (
+                final_report.get("transition") != "step_succeeded"
+                or final_report.get("stepId") != step.id
+                or final_report.get("sequence") != expected_state["sequence"] + 1
+            ):
+                self._submit_leaf_operation_recovery_required(
+                    delivery,
+                    "Final leaf operation report did not prove the next state",
+                    reason="observation_outcome_indeterminate",
+                )
+                return
+        else:
+            from ..presentation.native_menu_guidance import focus_next_leaf_operation
+
+            if not focus_next_leaf_operation(
+                step,
+                delivery["sourceOperationId"],
+                delivery["operationOrdinal"],
+                snapshot.cursor_token,
+            ):
+                self._submit_leaf_operation_recovery_required(
+                    delivery,
+                    "Leaf operation completed but the guidance cursor did not advance",
+                    reason="observation_outcome_indeterminate",
+                )
+                return
+
+        progress = {
+            "runId": command_result.run_id,
+            "bindingSha256": command_result.binding_sha256,
+            "stepId": step.id,
+            "actionName": action_name,
+            "recipeId": recipe_id,
+            "catalogVersion": delivery["catalogVersion"],
+            "operationIds": list(operation_ids),
+            "completedOperationIds": list(command_result.completed_operation_ids),
+            "nextOrdinal": command_result.next_ordinal,
+            "latestObservation": deepcopy(command_result.observation),
+            "leafCompleted": command_result.leaf_completed,
+            "finalReport": (
+                {
+                    "reportId": final_report["reportId"],
+                    "sequence": final_report["sequence"],
+                }
+                if final_report is not None
+                else None
+            ),
+        }
+        transport.submit_leaf_operation_result(
+            self._leaf_operation_result_payload(
+                delivery, status="succeeded", progress=progress, error=None
+            )
+        )
+        self.error = ""
+        self.status = (
+            f"Leaf {step.id} completed"
+            if command_result.leaf_completed
+            else f"Leaf operation {command_result.ordinal:02d} succeeded"
+        )
+
+    @staticmethod
+    def _leaf_operation_recovery_run(run: Any) -> dict[str, Any]:
+        if run is None:
+            return {
+                "completedOperationIds": [],
+                "runId": None,
+                "bindingSha256": None,
+                "receiptId": None,
+                "nextOrdinal": 1,
+                "latestFingerprintSha256": None,
+            }
+        receipts = tuple(getattr(run, "operation_receipts", ()))
+        return {
+            "completedOperationIds": [
+                getattr(receipt, "operation_id", None) for receipt in receipts
+            ],
+            "runId": getattr(run, "run_id", None),
+            "bindingSha256": getattr(run, "binding_sha256", None),
+            "receiptId": getattr(run, "leaf_receipt_id", None),
+            "nextOrdinal": getattr(run, "next_ordinal", None),
+            "latestFingerprintSha256": (
+                getattr(receipts[-1], "after_sha256", None) if receipts else None
+            ),
+        }
+
+    def _leaf_operation_recovery_checkpoint(
+        self,
+        session: DemoSession,
+        leaf_run: dict[str, Any],
+        *,
+        observed_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        from ..infrastructure.native_history import native_leaf_checkpoint_attestation
+
+        attestation = native_leaf_checkpoint_attestation(session)
+        report = self.last_report
+        if not isinstance(attestation, dict) or not isinstance(report, dict):
+            return None
+        marker = attestation.get("marker")
+        journal = attestation.get("journal")
+        operation = attestation.get("operation")
+        if operation == "leaf_operation_back":
+            operation = "back"
+        if (
+            not isinstance(marker, dict)
+            or marker.get("matched") is not True
+            or not isinstance(journal, dict)
+            or journal.get("snapshotMatchesSession") is not True
+            or operation
+            not in {
+                "start",
+                "next",
+                "recheck",
+                "back",
+                "leaf_operation",
+                "leaf_operation_failure",
+            }
+        ):
+            return None
+        return {
+            "reportId": report.get("reportId"),
+            "sequence": report.get("sequence"),
+            "checkpointId": attestation.get("checkpointId"),
+            "previousCheckpointId": attestation.get("previousCheckpointId"),
+            "operation": operation,
+            "sceneFingerprintSha256": leaf_run["latestFingerprintSha256"],
+            "markerMatched": True,
+            "sessionSnapshotMatches": True,
+            "stageVerified": True,
+            "observedAt": observed_at
+            or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+
+    def _leaf_operation_recovery_state_signature(
+        self, session: DemoSession, challenge: dict[str, Any]
+    ) -> str:
+        """Hash only read-only state that can make a deferred proof newly valid."""
+
+        from ..infrastructure.native_history import (
+            native_leaf_checkpoint_attestation,
+            peek_native_undo_restoration_witness,
+        )
+
+        delivery = challenge.get("originalDelivery")
+        step_id = delivery.get("stepId") if isinstance(delivery, dict) else None
+        run = (
+            session.leaf_operation_runs.get(step_id)
+            if isinstance(step_id, str)
+            else None
+        )
+        if run is None:
+            run = session.pending_leaf_operation_run
+        attestation = native_leaf_checkpoint_attestation(session)
+        witness = peek_native_undo_restoration_witness()
+        return CompanionTransport._canonical_sha256(
+            {
+                "report": (
+                    {
+                        "reportId": self.last_report.get("reportId"),
+                        "sequence": self.last_report.get("sequence"),
+                    }
+                    if isinstance(self.last_report, dict)
+                    else None
+                ),
+                "leafRun": self._leaf_operation_recovery_run(run),
+                "checkpoint": (
+                    {
+                        "checkpointId": attestation.get("checkpointId"),
+                        "previousCheckpointId": attestation.get(
+                            "previousCheckpointId"
+                        ),
+                        "operation": attestation.get("operation"),
+                        "markerMatched": (
+                            attestation.get("marker", {}).get("matched")
+                            if isinstance(attestation.get("marker"), dict)
+                            else None
+                        ),
+                        "sessionSnapshotMatches": (
+                            attestation.get("journal", {}).get(
+                                "snapshotMatchesSession"
+                            )
+                            if isinstance(attestation.get("journal"), dict)
+                            else None
+                        ),
+                    }
+                    if isinstance(attestation, dict)
+                    else None
+                ),
+                "nativeUndoWitness": (
+                    {
+                        "sourceCheckpointId": witness.source_checkpoint_id,
+                        "restoredCheckpointId": witness.restored_checkpoint_id,
+                        "recoveryTokenSha256": witness.recovery_token_sha256,
+                        "restoredAt": witness.restored_at,
+                        "probeSatisfied": witness.recovery_probe_satisfied,
+                    }
+                    if witness is not None
+                    else None
+                ),
+            }
+        )
+
+    def _defer_leaf_operation_recovery(
+        self, challenge: dict[str, Any], session: DemoSession
+    ) -> None:
+        self._active_leaf_operation_recovery_challenge = deepcopy(challenge)
+        self._pending_leaf_operation_recovery_ack_id = None
+        try:
+            self._leaf_operation_recovery_retry_signature = (
+                self._leaf_operation_recovery_state_signature(session, challenge)
+            )
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            self._leaf_operation_recovery_retry_signature = None
+        self._leaf_operation_recovery_retry_at = time.monotonic() + 0.5
+
+    def _retry_deferred_leaf_operation_recovery(self) -> None:
+        # Older hosts and focused tests may construct a controller snapshot
+        # without fields introduced by the leaf-recovery protocol. Treat that
+        # shape as "no deferred recovery" instead of breaking the main pump.
+        challenge = getattr(
+            self, "_active_leaf_operation_recovery_challenge", None
+        )
+        if (
+            challenge is None
+            or self._pending_leaf_operation_recovery_ack_id is not None
+            or time.monotonic() < self._leaf_operation_recovery_retry_at
+        ):
+            return
+        from .. import get_session
+
+        try:
+            signature = self._leaf_operation_recovery_state_signature(
+                get_session(), challenge
+            )
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+            self._leaf_operation_recovery_retry_at = time.monotonic() + 0.5
+            return
+        if signature == self._leaf_operation_recovery_retry_signature:
+            self._leaf_operation_recovery_retry_at = time.monotonic() + 0.5
+            return
+        self._leaf_operation_recovery_retry_signature = signature
+        self._handle_leaf_operation_recovery_request(challenge)
+
+    def _handle_leaf_operation_recovery_request(self, challenge: Any) -> None:
+        """Prove an already-restored prefix without executing or replaying Blender actions."""
+
+        from .. import get_session
+        from ..infrastructure.native_history import (
+            peek_native_undo_restoration_witness,
+        )
+
+        transport = self._transport
+        if transport is None or not isinstance(challenge, dict):
+            return
+        recovery_id = challenge.get("recoveryId")
+        delivery = challenge.get("originalDelivery")
+        accepted_prefix = challenge.get("acceptedPrefix")
+        expected_state = challenge.get("expectedState")
+        authority = challenge.get("authorityProof")
+        if (
+            not isinstance(recovery_id, str)
+            or not isinstance(delivery, dict)
+            or not isinstance(delivery.get("requestId"), str)
+            or not isinstance(delivery.get("deliveryId"), str)
+            or not isinstance(challenge.get("replacementSessionFingerprintSha256"), str)
+        ):
+            self.error = "Leaf operation recovery challenge is malformed"
+            self.status = "Leaf operation recovery required"
+            return
+        if self._pending_leaf_operation_recovery_ack_id == recovery_id:
+            return
+        self._active_leaf_operation_recovery_challenge = deepcopy(challenge)
+        session = get_session()
+        try:
+            if (
+                challenge.get("mode") != "read_only_reconcile"
+                or challenge.get("automaticReplay") is not False
+                or not isinstance(accepted_prefix, dict)
+                or not isinstance(expected_state, dict)
+                or not isinstance(authority, dict)
+                or delivery.get("target")
+                != {"adapterId": "blender", "instanceId": self.instance_id}
+                or delivery.get("expectedState") != expected_state
+                or authority.get("reportId") != expected_state.get("reportId")
+                or authority.get("sequence") != expected_state.get("sequence")
+            ):
+                raise ValueError("Leaf operation recovery authority is stale")
+            action_name = delivery.get("actionName")
+            if action_name == TRANSFORM_GEOMETRY_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_geometry_operations import (
+                    verify_transform_geometry_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_geometry_nodes_transform as validate_definition,
+                )
+            elif action_name == LIGHT_TRAILS_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_light_trails_operations import (
+                    verify_light_trails_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_geometry_nodes_light_trails as validate_definition,
+                )
+            elif action_name == POSE_ANIMATION_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_pose_animation_operations import (
+                    verify_pose_animation_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.rigging import (
+                    validate_pose_animation as validate_definition,
+                )
+            elif action_name == ARMATURE_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_armature_operations import (
+                    verify_armature_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.rigging import (
+                    validate_armature as validate_definition,
+                )
+            elif action_name == SKIN_WEIGHTS_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_skin_weights_operations import (
+                    verify_skin_weights_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.rigging import (
+                    validate_skin_weights as validate_definition,
+                )
+            elif action_name == SOLIDIFY_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_solidify_operations import (
+                    verify_solidify_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_solidify as validate_definition,
+                )
+            elif action_name == BEVEL_MODIFIER_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_bevel_modifier_operations import (
+                    verify_bevel_modifier_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_bevel as validate_definition,
+                )
+            elif action_name == SINGLE_MATERIAL_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_single_material_operations import (
+                    verify_single_material_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.material import (
+                    validate_single_definition as validate_definition,
+                )
+            elif action_name == MATERIAL_PALETTE_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_material_palette_operations import (
+                    verify_material_palette_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.material import (
+                    validate_palette as validate_definition,
+                )
+            elif action_name == SUBDIVISION_SURFACE_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_subdivision_surface_operations import (
+                    verify_subdivision_surface_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_subdivision_surface as validate_definition,
+                )
+            elif action_name == EDIT_BEVEL_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_edit_bevel_operations import (
+                    verify_edit_bevel_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_edit_bevel_edges as validate_definition,
+                )
+            elif action_name == EDIT_INSET_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_edit_inset_operations import (
+                    verify_edit_inset_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_edit_inset_faces as validate_definition,
+                )
+            elif action_name == EDIT_TRIANGULATE_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_edit_triangulate_operations import (
+                    verify_edit_triangulate_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_triangulate as validate_definition,
+                )
+            elif action_name == EDIT_EXTRUDE_REGION_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_edit_extrude_region_operations import (
+                    verify_edit_extrude_region_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_extrude_region as validate_definition,
+                )
+            elif action_name == EDIT_POKE_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_edit_poke_operations import (
+                    verify_edit_poke_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_edit_poke_faces as validate_definition,
+                )
+            elif action_name == MIRROR_LEAF_OPERATION_ACTION:
+                from ..infrastructure.guided_mirror_operations import (
+                    verify_mirror_stage as verify_stage,
+                )
+                from ..infrastructure.snowman_actions.editing import (
+                    validate_mirror as validate_definition,
+                )
+            else:
+                raise ValueError("Leaf operation recovery profile is unsupported")
+            run = session.leaf_operation_runs.get(delivery.get("stepId"))
+            if run is None:
+                run = session.pending_leaf_operation_run
+            receipts = tuple(getattr(run, "operation_receipts", ()))
+            operation_ordinal = delivery.get("operationOrdinal")
+            operation_applied = (
+                run is not None
+                and isinstance(operation_ordinal, int)
+                and not isinstance(operation_ordinal, bool)
+                and len(receipts) == operation_ordinal
+                and operation_ordinal > 0
+                and getattr(receipts[-1], "operation_id", None)
+                == delivery.get("sourceOperationId")
+            )
+            completed_prefix = accepted_prefix.get("completedOperationIds")
+            report_identity_matches = isinstance(self.last_report, dict) and {
+                "reportId": self.last_report.get("reportId"),
+                "sequence": self.last_report.get("sequence"),
+            } == expected_state
+            local_recovery_evidence_lost = not report_identity_matches or (
+                isinstance(completed_prefix, list)
+                and len(completed_prefix) > 0
+                and run is None
+            )
+            if local_recovery_evidence_lost and not operation_applied:
+                retirement_at = self._leaf_operation_timestamp_at_or_after(
+                    challenge.get("requestedAt")
+                )
+                native_guard = challenge.get("nativeUndoGuard")
+                ack = {
+                    "formatVersion": challenge["formatVersion"],
+                    "challenge": deepcopy(challenge),
+                    "recoveryId": recovery_id,
+                    "requestId": delivery["requestId"],
+                    "originalDeliveryId": delivery["deliveryId"],
+                    "replacementSessionFingerprintSha256": challenge[
+                        "replacementSessionFingerprintSha256"
+                    ],
+                    "outcome": "document_incarnation_retired",
+                    "evidence": {
+                        "kind": "document_incarnation_retired",
+                        "reason": (
+                            "native_undo_witness_lost_after_reload"
+                            if native_guard is not None
+                            else "runtime_recovery_evidence_lost"
+                        ),
+                        "mutationOutcome": "indeterminate",
+                        "requiresFreshDocumentIncarnation": True,
+                    },
+                    "retainsTargetLock": False,
+                    "automaticReplay": False,
+                    "occurredAt": retirement_at,
+                }
+                self._pending_leaf_operation_recovery_ack_id = recovery_id
+                self._leaf_operation_recovery_retry_signature = None
+                transport.submit_leaf_operation_recovery_ack(ack)
+                return
+            if operation_applied:
+                if challenge.get("nativeUndoGuard") is not None:
+                    raise ValueError(
+                        "Native Undo recovery cannot accept an applied operation"
+                    )
+                step = next(
+                    (
+                        candidate
+                        for candidate in session.steps
+                        if candidate.id == delivery.get("stepId")
+                    ),
+                    None,
+                )
+                if (
+                    step is None
+                    or step.action is None
+                    or run.step_id != step.id
+                    or run.action_name != delivery.get("actionName")
+                    or run.recipe_id != delivery.get("recipeId")
+                    or run.catalog_version != delivery.get("catalogVersion")
+                    or tuple(run.operation_ids) != tuple(delivery.get("operationIds", ()))
+                ):
+                    raise ValueError("Applied leaf-operation run authority changed")
+                latest_receipt = receipts[-1]
+                definition = validate_definition(step.action.arguments)
+                if verify_stage(
+                    receipt_id=run.leaf_receipt_id,
+                    step_id=step.id,
+                    action_name=step.action.name,
+                    receipts=dict(session.receipts),
+                    definition=definition,
+                    completed_operations=tuple(range(1, operation_ordinal + 1)),
+                    expected_fingerprint=latest_receipt.after_sha256,
+                    partial_receipt=(
+                        session.receipts.get(step.id)
+                        if operation_ordinal == len(run.operation_ids)
+                        else run.partial_action_receipt
+                    ),
+                    rebind_after_native_restore=True,
+                ) is not True:
+                    raise ValueError("Applied leaf-operation Blender stage did not verify")
+                final = operation_ordinal == len(run.operation_ids)
+                report = self.last_report
+                if final:
+                    if (
+                        run.status != "completed"
+                        or not isinstance(report, dict)
+                        or report.get("reportId") == expected_state.get("reportId")
+                        or report.get("sequence") != expected_state.get("sequence") + 1
+                        or report.get("transition") != "step_succeeded"
+                        or report.get("stepId") != step.id
+                    ):
+                        raise ValueError(
+                            "Applied final operation lacks its next verified report"
+                        )
+                    final_report = {
+                        "reportId": report["reportId"],
+                        "sequence": report["sequence"],
+                    }
+                else:
+                    if (
+                        run.status != "in_progress"
+                        or not isinstance(report, dict)
+                        or {
+                            "reportId": report.get("reportId"),
+                            "sequence": report.get("sequence"),
+                        }
+                        != expected_state
+                    ):
+                        raise ValueError(
+                            "Applied partial operation changed its Companion report"
+                        )
+                    final_report = None
+                applied_run = self._leaf_operation_recovery_run(run)
+                applied_at = self._leaf_operation_timestamp_at_or_after(
+                    challenge.get("requestedAt"), delivery.get("dispatchedAt")
+                )
+                checkpoint = self._leaf_operation_recovery_checkpoint(
+                    session, applied_run, observed_at=applied_at
+                )
+                if checkpoint is None:
+                    raise ValueError(
+                        "Applied operation native Undo checkpoint cannot be attested"
+                    )
+                progress = {
+                    "runId": run.run_id,
+                    "bindingSha256": run.binding_sha256,
+                    "stepId": run.step_id,
+                    "actionName": run.action_name,
+                    "recipeId": run.recipe_id,
+                    "catalogVersion": run.catalog_version,
+                    "operationIds": list(run.operation_ids),
+                    "completedOperationIds": [
+                        receipt.operation_id for receipt in receipts
+                    ],
+                    "nextOrdinal": run.next_ordinal,
+                    "latestObservation": deepcopy(latest_receipt.observation),
+                    "leafCompleted": final,
+                    "finalReport": final_report,
+                }
+                terminal_result = self._leaf_operation_result_payload(
+                    delivery,
+                    status="succeeded",
+                    progress=progress,
+                    error=None,
+                    occurred_at=applied_at,
+                )
+                ack = {
+                    "formatVersion": challenge["formatVersion"],
+                    "challenge": deepcopy(challenge),
+                    "recoveryId": recovery_id,
+                    "requestId": delivery["requestId"],
+                    "originalDeliveryId": delivery["deliveryId"],
+                    "replacementSessionFingerprintSha256": challenge[
+                        "replacementSessionFingerprintSha256"
+                    ],
+                    "outcome": "operation_applied",
+                    "evidence": {
+                        "kind": "operation_applied",
+                        "terminalResult": terminal_result,
+                        "currentCheckpoint": checkpoint,
+                    },
+                    "retainsTargetLock": False,
+                    "automaticReplay": False,
+                    "occurredAt": applied_at,
+                }
+                self._pending_leaf_operation_recovery_ack_id = recovery_id
+                self._leaf_operation_recovery_retry_signature = None
+                transport.submit_leaf_operation_recovery_ack(ack)
+                return
+            if (
+                self.last_report is None
+                or {
+                    "reportId": self.last_report.get("reportId"),
+                    "sequence": self.last_report.get("sequence"),
+                }
+                != expected_state
+            ):
+                raise ValueError("Leaf operation recovery authority is stale")
+            leaf_run = self._leaf_operation_recovery_run(
+                session.pending_leaf_operation_run
+            )
+            if leaf_run != accepted_prefix:
+                raise ValueError("Current leaf-operation prefix does not match the challenge")
+            proof_at = self._leaf_operation_timestamp_at_or_after(
+                challenge.get("requestedAt")
+            )
+            checkpoint = self._leaf_operation_recovery_checkpoint(
+                session, leaf_run, observed_at=proof_at
+            )
+            if checkpoint is None:
+                raise ValueError("Current native Undo checkpoint cannot be attested")
+            completed_count = len(accepted_prefix["completedOperationIds"])
+            if completed_count == 0:
+                if checkpoint["checkpointId"] != authority.get(
+                    "authorizedStartCheckpointId"
+                ):
+                    raise ValueError("Current checkpoint is not the authorized start")
+            else:
+                next_index = session.active_index + 1
+                if next_index < 0 or next_index >= len(session.steps):
+                    raise ValueError("The accepted walkthrough has no recoverable leaf")
+                step = session.steps[next_index]
+                if step.id != delivery.get("stepId"):
+                    raise ValueError("The recoverable leaf changed")
+                run = session.pending_leaf_operation_run
+                definition = validate_definition(step.action.arguments)
+                verified = verify_stage(
+                    receipt_id=run.leaf_receipt_id,
+                    step_id=step.id,
+                    action_name=step.action.name,
+                    receipts=dict(session.receipts),
+                    definition=definition,
+                    completed_operations=tuple(range(1, completed_count + 1)),
+                    expected_fingerprint=accepted_prefix["latestFingerprintSha256"],
+                    partial_receipt=run.partial_action_receipt,
+                    rebind_after_native_restore=True,
+                )
+                if verified is not True:
+                    raise ValueError("Current Blender stage did not verify")
+
+            native_guard = challenge.get("nativeUndoGuard")
+            witness = peek_native_undo_restoration_witness()
+            evidence: dict[str, Any] = {
+                "kind": "prefix_restored",
+                "expectedState": deepcopy(expected_state),
+                "leafRun": deepcopy(accepted_prefix),
+                "currentCheckpoint": checkpoint,
+                "restoration": "prefix_observed_without_native_undo",
+            }
+            if native_guard is not None:
+                if witness is None:
+                    raise ValueError("Native Undo restoration witness is not available")
+                witness_payload = {
+                    "sourceCheckpointId": witness.source_checkpoint_id,
+                    "restoredCheckpointId": witness.restored_checkpoint_id,
+                    "recoveryTokenSha256": witness.recovery_token_sha256,
+                    "restoredAt": witness.restored_at,
+                    "probeSatisfied": witness.recovery_probe_satisfied,
+                }
+                if (
+                    witness_payload["recoveryTokenSha256"]
+                    != native_guard.get("recoveryTokenSha256")
+                    or (
+                        native_guard.get("expectedRestoredCheckpointId") is not None
+                        and witness_payload["restoredCheckpointId"]
+                        != native_guard.get("expectedRestoredCheckpointId")
+                    )
+                    or witness_payload["restoredCheckpointId"]
+                    != checkpoint["checkpointId"]
+                    or witness_payload["probeSatisfied"] is not True
+                ):
+                    raise ValueError("Native Undo restoration witness does not match")
+                evidence["restoration"] = "native_undo_restored"
+                evidence["nativeUndoWitness"] = witness_payload
+                proof_at = self._leaf_operation_timestamp_at_or_after(
+                    challenge.get("requestedAt"), witness_payload["restoredAt"]
+                )
+                checkpoint["observedAt"] = proof_at
+                self._pending_leaf_operation_recovery_witness_id = recovery_id
+            ack = {
+                "formatVersion": challenge["formatVersion"],
+                "challenge": deepcopy(challenge),
+                "recoveryId": recovery_id,
+                "requestId": delivery["requestId"],
+                "originalDeliveryId": delivery["deliveryId"],
+                "replacementSessionFingerprintSha256": challenge[
+                    "replacementSessionFingerprintSha256"
+                ],
+                "outcome": "prefix_restored",
+                "evidence": evidence,
+                "retainsTargetLock": False,
+                "automaticReplay": False,
+                "occurredAt": self._leaf_operation_timestamp_at_or_after(proof_at),
+            }
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as error:
+            self._defer_leaf_operation_recovery(challenge, session)
+            self.error = f"Leaf operation recovery remains unresolved: {error}"
+            self.status = "Leaf operation recovery required"
+            return
+        self._pending_leaf_operation_recovery_ack_id = recovery_id
+        self._leaf_operation_recovery_retry_signature = None
+        try:
+            transport.submit_leaf_operation_recovery_ack(ack)
+        except (KeyError, RuntimeError, TypeError, ValueError) as error:
+            self._pending_leaf_operation_recovery_ack_id = None
+            self._defer_leaf_operation_recovery(challenge, session)
+            self.error = f"Leaf operation recovery proof was rejected locally: {error}"
+            self.status = "Leaf operation recovery required"
+
+    def _acknowledge_leaf_operation_recovery(
+        self, recovery_id: Any, outcome: Any = "prefix_restored"
+    ) -> None:
+        """Finalize UI state and consume any witness only after server confirmation."""
+
+        if not isinstance(recovery_id, str):
+            return
+        if outcome == "unresolved_current_state":
+            self._pending_leaf_operation_recovery_ack_id = None
+            challenge = self._active_leaf_operation_recovery_challenge
+            if challenge is not None:
+                from .. import get_session
+
+                self._defer_leaf_operation_recovery(challenge, get_session())
+            return
+        if outcome not in {
+            "prefix_restored",
+            "operation_applied",
+            "document_incarnation_retired",
+        }:
+            return
+        if outcome == "prefix_restored" and recovery_id == getattr(
+            self, "_pending_leaf_operation_recovery_witness_id", None
+        ):
+            from ..infrastructure.native_history import (
+                consume_native_undo_restoration_witness,
+            )
+
+            consume_native_undo_restoration_witness()
+            self._pending_leaf_operation_recovery_witness_id = None
+        elif outcome == "document_incarnation_retired":
+            # Retirement is a quarantine declaration, never proof that native
+            # Undo succeeded.  Preserve any host witness and only clear the
+            # controller's pending acknowledgement pointer.
+            self._pending_leaf_operation_recovery_witness_id = None
+        self._active_leaf_operation_recovery_challenge = None
+        self._pending_leaf_operation_recovery_ack_id = None
+        self._leaf_operation_recovery_retry_signature = None
+        if outcome == "document_incarnation_retired":
+            self.error = (
+                "Recovery evidence was lost after add-on reload; open or reload "
+                "a fresh Blender document before continuing managed operations"
+            )
+            self.status = "Current Blender document quarantined"
+        else:
+            self.error = ""
+            self.status = "Leaf operation recovery reconciled"
 
     @staticmethod
     def _menu_control_identity(delivery: dict[str, Any]) -> dict[str, Any]:
@@ -4462,6 +7029,9 @@ class CompanionController:
     def _submit_menu_control_history_transition(self, transition: Any) -> None:
         if not isinstance(transition, dict):
             raise TypeError("Menu-control history transition must be an object")
+        if self._execution_track_delivery is not None:
+            self._handle_execution_track_history_transition(transition)
+            return
         transport = self._transport
         if (
             transport is None
@@ -4638,7 +7208,7 @@ class CompanionController:
         from .. import get_session
 
         self._reap_stopping_transports()
-        if self.pending_plan is not None and not get_session().receipts:
+        if self.pending_plan is not None and not get_session().has_execution_state:
             pending = self.pending_plan
             pending_content_sha256 = self.pending_plan_content_sha256
             try:
@@ -4694,10 +7264,58 @@ class CompanionController:
                         continue
                 if message.get("kind") == "action_execute_request":
                     self._handle_action_execute_request(message.get("request"))
+                elif message.get("kind") == "leaf_operation_execute_request":
+                    self._handle_leaf_operation_execute_request(message.get("request"))
+                elif message.get("kind") == "leaf_operation_recovery_request":
+                    self._handle_leaf_operation_recovery_request(message.get("request"))
+                elif message.get("kind") == "leaf_operation_recovery_acknowledged":
+                    self._acknowledge_leaf_operation_recovery(
+                        message.get("recoveryId"), message.get("outcome")
+                    )
+                elif message.get("kind") == "leaf_operation_recovery_rejected":
+                    self._pending_leaf_operation_recovery_ack_id = None
+                    challenge = self._active_leaf_operation_recovery_challenge
+                    if challenge is not None:
+                        self._defer_leaf_operation_recovery(challenge, get_session())
+                    self.error = str(
+                        message.get("message")
+                        or "Runtime rejected the leaf-operation recovery proof"
+                    )
+                    self.status = "Leaf operation recovery required"
+                elif message.get("kind") == "leaf_operation_result_rejected":
+                    self.error = str(
+                        message.get("message")
+                        or "Runtime rejected the leaf-operation result"
+                    )
+                    self.status = "Leaf operation result rejected"
+                elif message.get("kind") == "leaf_operation_result_acknowledged":
+                    if self.status.startswith("Leaf operation") or self.status.startswith("Leaf "):
+                        self.error = ""
                 elif message.get("kind") == "execution_track_execution_delivery":
                     self._handle_execution_track_execution_delivery(message.get("request"))
                 elif message.get("kind") == "execution_track_execution_recovery_request":
                     self._handle_execution_track_execution_recovery(message.get("request"))
+                elif (
+                    message.get("kind")
+                    == "execution_track_execution_progress_acknowledged"
+                ):
+                    self._handle_execution_track_progress_ack(message)
+                elif (
+                    message.get("kind")
+                    == "execution_track_execution_managed_start_acknowledged"
+                ):
+                    self._handle_execution_track_managed_start_ack(message)
+                elif (
+                    message.get("kind")
+                    == "execution_track_execution_managed_start_rejected"
+                ):
+                    self._terminate_execution_track_before_managed(
+                        str(
+                            message.get("message")
+                            or "Runtime rejected execution-track managed start"
+                        ),
+                        reason="document_authority_drift",
+                    )
                 elif message.get("kind") == "execution_track_execution_result_acknowledged":
                     from ..infrastructure.execution_track_execution import (
                         acknowledge_outbox,
@@ -4714,6 +7332,11 @@ class CompanionController:
                         )
                         if not failed_managed:
                             acknowledge_outbox(bpy.context.scene, request_id)
+                            self._execution_track_delivery = None
+                            self._execution_track_driver = None
+                            self._execution_track_outbox_cache = None
+                            self._execution_track_managed_commit_token = None
+                            self._menu_control_recovery_locked = False
                         else:
                             transport = self._transport
                             if transport is not None:
@@ -4721,7 +7344,7 @@ class CompanionController:
                     self.status = (
                         "Execution-track failed-managed evidence retained for recovery"
                         if isinstance(request_id, str) and failed_managed
-                        else "Execution-track request safely terminated"
+                        else "Execution-track request completed"
                     )
                 elif (
                     message.get("kind")
@@ -4735,9 +7358,16 @@ class CompanionController:
 
                     request_id = message.get("requestId")
                     retained = False
+                    retains_lock = False
                     if isinstance(request_id, str):
                         try:
                             durable = load_outbox(bpy.context.scene)
+                            retains_lock = bool(
+                                isinstance(durable, dict)
+                                and durable.get("recoveryAck", {}).get(
+                                    "retainsTargetLock"
+                                )
+                            )
                             recovered_report = (
                                 durable.get("recoveredReport")
                                 if isinstance(durable, dict)
@@ -4746,8 +7376,12 @@ class CompanionController:
                             retained = retain_failed_managed_terminal(
                                 bpy.context.scene, request_id
                             )
-                            if not retained:
+                            if not retained and not retains_lock:
                                 acknowledge_outbox(bpy.context.scene, request_id)
+                                self._execution_track_delivery = None
+                                self._execution_track_driver = None
+                                self._execution_track_outbox_cache = None
+                                self._execution_track_managed_commit_token = None
                                 if isinstance(recovered_report, dict):
                                     self.last_report = deepcopy(recovered_report)
                                     self._sequence = max(
@@ -4773,6 +7407,8 @@ class CompanionController:
                     self.status = (
                         "Execution-track failed-managed state retained for repair"
                         if isinstance(request_id, str) and retained
+                        else "Execution-track unresolved state remains locked"
+                        if isinstance(request_id, str) and retains_lock
                         else "Execution-track recovery reconciled"
                     )
                 elif message.get("kind") in {
@@ -5309,8 +7945,13 @@ class CompanionController:
                             and session.revision is not None
                             else "Connected"
                         )
-                    if outbox_error is None and not execution_outbox_pending:
+                    if (
+                        outbox_error is None
+                        and not execution_outbox_pending
+                        and not getattr(self, "_connected_session_reported", False)
+                    ):
                         self.report("connected")
+                        self._connected_session_reported = True
                 elif message.get("kind") == "error":
                     self.error = str(message.get("message", "Runtime connection error"))
                     self.status = "Connection error"
@@ -5334,6 +7975,7 @@ class CompanionController:
                             and session.revision is not None
                             else "Connected"
                         )
+        self._retry_deferred_leaf_operation_recovery()
         if not self._timer_registered:
             return None
         return 0.2 if self.connected else 1.0
@@ -5414,6 +8056,10 @@ class CompanionController:
                     session.receipts,
                 )
             )
+        if self._sequence >= MAX_COMPANION_REPORT_SEQUENCE:
+            raise RuntimeError(
+                "Companion report sequence is exhausted; open or reload a fresh Blender document"
+            )
         self._sequence += 1
         report_id = report_id_override or str(uuid.uuid4())
         if transition == "current_state_rechecked":
@@ -5446,7 +8092,7 @@ class CompanionController:
             "observation_recovered": "recheck",
             "step_rolled_back": "back",
         }.get(transition)
-        if protocol_version in {"1.5.0", "1.6.0"} and (
+        if protocol_version in NATIVE_UNDO_PROTOCOL_VERSIONS and (
             expected_checkpoint_operation is not None
             or transition == "current_state_rechecked"
         ):
@@ -5525,13 +8171,7 @@ class CompanionController:
             "error": error,
             "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
-        if report["protocolVersion"] in {
-            "1.2.0",
-            "1.3.0",
-            "1.4.0",
-            "1.5.0",
-            "1.6.0",
-        }:
+        if report["protocolVersion"] in OBSERVATION_POLICY_PROTOCOL_VERSIONS:
             report["observationGate"] = gate.report_data() if gate is not None else None
             retry = (
                 session.success_gate_retry_copy(step.id)
@@ -5540,7 +8180,7 @@ class CompanionController:
             )
             if retry is not None:
                 report["observationRetry"] = retry
-        if report["protocolVersion"] in {"1.5.0", "1.6.0"}:
+        if report["protocolVersion"] in NATIVE_UNDO_PROTOCOL_VERSIONS:
             report["artifactAttestation"] = (
                 deepcopy(self._artifact_attestation)
                 if phase == "completed" and transition != "current_state_rechecked"

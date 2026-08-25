@@ -275,7 +275,7 @@ def draw_proposal_review(layout, companion, active_session) -> None:
     )
     accept = decisions.row(align=True)
     missing_verifiable_base = _proposal_accept_requires_verifiable_base(proposal)
-    accept.enabled = not bool(active_session.receipts) and not missing_verifiable_base
+    accept.enabled = not active_session.has_execution_state and not missing_verifiable_base
     accept.operator("operating_line.accept_proposal", icon="CHECKMARK")
     decisions.operator("operating_line.reject_proposal", icon="CANCEL")
     if missing_verifiable_base:
@@ -283,8 +283,11 @@ def draw_proposal_review(layout, companion, active_session) -> None:
             text="Accept requires a protocol 1.1+ proposal with a verifiable base",
             icon="ERROR",
         )
-    elif active_session.receipts:
-        review.label(text="Use Back to reach the start before accepting", icon="ERROR")
+    elif active_session.has_execution_state:
+        review.label(
+            text="Finish/abort leaf operations and use Back before accepting",
+            icon="ERROR",
+        )
     elif (
         companion.provider_handoff.active
         or companion.initial_plan_handoff.active
@@ -682,7 +685,7 @@ def _draw_revision_branches(layout, companion, active_session) -> None:
             item.label(text=f"Plan r{plan['revision']}")
         if branch["status"] == "accepted" and not active:
             actions = item.row(align=True)
-            actions.enabled = can_prepare and not bool(active_session.receipts)
+            actions.enabled = can_prepare and not active_session.has_execution_state
             switch = actions.operator(
                 "operating_line.switch_revision_branch",
                 text="Switch",
@@ -698,9 +701,9 @@ def _draw_revision_branches(layout, companion, active_session) -> None:
             )
             merge_operator.source_thread_id = branch["threadId"]
 
-    if active_session.receipts:
+    if active_session.has_execution_state:
         branches_box.label(
-            text="Use Back to reach the start before switching or merging",
+            text="Finish/abort leaf operations and use Back before switching or merging",
             icon="ERROR",
         )
     if companion.revision_branches_error:

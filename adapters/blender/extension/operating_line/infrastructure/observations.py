@@ -10,22 +10,27 @@ from pathlib import Path
 from typing import Any, Literal
 
 import bpy
+import bmesh
 from mathutils import Vector
 
-from ..application.session import ActionReceipt
+from ..application.session import ActionReceipt, MaterialSurfaceState
 from .snowman_actions.common import (
     COLLECTION_LOGICAL_ID,
     COLLECTION_NAME,
     action_fcurves,
     action_keyframe_signature,
     build_resource_registry,
+    embedded_node_tree_semantic_signature,
     find_artifact,
     find_owned_modifier,
     find_owned_skin_weights,
     mesh_content_signature,
+    node_tree_semantic_signature,
     resolve_resource,
+    snapshot_material_surface,
 )
 from .snowman_actions.editing import (
+    _extrude_region_geometry,
     validate_edit_bevel_edges,
     validate_edit_inset_faces,
     validate_edit_poke_faces,
@@ -33,6 +38,7 @@ from .snowman_actions.editing import (
     validate_subdivide,
     validate_triangulate,
 )
+from .snowman_actions.light_trails_scene import validate_light_trails_scene
 from .snowman_actions.rigging import (
     validate_armature,
     validate_pose_animation,
@@ -1247,30 +1253,290 @@ def _material_assigned(
     requested_targets = (
         tuple(targets)
         if isinstance(targets, list)
+        and 1 <= len(targets) <= 64
         and all(isinstance(item, str) and item for item in targets)
+        and len(set(targets)) == len(targets)
         else ()
     )
+    if not isinstance(material_id, str) or not material_id or not requested_targets:
+        return False, {
+            "materialId": material_id if isinstance(material_id, str) else None,
+            "materialName": None,
+            "targetIds": list(requested_targets),
+            "assignedTargetIds": [],
+            "useNodes": False,
+            "principledNodeCount": 0,
+            "outputNodeCount": 0,
+            "baseColor": [],
+            "roughness": None,
+            "metallic": None,
+            "receiptMatches": False,
+            "ownershipMatches": False,
+            "materialSurfaceMatches": False,
+            "assignmentsMatch": False,
+            "sourceContentIntact": False,
+        }
     registry = build_resource_registry(receipts)
-    material_identity = registry.get(material_id) if isinstance(material_id, str) else None
+    material_identity = registry.get(material_id)
     material = resolve_resource(material_identity) if material_identity is not None else None
+    matching_receipts = tuple(
+        receipt
+        for receipt in receipts.values()
+        if receipt.action_name
+        in {
+            "blender.material.create_and_assign",
+            "blender.material.create_palette_and_assign",
+        }
+        and material_identity is not None
+        and material_identity in receipt.created
+    )
+    receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+    surface_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.resource == material_identity
+            and mutation.attribute == "material_surface"
+        )
+        if receipt is not None
+        else ()
+    )
+    surface_mutation = surface_mutations[0] if len(surface_mutations) == 1 else None
+    expected_surface = (
+        surface_mutation.after
+        if surface_mutation is not None
+        and isinstance(surface_mutation.after, MaterialSurfaceState)
+        else None
+    )
+    principled_nodes = (
+        tuple(
+            node
+            for node in material.node_tree.nodes
+            if node.bl_idname == "ShaderNodeBsdfPrincipled"
+        )
+        if isinstance(material, bpy.types.Material)
+        and material.use_nodes
+        and material.node_tree is not None
+        else ()
+    )
+    output_nodes = (
+        tuple(
+            node
+            for node in material.node_tree.nodes
+            if node.bl_idname == "ShaderNodeOutputMaterial"
+        )
+        if isinstance(material, bpy.types.Material)
+        and material.use_nodes
+        and material.node_tree is not None
+        else ()
+    )
+    try:
+        actual_surface = (
+            snapshot_material_surface(material)
+            if isinstance(material, bpy.types.Material)
+            and len(principled_nodes) == 1
+            and len(output_nodes) == 1
+            else None
+        )
+    except RuntimeError:
+        actual_surface = None
+
+    def number_matches(actual: float, expected: float) -> bool:
+        return math.isclose(
+            float(actual), float(expected), rel_tol=1e-6, abs_tol=1e-6
+        )
+    surface_values_match = bool(
+        actual_surface is not None
+        and actual_surface.use_nodes
+        and all(
+            number_matches(actual, expected)
+            for actual, expected in zip(
+                actual_surface.diffuse_color,
+                actual_surface.principled_base_color,
+                strict=True,
+            )
+        )
+        and number_matches(
+            actual_surface.roughness, actual_surface.principled_roughness
+        )
+        and number_matches(actual_surface.metallic, actual_surface.principled_metallic)
+    )
+    material_surface_matches = bool(
+        expected_surface is not None
+        and actual_surface == expected_surface
+        and surface_values_match
+    )
+    ownership_matches = bool(
+        isinstance(material, bpy.types.Material)
+        and expected_surface is not None
+        and material.name == expected_surface.display_name
+        and receipt is not None
+        and material_identity is not None
+        and material_identity.receipt_token == receipt.receipt_id
+        and material_identity.action_name == receipt.action_name
+    )
+    assignment_records: dict[str, tuple[bool, bool]] = {}
+    block_target_order: list[str] = []
+    block_structure_matches = False
+    surface_index = -1
+    block_end = -1
+    # A palette receipt concatenates one surface-plus-target block per material,
+    # while each Observation may intentionally name only an ordered target subset.
+    # Locate and validate the complete block before selecting the requested targets.
+    if receipt is not None and surface_mutation is not None:
+        surface_index = receipt.mutations.index(surface_mutation)
+        block_end = next(
+            (
+                index
+                for index in range(surface_index + 1, len(receipt.mutations))
+                if receipt.mutations[index].attribute == "material_surface"
+            ),
+            len(receipt.mutations),
+        )
+        block_mutations = receipt.mutations[surface_index + 1 : block_end]
+        block_structure_matches = bool(
+            block_mutations and len(block_mutations) % 3 == 0
+        )
+        if block_structure_matches:
+            for offset in range(0, len(block_mutations), 3):
+                data_guard, mesh_guard, slot_write = block_mutations[offset : offset + 3]
+                target_identity = data_guard.resource
+                target_id = target_identity.logical_id
+                target = resolve_resource(target_identity)
+                mesh_identities = (
+                    tuple(
+                        identity
+                        for identity in registry.values()
+                        if identity.resource_type == "MESH"
+                        and resolve_resource(identity) is target.data
+                    )
+                    if isinstance(target, bpy.types.Object) and target.type == "MESH"
+                    else ()
+                )
+                mesh_identity = (
+                    mesh_identities[0] if len(mesh_identities) == 1 else None
+                )
+                mesh = (
+                    resolve_resource(mesh_identity)
+                    if mesh_identity is not None
+                    else None
+                )
+                target_receipt_matches = bool(
+                    target_id not in assignment_records
+                    and registry.get(target_id) == target_identity
+                    and mesh_identity is not None
+                    and data_guard.attribute == "data"
+                    and data_guard.before == mesh_identity
+                    and data_guard.after == mesh_identity
+                    and mesh_guard.resource == mesh_identity
+                    and mesh_guard.attribute == "mesh_content"
+                    and mesh_guard.before == mesh_guard.after
+                    and slot_write.resource == target_identity
+                    and slot_write.attribute == "material_slots"
+                    and slot_write.after == (material_identity,)
+                )
+                if not target_receipt_matches:
+                    block_structure_matches = False
+                    break
+                current_content_intact = bool(
+                    isinstance(mesh, bpy.types.Mesh)
+                    and mesh_content_signature(mesh) == mesh_guard.after
+                )
+                current_assignment_matches = bool(
+                    isinstance(target, bpy.types.Object)
+                    and target.type == "MESH"
+                    and target.data is mesh
+                    and isinstance(material, bpy.types.Material)
+                    and tuple(slot.material for slot in target.material_slots)
+                    == (material,)
+                )
+                assignment_records[target_id] = (
+                    current_content_intact,
+                    current_assignment_matches,
+                )
+                block_target_order.append(target_id)
+
     assigned: list[str] = []
-    if isinstance(material, bpy.types.Material):
-        for target_id in requested_targets:
-            target_identity = registry.get(target_id)
-            target = resolve_resource(target_identity) if target_identity is not None else None
-            if isinstance(target, bpy.types.Object) and tuple(
-                slot.material for slot in target.material_slots
-            ) == (material,):
-                assigned.append(target_id)
+    source_content_intact = True
+    requested_positions: list[int] = []
+    for target_id in requested_targets:
+        assignment = assignment_records.get(target_id)
+        if assignment is None:
+            source_content_intact = False
+            continue
+        current_content_intact, current_assignment_matches = assignment
+        source_content_intact = source_content_intact and current_content_intact
+        requested_positions.append(block_target_order.index(target_id))
+        if current_assignment_matches:
+            assigned.append(target_id)
+    assignment_receipts_match = bool(
+        len(requested_positions) == len(requested_targets)
+        and requested_positions == sorted(requested_positions)
+    )
+    single_receipt_matches = bool(
+        receipt is not None
+        and receipt.action_name == "blender.material.create_and_assign"
+        and receipt.created == (material_identity,)
+        and surface_index == 0
+        and block_end == len(receipt.mutations)
+        and tuple(block_target_order) == requested_targets
+        and receipt.anchor == registry.get(requested_targets[0])
+    )
+    palette_receipt_matches = bool(
+        receipt is not None
+        and receipt.action_name == "blender.material.create_palette_and_assign"
+        and material_identity in receipt.created
+        and len({identity.logical_id for identity in receipt.created})
+        == len(receipt.created)
+        and all(
+            identity.resource_type == "MATERIAL"
+            and identity.receipt_token == receipt.receipt_id
+            and identity.action_name == receipt.action_name
+            for identity in receipt.created
+        )
+        and receipt.anchor is not None
+        and receipt.anchor.resource_type == "OBJECT"
+    )
+    receipt_matches = bool(
+        material_identity is not None
+        and len(surface_mutations) == 1
+        and block_structure_matches
+        and assignment_receipts_match
+        and (single_receipt_matches or palette_receipt_matches)
+    )
+    assignments_match = len(assigned) == len(requested_targets)
     satisfied = (
         isinstance(material, bpy.types.Material)
-        and bool(requested_targets)
-        and len(assigned) == len(requested_targets)
+        and receipt_matches
+        and ownership_matches
+        and material_surface_matches
+        and assignments_match
+        and source_content_intact
     )
     return satisfied, {
-        "materialId": material_id if isinstance(material_id, str) else None,
+        "materialId": material_id,
+        "materialName": material.name if isinstance(material, bpy.types.Material) else None,
         "targetIds": list(requested_targets),
         "assignedTargetIds": assigned,
+        "useNodes": bool(material.use_nodes)
+        if isinstance(material, bpy.types.Material)
+        else False,
+        "principledNodeCount": len(principled_nodes),
+        "outputNodeCount": len(output_nodes),
+        "baseColor": list(actual_surface.principled_base_color)
+        if actual_surface is not None
+        else [],
+        "roughness": actual_surface.principled_roughness
+        if actual_surface is not None
+        else None,
+        "metallic": actual_surface.principled_metallic
+        if actual_surface is not None
+        else None,
+        "receiptMatches": receipt_matches,
+        "ownershipMatches": ownership_matches,
+        "materialSurfaceMatches": material_surface_matches,
+        "assignmentsMatch": assignments_match,
+        "sourceContentIntact": source_content_intact,
     }
 
 
@@ -1724,6 +1990,8 @@ def _pose_animation_ready(
                         continue
                     for channel, values in (
                         ("rotation_euler", pose.rotation_euler),
+                        ("rotation_quaternion", pose.rotation_quaternion),
+                        ("rotation_axis_angle", pose.rotation_axis_angle),
                         ("location", pose.location),
                         ("scale", pose.scale),
                     ):
@@ -1873,7 +2141,14 @@ def _pose_animation_ready(
         isinstance(raw_channels, list)
         and raw_channels
         and all(
-            item in {"location", "rotation_euler", "scale"}
+            item
+            in {
+                "location",
+                "rotation_euler",
+                "rotation_quaternion",
+                "rotation_axis_angle",
+                "scale",
+            }
             for item in raw_channels
         )
         and len(set(raw_channels)) == len(raw_channels)
@@ -1917,7 +2192,13 @@ def _pose_animation_ready(
             for curve in action_fcurves(animation)
         }
     expected_frames = {float(frame) for frame in frames}
-    component_counts = {"location": 3, "rotation_euler": 3, "scale": 3}
+    component_counts = {
+        "location": 3,
+        "rotation_euler": 3,
+        "rotation_quaternion": 4,
+        "rotation_axis_angle": 4,
+        "scale": 3,
+    }
     channels_complete = (
         isinstance(armature, bpy.types.Object)
         and armature.type == "ARMATURE"
@@ -2479,7 +2760,50 @@ def _mesh_triangulated(
     proof = _replacement_mesh_proof(
         parameters, receipts, "blender.mesh.edit_triangulate"
     )
+    source_mesh = proof["sourceMesh"]
     result_mesh = proof["resultMesh"]
+    receipt = proof["receipt"]
+    source_identity = proof["sourceIdentity"]
+    source_topology = (
+        proof["sourceVertexCount"],
+        proof["sourceEdgeCount"],
+        proof["sourceFaceCount"],
+    )
+    result_topology = (
+        proof["vertexCount"],
+        proof["edgeCount"],
+        proof["faceCount"],
+    )
+    source_content_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.attribute == "mesh_content"
+            and mutation.resource == source_identity
+            and mutation.before == mutation.after
+            and mutation.before is not None
+        )
+        if receipt is not None
+        else ()
+    )
+    source_content_intact = bool(
+        isinstance(source_mesh, bpy.types.Mesh)
+        and len(source_content_mutations) == 1
+        and mesh_content_signature(source_mesh) == source_content_mutations[0].after
+    )
+    source_loop_count = (
+        sum(len(polygon.vertices) for polygon in source_mesh.polygons)
+        if isinstance(source_mesh, bpy.types.Mesh)
+        else 0
+    )
+    expected_topology = (
+        source_topology[0],
+        source_topology[1] + source_loop_count - 3 * source_topology[2],
+        source_loop_count - 2 * source_topology[2],
+    )
+    topology_matches = bool(
+        source_loop_count and result_topology == expected_topology
+    )
     nonempty = all(
         proof[key] > 0 for key in ("vertexCount", "edgeCount", "faceCount")
     )
@@ -2491,12 +2815,23 @@ def _mesh_triangulated(
     details = _replacement_mesh_details(
         proof,
         {
-            "topologyMatches": nonempty and all_triangles,
+            "topologyMatches": topology_matches,
             "nonempty": nonempty,
             "allTriangles": all_triangles,
+            "sourceContentIntact": source_content_intact,
+            "sourceLoopCount": source_loop_count,
+            "expectedVertexCount": expected_topology[0],
+            "expectedEdgeCount": expected_topology[1],
+            "expectedFaceCount": expected_topology[2],
         },
     )
-    return _replacement_mesh_observation_satisfied(details), details
+    return bool(
+        _replacement_mesh_observation_satisfied(details)
+        and topology_matches
+        and nonempty
+        and all_triangles
+        and source_content_intact
+    ), details
 
 
 def _replacement_mesh_grew(
@@ -2523,9 +2858,82 @@ def _replacement_mesh_grew(
 def _mesh_region_extruded(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
-    return _replacement_mesh_grew(
+    if set(parameters) == {"targetId", "resultMeshId"}:
+        return _replacement_mesh_grew(
+            parameters, receipts, "blender.mesh.edit_extrude_region"
+        )
+    definition = validate_extrude_region(parameters)
+    proof = _replacement_mesh_proof(
         parameters, receipts, "blender.mesh.edit_extrude_region"
     )
+    source_mesh = proof["sourceMesh"]
+    source_topology = (
+        proof["sourceVertexCount"],
+        proof["sourceEdgeCount"],
+        proof["sourceFaceCount"],
+    )
+    result_topology = (
+        proof["vertexCount"],
+        proof["edgeCount"],
+        proof["faceCount"],
+    )
+    selected_counts = (0, 0, 0, 0)
+    if isinstance(source_mesh, bpy.types.Mesh):
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(source_mesh)
+            faces, edges, vertices = _extrude_region_geometry(
+                bm, definition.polygon_indices
+            )
+            selected_faces = set(faces)
+            selected_counts = (
+                len(faces),
+                len(edges),
+                len(vertices),
+                sum(
+                    1
+                    for edge in edges
+                    if sum(face in selected_faces for face in edge.link_faces) == 1
+                ),
+            )
+        finally:
+            bm.free()
+    selected_face_count, selected_edge_count, selected_vertex_count, boundary_edge_count = (
+        selected_counts
+    )
+    expected_topology = (
+        source_topology[0] + selected_vertex_count,
+        source_topology[1] + selected_edge_count + boundary_edge_count,
+        source_topology[2] + boundary_edge_count,
+    )
+    topology_matches = bool(
+        selected_face_count == len(definition.polygon_indices)
+        and boundary_edge_count > 0
+        and result_topology == expected_topology
+    )
+    topology_grew = all(
+        result_count > source_count
+        for result_count, source_count in zip(result_topology, source_topology)
+    )
+    details = _replacement_mesh_details(
+        proof,
+        {
+            "topologyMatches": topology_matches,
+            "topologyGrew": topology_grew,
+            "selectedFaceCount": selected_face_count,
+            "selectedEdgeCount": selected_edge_count,
+            "selectedVertexCount": selected_vertex_count,
+            "boundaryEdgeCount": boundary_edge_count,
+            "expectedVertexCount": expected_topology[0],
+            "expectedEdgeCount": expected_topology[1],
+            "expectedFaceCount": expected_topology[2],
+        },
+    )
+    return bool(
+        _replacement_mesh_observation_satisfied(details)
+        and topology_matches
+        and topology_grew
+    ), details
 
 
 def _mesh_edges_beveled(
@@ -3060,6 +3468,7 @@ def _modifier_ready(
         "modifierType",
         "width",
         "segments",
+        "angleLimit",
         "thickness",
         "offset",
         "useEvenOffset",
@@ -3138,6 +3547,28 @@ def _modifier_ready(
         "useRim",
         "useRimOnly",
     }
+    if modifier_type == "BEVEL":
+        properties_match = properties_match and frozenset(parameters) in {
+            frozenset(
+                {
+                    "targetId",
+                    "modifierId",
+                    "modifierType",
+                    "width",
+                    "segments",
+                }
+            ),
+            frozenset(
+                {
+                    "targetId",
+                    "modifierId",
+                    "modifierType",
+                    "width",
+                    "segments",
+                    "angleLimit",
+                }
+            ),
+        }
     if modifier_type == "SOLIDIFY":
         properties_match = properties_match and set(parameters) == {
             "targetId",
@@ -3162,10 +3593,12 @@ def _modifier_ready(
         "showOnCage",
     }
     if modifier_type == "SUBSURF":
-        properties_match = (
-            properties_match
-            and subdivision_surface_parameters.issubset(parameters)
-        )
+        properties_match = properties_match and set(parameters) == {
+            "targetId",
+            "modifierId",
+            "modifierType",
+            *subdivision_surface_parameters,
+        }
     if modifier_type == "MIRROR":
         properties_match = properties_match and set(parameters) == {
             "targetId",
@@ -3178,6 +3611,7 @@ def _modifier_ready(
     if modifier is not None:
         numeric_properties = {
             "width": "width",
+            "angleLimit": "angle_limit",
             "thickness": "thickness",
             "offset": "offset",
         }
@@ -3272,6 +3706,11 @@ def _modifier_ready(
     actual_mirror_axis = None
     mirror_fixed_state_matches = False
     mirror_object_absent = False
+    actual_bevel_width = None
+    actual_bevel_segments = None
+    actual_bevel_angle_limit = None
+    actual_bevel_limit_method = None
+    bevel_fixed_state_matches = False
     actual_solidify_thickness = None
     actual_solidify_offset = None
     actual_solidify_mode = None
@@ -3283,7 +3722,7 @@ def _modifier_ready(
     evaluated_topology = (0, 0, 0)
     evaluated_finite = False
     evaluated_within_limits = False
-    if modifier_type in {"MIRROR", "SOLIDIFY"} and modifier is not None:
+    if modifier_type in {"BEVEL", "MIRROR", "SOLIDIFY", "SUBSURF"} and modifier is not None:
         owning_receipt = next(
             (
                 receipt
@@ -3359,7 +3798,20 @@ def _modifier_ready(
                     evaluated.to_mesh_clear()
             except RuntimeError:
                 pass
-    if modifier_type == "MIRROR" and modifier is not None:
+    if modifier_type == "BEVEL" and modifier is not None:
+        actual_bevel_width = float(modifier.width)
+        actual_bevel_segments = int(modifier.segments)
+        actual_bevel_angle_limit = float(modifier.angle_limit)
+        actual_bevel_limit_method = str(modifier.limit_method)
+        bevel_fixed_state_matches = actual_bevel_limit_method == "ANGLE"
+        properties_match = bool(
+            properties_match
+            and bevel_fixed_state_matches
+            and source_content_intact
+            and evaluated_finite
+            and evaluated_within_limits
+        )
+    elif modifier_type == "MIRROR" and modifier is not None:
         expected_axis = {
             "X": (True, False, False),
             "Y": (False, True, False),
@@ -3451,6 +3903,13 @@ def _modifier_ready(
             and evaluated_finite
             and evaluated_within_limits
         )
+    elif modifier_type == "SUBSURF" and modifier is not None:
+        properties_match = bool(
+            properties_match
+            and source_content_intact
+            and evaluated_finite
+            and evaluated_within_limits
+        )
     satisfied = bool(
         isinstance(target, bpy.types.Object)
         and owner is target
@@ -3485,6 +3944,22 @@ def _modifier_ready(
                 "evaluatedWithinLimits": evaluated_within_limits,
             }
         )
+    elif modifier_type == "BEVEL":
+        details.update(
+            {
+                "width": actual_bevel_width,
+                "segments": actual_bevel_segments,
+                "angleLimit": actual_bevel_angle_limit,
+                "limitMethod": actual_bevel_limit_method,
+                "bevelFixedStateMatches": bevel_fixed_state_matches,
+                "sourceContentIntact": source_content_intact,
+                "evaluatedVertexCount": evaluated_topology[0],
+                "evaluatedEdgeCount": evaluated_topology[1],
+                "evaluatedFaceCount": evaluated_topology[2],
+                "evaluatedFinite": evaluated_finite,
+                "evaluatedWithinLimits": evaluated_within_limits,
+            }
+        )
     elif modifier_type == "SOLIDIFY":
         details.update(
             {
@@ -3495,6 +3970,17 @@ def _modifier_ready(
                 "useRim": actual_solidify_rim,
                 "useRimOnly": actual_solidify_rim_only,
                 "solidifyFixedStateMatches": solidify_fixed_state_matches,
+                "sourceContentIntact": source_content_intact,
+                "evaluatedVertexCount": evaluated_topology[0],
+                "evaluatedEdgeCount": evaluated_topology[1],
+                "evaluatedFaceCount": evaluated_topology[2],
+                "evaluatedFinite": evaluated_finite,
+                "evaluatedWithinLimits": evaluated_within_limits,
+            }
+        )
+    elif modifier_type == "SUBSURF":
+        details.update(
+            {
                 "sourceContentIntact": source_content_intact,
                 "evaluatedVertexCount": evaluated_topology[0],
                 "evaluatedEdgeCount": evaluated_topology[1],
@@ -3556,6 +4042,1389 @@ def _geometry_nodes_ready(
     }
 
 
+def _recursive_geometry_node_types(
+    node_group: bpy.types.NodeTree,
+    seen: set[int] | None = None,
+) -> tuple[str, ...]:
+    visited = set() if seen is None else seen
+    pointer = node_group.as_pointer()
+    if pointer in visited:
+        return ()
+    visited.add(pointer)
+    node_types: list[str] = []
+    for node in node_group.nodes:
+        node_types.append(node.bl_idname)
+        nested = getattr(node, "node_tree", None)
+        if isinstance(nested, bpy.types.NodeTree):
+            node_types.extend(_recursive_geometry_node_types(nested, visited))
+    return tuple(sorted(node_types))
+
+
+_LIGHT_TRAILS_CANONICAL_NODE_TYPES = tuple(
+    sorted(
+        (
+            "NodeGroupInput",
+            "NodeGroupOutput",
+            "GeometryNodeCurvePrimitiveLine",
+            "GeometryNodeResampleCurve",
+            "GeometryNodeMeshLine",
+            "GeometryNodeMeshLine",
+            "GeometryNodeInstanceOnPoints",
+            "GeometryNodeInstanceOnPoints",
+            "GeometryNodeRealizeInstances",
+            "GeometryNodeRealizeInstances",
+            "GeometryNodeInputPosition",
+            "ShaderNodeTexNoise",
+            "ShaderNodeMath",
+            "ShaderNodeMath",
+            "ShaderNodeCombineXYZ",
+            "GeometryNodeSetPosition",
+            "GeometryNodeTransform",
+            "GeometryNodeJoinGeometry",
+            "GeometryNodeCurvePrimitiveCircle",
+            "GeometryNodeCurveToMesh",
+        )
+    )
+)
+_LIGHT_TRAILS_CANONICAL_INTERFACE = (
+    ("INPUT", "NodeSocketGeometry", "Geometry"),
+    ("OUTPUT", "NodeSocketGeometry", "Geometry"),
+)
+_LIGHT_TRAILS_CANONICAL_LINKS = tuple(
+    sorted(
+        (
+            (
+                "OperatingLine Half Tile Line",
+                "Curve",
+                "OperatingLine Trail Resolution",
+                "Curve",
+            ),
+            (
+                "OperatingLine Trail Rows",
+                "Mesh",
+                "OperatingLine Trail Instances",
+                "Points",
+            ),
+            (
+                "OperatingLine Trail Resolution",
+                "Curve",
+                "OperatingLine Trail Instances",
+                "Instance",
+            ),
+            (
+                "OperatingLine Trail Instances",
+                "Instances",
+                "OperatingLine Realize Trails",
+                "Geometry",
+            ),
+            (
+                "OperatingLine Trail Position",
+                "Position",
+                "OperatingLine Terrain Noise",
+                "Vector",
+            ),
+            (
+                "OperatingLine Terrain Noise",
+                "Fac",
+                "OperatingLine Center Noise",
+                "Value",
+            ),
+            (
+                "OperatingLine Center Noise",
+                "Value",
+                "OperatingLine Scale Height",
+                "Value",
+            ),
+            (
+                "OperatingLine Scale Height",
+                "Value",
+                "OperatingLine Z Offset",
+                "Z",
+            ),
+            (
+                "OperatingLine Realize Trails",
+                "Geometry",
+                "OperatingLine Displace Trails",
+                "Geometry",
+            ),
+            (
+                "OperatingLine Z Offset",
+                "Vector",
+                "OperatingLine Displace Trails",
+                "Offset",
+            ),
+            (
+                "OperatingLine Displace Trails",
+                "Geometry",
+                "OperatingLine Mirror Half Tile",
+                "Geometry",
+            ),
+            (
+                "OperatingLine Displace Trails",
+                "Geometry",
+                "OperatingLine Mirrored Tile",
+                "Geometry",
+            ),
+            (
+                "OperatingLine Mirror Half Tile",
+                "Geometry",
+                "OperatingLine Mirrored Tile",
+                "Geometry",
+            ),
+            (
+                "OperatingLine Mirrored Tile",
+                "Geometry",
+                "OperatingLine Curve To Mesh",
+                "Curve",
+            ),
+            (
+                "OperatingLine Trail Profile",
+                "Curve",
+                "OperatingLine Curve To Mesh",
+                "Profile Curve",
+            ),
+            (
+                "OperatingLine Loop Tiles",
+                "Mesh",
+                "OperatingLine Tile Instances",
+                "Points",
+            ),
+            (
+                "OperatingLine Curve To Mesh",
+                "Mesh",
+                "OperatingLine Tile Instances",
+                "Instance",
+            ),
+            (
+                "OperatingLine Tile Instances",
+                "Instances",
+                "OperatingLine Realize Tiles",
+                "Geometry",
+            ),
+            (
+                "OperatingLine Realize Tiles",
+                "Geometry",
+                "OperatingLine Output",
+                "GROUP_OUTPUT_GEOMETRY",
+            ),
+        )
+    )
+)
+
+
+def _light_trails_topology_evidence(
+    node_group: bpy.types.NodeTree,
+) -> tuple[
+    tuple[tuple[str, str, str], ...],
+    tuple[tuple[str, str, str, str], ...],
+]:
+    interface = tuple(
+        sorted(
+            (
+                str(item.in_out),
+                str(item.socket_type),
+                str(item.name),
+            )
+            for item in node_group.interface.items_tree
+            if item.item_type == "SOCKET"
+        )
+    )
+    output_identifiers = {
+        item.identifier
+        for item in node_group.interface.items_tree
+        if item.item_type == "SOCKET"
+        and item.in_out == "OUTPUT"
+        and item.socket_type == "NodeSocketGeometry"
+        and item.name == "Geometry"
+    }
+    links = tuple(
+        sorted(
+            (
+                link.from_node.name,
+                link.from_socket.identifier,
+                link.to_node.name,
+                (
+                    "GROUP_OUTPUT_GEOMETRY"
+                    if link.to_node.name == "OperatingLine Output"
+                    and link.to_socket.identifier in output_identifiers
+                    else link.to_socket.identifier
+                ),
+            )
+            for link in node_group.links
+        )
+    )
+    return interface, links
+
+
+def _light_trails_semantic_evidence(
+    node_group: bpy.types.NodeTree,
+    parameters: Mapping[str, Any],
+) -> tuple[dict[str, int | float] | None, bool, bool]:
+    """Resolve and independently verify every accepted recipe parameter."""
+
+    def required_node(name: str, bl_idname: str) -> Any:
+        node = node_group.nodes.get(name)
+        if node is None or node.bl_idname != bl_idname:
+            raise ValueError(f"Light-trails node is unavailable: {name}")
+        return node
+
+    def input_value(node: Any, identifier: str) -> Any:
+        matches = tuple(
+            socket for socket in node.inputs if socket.identifier == identifier
+        )
+        if len(matches) != 1 or not hasattr(matches[0], "default_value"):
+            raise ValueError(
+                f"Light-trails socket is unavailable: {node.name}.{identifier}"
+            )
+        return matches[0].default_value
+
+    def scalar(value: Any) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("Light-trails socket value is not numeric")
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("Light-trails socket value is not finite")
+        return result
+
+    def vector(value: Any) -> tuple[float, float, float]:
+        result = tuple(float(component) for component in value)
+        if len(result) != 3 or not all(math.isfinite(component) for component in result):
+            raise ValueError("Light-trails socket vector is invalid")
+        return result
+
+    def close(left: float, right: float) -> bool:
+        return math.isclose(left, right, rel_tol=1e-6, abs_tol=1e-6)
+
+    def vector_close(
+        left: tuple[float, float, float], right: tuple[float, float, float]
+    ) -> bool:
+        return all(close(actual, expected) for actual, expected in zip(left, right))
+
+    try:
+        half_line = required_node(
+            "OperatingLine Half Tile Line", "GeometryNodeCurvePrimitiveLine"
+        )
+        resample = required_node(
+            "OperatingLine Trail Resolution", "GeometryNodeResampleCurve"
+        )
+        trail_points = required_node(
+            "OperatingLine Trail Rows", "GeometryNodeMeshLine"
+        )
+        noise = required_node("OperatingLine Terrain Noise", "ShaderNodeTexNoise")
+        center_noise = required_node(
+            "OperatingLine Center Noise", "ShaderNodeMath"
+        )
+        scale_height = required_node(
+            "OperatingLine Scale Height", "ShaderNodeMath"
+        )
+        mirror = required_node(
+            "OperatingLine Mirror Half Tile", "GeometryNodeTransform"
+        )
+        profile = required_node(
+            "OperatingLine Trail Profile", "GeometryNodeCurvePrimitiveCircle"
+        )
+        tile_points = required_node(
+            "OperatingLine Loop Tiles", "GeometryNodeMeshLine"
+        )
+
+        resolved: dict[str, int | float] = {
+            "trailCount": int(input_value(trail_points, "Count")),
+            "pointsPerTrail": int(input_value(resample, "Count")),
+            "tileLength": scalar(vector(input_value(tile_points, "Offset"))[0]),
+            "trailSpacing": scalar(vector(input_value(trail_points, "Offset"))[1]),
+            "noiseScale": scalar(input_value(noise, "Scale")),
+            "noiseDetail": scalar(input_value(noise, "Detail")),
+            "noiseRoughness": scalar(input_value(noise, "Roughness")),
+            "noiseSeed": scalar(input_value(noise, "W")),
+            "height": scalar(input_value(scale_height, "Value_001")),
+            "profileSides": int(input_value(profile, "Resolution")),
+            "profileRadius": scalar(input_value(profile, "Radius")),
+            "tileRepeatCount": int(input_value(tile_points, "Count")),
+        }
+        integer_fields = {
+            "trailCount",
+            "pointsPerTrail",
+            "profileSides",
+            "tileRepeatCount",
+        }
+        expected: dict[str, int | float] = {}
+        parameters_match = True
+        for field, actual in resolved.items():
+            value = parameters.get(field)
+            if field in integer_fields:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return resolved, False, False
+                expected[field] = value
+                if actual != value:
+                    parameters_match = False
+            else:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    return resolved, False, False
+                numeric = float(value)
+                if not math.isfinite(numeric):
+                    return resolved, False, False
+                expected[field] = numeric
+                if not close(float(actual), numeric):
+                    parameters_match = False
+
+        tile_length = float(expected["tileLength"])
+        trail_count = int(expected["trailCount"])
+        trail_spacing = float(expected["trailSpacing"])
+        tile_repeat_count = int(expected["tileRepeatCount"])
+        resample_mode = getattr(resample, "mode", None)
+        if resample_mode is None:
+            resample_mode = input_value(resample, "Mode")
+        fixed_semantics_match = bool(
+            getattr(half_line, "mode", None) == "POINTS"
+            and resample_mode in {"COUNT", "Count"}
+            and getattr(trail_points, "mode", None) == "OFFSET"
+            and getattr(tile_points, "mode", None) == "OFFSET"
+            and getattr(profile, "mode", None) == "RADIUS"
+            and getattr(noise, "noise_dimensions", None) == "4D"
+            and getattr(center_noise, "operation", None) == "SUBTRACT"
+            and getattr(scale_height, "operation", None) == "MULTIPLY"
+            and vector_close(
+                vector(input_value(half_line, "Start")),
+                (-tile_length / 2.0, 0.0, 0.0),
+            )
+            and vector_close(
+                vector(input_value(half_line, "End")), (0.0, 0.0, 0.0)
+            )
+            and vector_close(
+                vector(input_value(trail_points, "Start Location")),
+                (0.0, -((trail_count - 1) * trail_spacing) / 2.0, 0.0),
+            )
+            and vector_close(
+                vector(input_value(trail_points, "Offset")),
+                (0.0, trail_spacing, 0.0),
+            )
+            and close(scalar(input_value(center_noise, "Value_001")), 0.5)
+            and vector_close(
+                vector(input_value(mirror, "Scale")), (-1.0, 1.0, 1.0)
+            )
+            and vector_close(
+                vector(input_value(tile_points, "Start Location")),
+                (-((tile_repeat_count - 1) * tile_length) / 2.0, 0.0, 0.0),
+            )
+            and vector_close(
+                vector(input_value(tile_points, "Offset")),
+                (tile_length, 0.0, 0.0),
+            )
+        )
+        return resolved, parameters_match, fixed_semantics_match
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None, False, False
+
+
+def _light_trails_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    target_id = parameters.get("targetId")
+    modifier_id = parameters.get("modifierId")
+    node_group_id = parameters.get("nodeGroupId")
+    raw_node_types = parameters.get("nodeTypes")
+    expected_node_types = (
+        tuple(sorted(raw_node_types))
+        if isinstance(raw_node_types, list)
+        and raw_node_types
+        and all(isinstance(item, str) and item for item in raw_node_types)
+        else ()
+    )
+    registry = build_resource_registry(receipts)
+    target_identity = registry.get(target_id) if isinstance(target_id, str) else None
+    group_identity = (
+        registry.get(node_group_id) if isinstance(node_group_id, str) else None
+    )
+    target = resolve_resource(target_identity) if target_identity is not None else None
+    node_group = resolve_resource(group_identity) if group_identity is not None else None
+    found = (
+        find_owned_modifier(receipts, modifier_id)
+        if isinstance(modifier_id, str)
+        else None
+    )
+    owner, modifier = found if found is not None else (None, None)
+    actual_node_types = (
+        _recursive_geometry_node_types(node_group)
+        if isinstance(node_group, bpy.types.NodeTree)
+        else ()
+    )
+    actual_interface, actual_link_topology = (
+        _light_trails_topology_evidence(node_group)
+        if isinstance(node_group, bpy.types.NodeTree)
+        else ((), ())
+    )
+    interface_matches = actual_interface == _LIGHT_TRAILS_CANONICAL_INTERFACE
+    link_topology_matches = actual_link_topology == _LIGHT_TRAILS_CANONICAL_LINKS
+    forbidden_node_types = {
+        "GeometryNodeBake",
+        "GeometryNodeSimulationInput",
+        "GeometryNodeSimulationOutput",
+    }
+    forbidden_found = sorted(forbidden_node_types.intersection(actual_node_types))
+    modifier_is_nodes = modifier is not None and modifier.type == "NODES"
+    bake_count = len(modifier.bakes) if modifier_is_nodes else -1
+    bake_directory = modifier.bake_directory if modifier_is_nodes else None
+    resolved_parameters, semantic_parameters_match, fixed_semantics_match = (
+        _light_trails_semantic_evidence(node_group, parameters)
+        if isinstance(node_group, bpy.types.NodeTree)
+        else (None, False, False)
+    )
+    actual_modifier_name = modifier.name if modifier is not None else None
+    actual_node_group_name = (
+        node_group.name if isinstance(node_group, bpy.types.NodeTree) else None
+    )
+    expected_modifier_name = parameters.get("modifierName")
+    expected_node_group_name = parameters.get("nodeGroupName")
+
+    expected_signature = next(
+        (
+            mutation.after
+            for receipt in receipts.values()
+            for mutation in receipt.mutations
+            if mutation.attribute == "node_tree_semantic_signature_v2"
+            and group_identity is not None
+            and mutation.resource.logical_id == group_identity.logical_id
+        ),
+        None,
+    )
+    semantic_signature_matches = bool(
+        isinstance(node_group, bpy.types.NodeTree)
+        and expected_signature is not None
+        and node_tree_semantic_signature(node_group) == expected_signature
+    )
+
+    evaluated_vertex_count = 0
+    evaluated_edge_count = 0
+    evaluated_polygon_count = 0
+    evaluated_finite = False
+    if isinstance(target, bpy.types.Object):
+        evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        mesh = evaluated.data if isinstance(evaluated.data, bpy.types.Mesh) else None
+        if mesh is not None:
+            evaluated_vertex_count = len(mesh.vertices)
+            evaluated_edge_count = len(mesh.edges)
+            evaluated_polygon_count = len(mesh.polygons)
+            evaluated_finite = all(
+                math.isfinite(component)
+                for vertex in mesh.vertices
+                for component in vertex.co
+            )
+    expected_evaluated_vertex_count = 0
+    if all(
+        isinstance(parameters.get(field), int)
+        and not isinstance(parameters.get(field), bool)
+        for field in (
+            "trailCount",
+            "pointsPerTrail",
+            "profileSides",
+            "tileRepeatCount",
+        )
+    ):
+        expected_evaluated_vertex_count = (
+            int(parameters["trailCount"])
+            * int(parameters["pointsPerTrail"])
+            * int(parameters["profileSides"])
+            * int(parameters["tileRepeatCount"])
+            * 2
+        )
+    evaluated_vertex_count_matches = (
+        0 < expected_evaluated_vertex_count <= 3_000_000
+        and evaluated_vertex_count == expected_evaluated_vertex_count
+    )
+
+    satisfied = bool(
+        isinstance(target, bpy.types.Object)
+        and owner is target
+        and modifier is not None
+        and modifier.type == "NODES"
+        and isinstance(node_group, bpy.types.NodeTree)
+        and modifier.node_group is node_group
+        and isinstance(expected_modifier_name, str)
+        and actual_modifier_name == expected_modifier_name
+        and isinstance(expected_node_group_name, str)
+        and actual_node_group_name == expected_node_group_name
+        and expected_node_types
+        and expected_node_types == _LIGHT_TRAILS_CANONICAL_NODE_TYPES
+        and actual_node_types == _LIGHT_TRAILS_CANONICAL_NODE_TYPES
+        and interface_matches
+        and link_topology_matches
+        and not forbidden_found
+        and bake_count == 0
+        and bake_directory == ""
+        and semantic_signature_matches
+        and semantic_parameters_match
+        and fixed_semantics_match
+        and evaluated_vertex_count_matches
+        and 0 < evaluated_edge_count <= 12_000_000
+        and 0 < evaluated_polygon_count <= 12_000_000
+        and evaluated_finite
+    )
+    return satisfied, {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        "modifierId": modifier_id if isinstance(modifier_id, str) else None,
+        "modifierName": actual_modifier_name,
+        "nodeGroupId": node_group_id if isinstance(node_group_id, str) else None,
+        "nodeGroupName": actual_node_group_name,
+        "nodeTypes": list(actual_node_types),
+        "interfaceSignature": [list(item) for item in actual_interface],
+        "interfaceMatches": interface_matches,
+        "linkTopology": [list(item) for item in actual_link_topology],
+        "linkTopologyMatches": link_topology_matches,
+        "forbiddenNodeTypes": forbidden_found,
+        "bakeCount": bake_count,
+        "bakeDirectory": bake_directory,
+        "semanticSignatureMatches": semantic_signature_matches,
+        "resolvedParameters": resolved_parameters,
+        "semanticParametersMatch": semantic_parameters_match,
+        "fixedSemanticsMatch": fixed_semantics_match,
+        "evaluatedVertexCount": evaluated_vertex_count,
+        "expectedEvaluatedVertexCount": expected_evaluated_vertex_count,
+        "evaluatedVertexCountMatches": evaluated_vertex_count_matches,
+        "evaluatedEdgeCount": evaluated_edge_count,
+        "evaluatedPolygonCount": evaluated_polygon_count,
+        "evaluatedFinite": evaluated_finite,
+    }
+
+
+_LIGHT_TRAILS_SCENE_ACTION_PARAMETER_KEYS = frozenset(
+    {
+        "collectionId",
+        "trailTargetId",
+        "floorTargetId",
+        "sceneId",
+        "sceneName",
+        "worldId",
+        "worldName",
+        "cameraId",
+        "cameraObjectName",
+        "cameraDataName",
+        "controllerId",
+        "controllerObjectName",
+        "trailMaterialId",
+        "trailMaterialName",
+        "floorMaterialId",
+        "floorMaterialName",
+        "cameraActionId",
+        "cameraActionName",
+        "frameStart",
+        "frameEnd",
+        "cameraStart",
+        "cameraEnd",
+        "cameraTarget",
+        "lens",
+        "fStop",
+        "focusDistance",
+        "trailBaseColor",
+        "trailGlowColor",
+        "trailEmissionStrength",
+        "gradientRotationDegrees",
+        "gradientStart",
+        "glowBandStart",
+        "glowBandEnd",
+        "gradientEnd",
+        "waveScale",
+        "floorBaseColor",
+        "floorEmissionColor",
+        "floorEmissionStrength",
+        "floorMetallic",
+        "floorVoronoiScale",
+        "floorRoughnessMinimum",
+        "floorRoughnessMaximum",
+        "floorBumpStrength",
+        "floorBumpDistance",
+    }
+)
+_LIGHT_TRAILS_SCENE_NODE_PARAMETER_KEYS = frozenset(
+    {
+        "trailMaterialNodeTypes",
+        "floorMaterialNodeTypes",
+        "compositorNodeTypes",
+    }
+)
+_LIGHT_TRAILS_SCENE_TRAIL_NODE_TYPES = tuple(
+    sorted(
+        (
+            "ShaderNodeOutputMaterial",
+            "ShaderNodeBsdfPrincipled",
+            "ShaderNodeTexCoord",
+            "ShaderNodeMapping",
+            "ShaderNodeTexGradient",
+            "ShaderNodeValToRGB",
+            "ShaderNodeTexWave",
+            "ShaderNodeValToRGB",
+            "ShaderNodeMixRGB",
+        )
+    )
+)
+_LIGHT_TRAILS_SCENE_FLOOR_NODE_TYPES = tuple(
+    sorted(
+        (
+            "ShaderNodeOutputMaterial",
+            "ShaderNodeBsdfPrincipled",
+            "ShaderNodeTexCoord",
+            "ShaderNodeMapping",
+            "ShaderNodeTexVoronoi",
+            "ShaderNodeValToRGB",
+            "ShaderNodeBump",
+            "ShaderNodeValToRGB",
+        )
+    )
+)
+_LIGHT_TRAILS_SCENE_COMPOSITOR_NODE_TYPES = tuple(
+    sorted(
+        (
+            "CompositorNodeRLayers",
+            "CompositorNodeGlare",
+            "CompositorNodeComposite",
+        )
+    )
+)
+
+
+def _scene_node_types(
+    tree: bpy.types.NodeTree | None, *, normalize_compositor_output: bool = False
+) -> tuple[str, ...]:
+    if tree is None:
+        return ()
+    node_types = []
+    for node in tree.nodes:
+        node_type = node.bl_idname
+        if normalize_compositor_output and node_type == "NodeGroupOutput":
+            node_type = "CompositorNodeComposite"
+        node_types.append(node_type)
+    return tuple(sorted(node_types))
+
+
+def _scene_node(tree: bpy.types.NodeTree, name: str, node_type: str) -> Any | None:
+    node = tree.nodes.get(name)
+    return node if node is not None and node.bl_idname == node_type else None
+
+
+def _scene_socket(sockets: Any, *names: str) -> Any | None:
+    matches = tuple(
+        socket
+        for socket in sockets
+        if socket.identifier in names or socket.name in names
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _scene_input(node: Any, *names: str) -> Any | None:
+    return _scene_socket(node.inputs, *names) if node is not None else None
+
+
+def _scene_output(node: Any, *names: str) -> Any | None:
+    return _scene_socket(node.outputs, *names) if node is not None else None
+
+
+def _scene_links(tree: bpy.types.NodeTree) -> set[tuple[str, str, str, str]]:
+    def semantic_socket_name(socket: Any) -> str:
+        # Blender 5.1 expanded the legacy `Fac` display label to `Factor`
+        # without changing the meaning of these shader links.
+        return "Fac" if socket.name == "Factor" else socket.name
+
+    return {
+        (
+            link.from_node.name,
+            semantic_socket_name(link.from_socket),
+            link.to_node.name,
+            semantic_socket_name(link.to_socket),
+        )
+        for link in tree.links
+    }
+
+
+def _scene_close(actual: Any, expected: float, tolerance: float = 1e-6) -> bool:
+    return isinstance(actual, (int, float)) and not isinstance(actual, bool) and math.isclose(
+        float(actual), expected, rel_tol=1e-6, abs_tol=tolerance
+    )
+
+
+def _scene_vector_close(actual: Any, expected: tuple[float, ...]) -> bool:
+    try:
+        values = tuple(float(value) for value in actual)
+    except (TypeError, ValueError):
+        return False
+    return len(values) == len(expected) and all(
+        _scene_close(value, expected_value)
+        for value, expected_value in zip(values, expected, strict=True)
+    )
+
+
+def _scene_ramp_matches(
+    node: Any,
+    expected: tuple[tuple[float, tuple[float, float, float, float]], ...],
+) -> bool:
+    if node is None or not hasattr(node, "color_ramp"):
+        return False
+    elements = tuple(node.color_ramp.elements)
+    return len(elements) == len(expected) and all(
+        _scene_close(element.position, position)
+        and _scene_vector_close(element.color, color)
+        for element, (position, color) in zip(elements, expected, strict=True)
+    )
+
+
+def _embedded_signature_matches(
+    receipt: ActionReceipt | None,
+    identity: Any,
+    resource: Any,
+) -> bool:
+    expected = tuple(
+        mutation.after
+        for mutation in (receipt.mutations if receipt is not None else ())
+        if mutation.resource == identity
+        and mutation.attribute == "embedded_node_tree_semantic_signature_v1"
+    )
+    return bool(
+        len(expected) == 1
+        and embedded_node_tree_semantic_signature(resource) == expected[0]
+    )
+
+
+def _node_group_signature_matches(
+    receipt: ActionReceipt | None,
+    identity: Any,
+    tree: bpy.types.NodeTree,
+) -> bool:
+    expected = tuple(
+        mutation.after
+        for mutation in (receipt.mutations if receipt is not None else ())
+        if mutation.resource == identity
+        and mutation.attribute == "node_tree_semantic_signature_v2"
+    )
+    return bool(len(expected) == 1 and node_tree_semantic_signature(tree) == expected[0])
+
+
+def _light_trails_scene_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    if set(parameters) != (
+        _LIGHT_TRAILS_SCENE_ACTION_PARAMETER_KEYS
+        | _LIGHT_TRAILS_SCENE_NODE_PARAMETER_KEYS
+    ):
+        raise ValueError("Light-trails scene Observation parameters are incomplete")
+    action_parameters = {
+        key: parameters[key] for key in _LIGHT_TRAILS_SCENE_ACTION_PARAMETER_KEYS
+    }
+    definition = validate_light_trails_scene(action_parameters)
+    expected_trail_node_types = tuple(parameters["trailMaterialNodeTypes"])
+    expected_floor_node_types = tuple(parameters["floorMaterialNodeTypes"])
+    expected_compositor_node_types = tuple(parameters["compositorNodeTypes"])
+    canonical_node_parameters = bool(
+        expected_trail_node_types == _LIGHT_TRAILS_SCENE_TRAIL_NODE_TYPES
+        and expected_floor_node_types == _LIGHT_TRAILS_SCENE_FLOOR_NODE_TYPES
+        and expected_compositor_node_types
+        == _LIGHT_TRAILS_SCENE_COMPOSITOR_NODE_TYPES
+    )
+
+    registry = build_resource_registry(receipts)
+
+    def identity(logical_id: str) -> Any | None:
+        return registry.get(logical_id)
+
+    def resource(logical_id: str) -> Any | None:
+        found = identity(logical_id)
+        return resolve_resource(found) if found is not None else None
+
+    scene_identity = identity(definition.scene_id)
+    world_identity = identity(definition.world_id)
+    camera_identity = identity(definition.camera_id)
+    camera_data_identity = identity(f"{definition.camera_id}.data")
+    trail_material_identity = identity(definition.trail_material_id)
+    floor_material_identity = identity(definition.floor_material_id)
+    camera_action_identity = identity(definition.camera_action_id)
+    compositor_identity = identity(f"{definition.scene_id}.compositor")
+
+    collection = resource(definition.collection_id)
+    trail = resource(definition.trail_target_id)
+    floor = resource(definition.floor_target_id)
+    scene = resource(definition.scene_id)
+    world = resource(definition.world_id)
+    camera = resource(definition.camera_id)
+    camera_data = resource(f"{definition.camera_id}.data")
+    controller = resource(definition.controller_id)
+    trail_material = resource(definition.trail_material_id)
+    floor_material = resource(definition.floor_material_id)
+    camera_action = resource(definition.camera_action_id)
+    compositor_group = (
+        resolve_resource(compositor_identity)
+        if compositor_identity is not None
+        else None
+    )
+
+    matching_receipts = tuple(
+        receipt
+        for receipt in receipts.values()
+        if receipt.action_name == "blender.lookdev.create_light_trails_scene"
+        and scene_identity is not None
+        and scene_identity in receipt.created
+    )
+    receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+    expected_created_ids = {
+        definition.scene_id,
+        definition.world_id,
+        f"{definition.camera_id}.data",
+        definition.camera_id,
+        definition.controller_id,
+        definition.trail_material_id,
+        definition.floor_material_id,
+        definition.camera_action_id,
+    }
+    actual_created_ids = (
+        {item.logical_id for item in receipt.created} if receipt is not None else set()
+    )
+    receipt_matches = bool(
+        receipt is not None
+        and receipt.anchor == camera_identity
+        and actual_created_ids
+        in (
+            expected_created_ids,
+            expected_created_ids | {f"{definition.scene_id}.compositor"},
+        )
+        and not receipt.artifacts
+    )
+
+    compositor_tree = None
+    if isinstance(scene, bpy.types.Scene):
+        compositor_tree = getattr(scene, "node_tree", None)
+        if compositor_tree is None:
+            compositor_tree = getattr(scene, "compositing_node_group", None)
+
+    tracked_object_pointers = {
+        obj.as_pointer()
+        for item in registry.values()
+        if item.resource_type == "OBJECT"
+        for obj in (resolve_resource(item),)
+        if isinstance(obj, bpy.types.Object)
+    }
+    collection_matches = bool(
+        isinstance(collection, bpy.types.Collection)
+        and isinstance(scene, bpy.types.Scene)
+        and tuple(scene.collection.children) == (collection,)
+        and not collection.children
+        and isinstance(trail, bpy.types.Object)
+        and isinstance(floor, bpy.types.Object)
+        and isinstance(camera, bpy.types.Object)
+        and isinstance(controller, bpy.types.Object)
+        and all(
+            item.name in collection.objects
+            for item in (trail, floor, camera, controller)
+        )
+        and all(
+            obj.as_pointer() in tracked_object_pointers
+            for obj in collection.all_objects
+        )
+    )
+
+    world_matches = False
+    if isinstance(world, bpy.types.World) and world.node_tree is not None:
+        world_background = _scene_node(
+            world.node_tree, "OperatingLine Background", "ShaderNodeBackground"
+        )
+        world_output = _scene_node(
+            world.node_tree, "OperatingLine World Output", "ShaderNodeOutputWorld"
+        )
+        color_socket = _scene_input(world_background, "Color")
+        strength_socket = _scene_input(world_background, "Strength")
+        world_matches = bool(
+            world.name == definition.world_name
+            and world.use_nodes
+            and isinstance(scene, bpy.types.Scene)
+            and scene.world is world
+            and _scene_node_types(world.node_tree)
+            == tuple(sorted(("ShaderNodeBackground", "ShaderNodeOutputWorld")))
+            and _scene_links(world.node_tree)
+            == {
+                (
+                    "OperatingLine Background",
+                    "Background",
+                    "OperatingLine World Output",
+                    "Surface",
+                )
+            }
+            and color_socket is not None
+            and _scene_vector_close(color_socket.default_value, (0.0, 0.0, 0.0, 1.0))
+            and strength_socket is not None
+            and _scene_close(strength_socket.default_value, 0.0)
+            and world_output is not None
+            and _embedded_signature_matches(receipt, world_identity, world)
+        )
+
+    camera_matches = False
+    if (
+        isinstance(scene, bpy.types.Scene)
+        and isinstance(camera, bpy.types.Object)
+        and isinstance(camera_data, bpy.types.Camera)
+    ):
+        expected_rotation = (
+            Vector(definition.camera_target) - Vector(definition.camera_start)
+        ).to_track_quat("-Z", "Y").to_euler()
+        camera_matches = bool(
+            camera.name == definition.camera_object_name
+            and camera.type == "CAMERA"
+            and camera.data is camera_data
+            and camera_data_identity is not None
+            and camera_data.name == definition.camera_data_name
+            and scene.camera is camera
+            and _scene_close(camera_data.lens, definition.lens)
+            and camera_data.dof.use_dof
+            and _scene_close(camera_data.dof.aperture_fstop, definition.f_stop)
+            and _scene_close(
+                camera_data.dof.focus_distance, definition.focus_distance
+            )
+            and _scene_vector_close(camera.rotation_euler, tuple(expected_rotation))
+        )
+
+    curves = (
+        tuple(sorted(action_fcurves(camera_action), key=lambda item: item.array_index))
+        if isinstance(camera_action, bpy.types.Action)
+        else ()
+    )
+    camera_keyframe_count = sum(len(curve.keyframe_points) for curve in curves)
+    curves_match = len(curves) == 3
+    if curves_match:
+        for index, curve in enumerate(curves):
+            points = tuple(curve.keyframe_points)
+            curves_match = bool(
+                curves_match
+                and curve.data_path == "location"
+                and curve.array_index == index
+                and curve.extrapolation == "CONSTANT"
+                and len(points) == 2
+                and _scene_close(points[0].co[0], definition.frame_start)
+                and _scene_close(points[0].co[1], definition.camera_start[index])
+                and points[0].interpolation == "LINEAR"
+                and _scene_close(points[1].co[0], definition.frame_end)
+                and _scene_close(points[1].co[1], definition.camera_end[index])
+                and points[1].interpolation == "LINEAR"
+            )
+    action_signature_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.resource == camera_action_identity
+            and mutation.attribute == "action_keyframes"
+        )
+        if receipt is not None
+        else ()
+    )
+    animation_matches = bool(
+        isinstance(camera, bpy.types.Object)
+        and isinstance(camera_action, bpy.types.Action)
+        and camera_action.name == definition.camera_action_name
+        and camera.animation_data is not None
+        and camera.animation_data.action is camera_action
+        and camera_keyframe_count == 6
+        and curves_match
+        and len(action_signature_mutations) == 1
+        and action_keyframe_signature(camera_action)
+        == action_signature_mutations[0].after
+    )
+
+    trail_material_matches = False
+    trail_texcoord = None
+    if (
+        isinstance(trail, bpy.types.Object)
+        and isinstance(trail_material, bpy.types.Material)
+        and trail_material.node_tree is not None
+    ):
+        tree = trail_material.node_tree
+        trail_texcoord = _scene_node(
+            tree, "OperatingLine Trail Coordinates", "ShaderNodeTexCoord"
+        )
+        mapping = _scene_node(tree, "OperatingLine Trail Mapping", "ShaderNodeMapping")
+        gradient = _scene_node(
+            tree, "OperatingLine Trail Gradient", "ShaderNodeTexGradient"
+        )
+        gradient_ramp = _scene_node(
+            tree, "OperatingLine Trail Gradient Ramp", "ShaderNodeValToRGB"
+        )
+        wave = _scene_node(tree, "OperatingLine Trail Wave", "ShaderNodeTexWave")
+        wave_ramp = _scene_node(
+            tree, "OperatingLine Trail Glow Ramp", "ShaderNodeValToRGB"
+        )
+        mix = _scene_node(tree, "OperatingLine Trail Bright Band", "ShaderNodeMixRGB")
+        principled = _scene_node(
+            tree, "OperatingLine Trail Shader", "ShaderNodeBsdfPrincipled"
+        )
+        output = _scene_node(
+            tree, "OperatingLine Trail Output", "ShaderNodeOutputMaterial"
+        )
+        rotation = _scene_input(mapping, "Rotation")
+        wave_scale = _scene_input(wave, "Scale")
+        emission_strength = _scene_input(principled, "Emission Strength")
+        trail_material_matches = bool(
+            trail_material.name == definition.trail_material_name
+            and trail_material.use_nodes
+            and trail_material.surface_render_method == "BLENDED"
+            and tuple(slot.material for slot in trail.material_slots)
+            == (trail_material,)
+            and _scene_node_types(tree) == _LIGHT_TRAILS_SCENE_TRAIL_NODE_TYPES
+            and _scene_links(tree)
+            == {
+                ("OperatingLine Trail Coordinates", "Object", "OperatingLine Trail Mapping", "Vector"),
+                ("OperatingLine Trail Mapping", "Vector", "OperatingLine Trail Gradient", "Vector"),
+                ("OperatingLine Trail Gradient", "Fac", "OperatingLine Trail Gradient Ramp", "Fac"),
+                ("OperatingLine Trail Mapping", "Vector", "OperatingLine Trail Wave", "Vector"),
+                ("OperatingLine Trail Wave", "Color", "OperatingLine Trail Glow Ramp", "Fac"),
+                ("OperatingLine Trail Gradient Ramp", "Color", "OperatingLine Trail Bright Band", "Color1"),
+                ("OperatingLine Trail Glow Ramp", "Color", "OperatingLine Trail Bright Band", "Fac"),
+                ("OperatingLine Trail Bright Band", "Color", "OperatingLine Trail Shader", "Base Color"),
+                ("OperatingLine Trail Bright Band", "Color", "OperatingLine Trail Shader", "Emission Color"),
+                ("OperatingLine Trail Gradient Ramp", "Alpha", "OperatingLine Trail Shader", "Alpha"),
+                ("OperatingLine Trail Shader", "BSDF", "OperatingLine Trail Output", "Surface"),
+            }
+            and trail_texcoord is not None
+            and trail_texcoord.object is controller
+            and rotation is not None
+            and _scene_close(
+                rotation.default_value[2],
+                math.radians(definition.gradient_rotation_degrees),
+            )
+            and getattr(gradient, "gradient_type", None) == "LINEAR"
+            and _scene_ramp_matches(
+                gradient_ramp,
+                (
+                    (definition.gradient_start, (0.0, 0.0, 0.0, 0.0)),
+                    (definition.gradient_end, definition.trail_base_color),
+                ),
+            )
+            and getattr(wave, "wave_type", None) == "BANDS"
+            and getattr(wave, "bands_direction", None) == "X"
+            and wave_scale is not None
+            and _scene_close(wave_scale.default_value, definition.wave_scale)
+            and _scene_ramp_matches(
+                wave_ramp,
+                (
+                    (definition.gradient_start, (0.0, 0.0, 0.0, 1.0)),
+                    (definition.glow_band_start, (0.0, 0.0, 0.0, 1.0)),
+                    (definition.glow_band_end, (1.0, 1.0, 1.0, 1.0)),
+                    (definition.gradient_end, (0.0, 0.0, 0.0, 1.0)),
+                ),
+            )
+            and getattr(mix, "blend_type", None) == "ADD"
+            and getattr(mix, "use_clamp", None) is True
+            and emission_strength is not None
+            and _scene_close(
+                emission_strength.default_value,
+                definition.trail_emission_strength,
+            )
+            and output is not None
+            and _embedded_signature_matches(
+                receipt, trail_material_identity, trail_material
+            )
+        )
+
+    floor_material_matches = False
+    if (
+        isinstance(floor, bpy.types.Object)
+        and isinstance(floor_material, bpy.types.Material)
+        and floor_material.node_tree is not None
+    ):
+        tree = floor_material.node_tree
+        mapping = _scene_node(tree, "OperatingLine Floor Mapping", "ShaderNodeMapping")
+        voronoi = _scene_node(
+            tree, "OperatingLine Floor Voronoi", "ShaderNodeTexVoronoi"
+        )
+        roughness_ramp = _scene_node(
+            tree, "OperatingLine Floor Roughness Ramp", "ShaderNodeValToRGB"
+        )
+        bump = _scene_node(tree, "OperatingLine Floor Bump", "ShaderNodeBump")
+        emission_ramp = _scene_node(
+            tree, "OperatingLine Floor Emission Ramp", "ShaderNodeValToRGB"
+        )
+        principled = _scene_node(
+            tree, "OperatingLine Floor Shader", "ShaderNodeBsdfPrincipled"
+        )
+        output = _scene_node(
+            tree, "OperatingLine Floor Output", "ShaderNodeOutputMaterial"
+        )
+        voronoi_scale = _scene_input(voronoi, "Scale")
+        bump_strength = _scene_input(bump, "Strength")
+        bump_distance = _scene_input(bump, "Distance")
+        base_color = _scene_input(principled, "Base Color")
+        metallic = _scene_input(principled, "Metallic")
+        emission_strength = _scene_input(principled, "Emission Strength")
+        floor_material_matches = bool(
+            floor_material.name == definition.floor_material_name
+            and floor_material.use_nodes
+            and tuple(slot.material for slot in floor.material_slots)
+            == (floor_material,)
+            and _scene_node_types(tree) == _LIGHT_TRAILS_SCENE_FLOOR_NODE_TYPES
+            and _scene_links(tree)
+            == {
+                ("OperatingLine Floor Coordinates", "Object", "OperatingLine Floor Mapping", "Vector"),
+                ("OperatingLine Floor Mapping", "Vector", "OperatingLine Floor Voronoi", "Vector"),
+                ("OperatingLine Floor Voronoi", "Distance", "OperatingLine Floor Roughness Ramp", "Fac"),
+                ("OperatingLine Floor Voronoi", "Distance", "OperatingLine Floor Bump", "Height"),
+                ("OperatingLine Floor Voronoi", "Distance", "OperatingLine Floor Emission Ramp", "Fac"),
+                ("OperatingLine Floor Roughness Ramp", "Color", "OperatingLine Floor Shader", "Roughness"),
+                ("OperatingLine Floor Bump", "Normal", "OperatingLine Floor Shader", "Normal"),
+                ("OperatingLine Floor Emission Ramp", "Color", "OperatingLine Floor Shader", "Emission Color"),
+                ("OperatingLine Floor Shader", "BSDF", "OperatingLine Floor Output", "Surface"),
+            }
+            and mapping is not None
+            and getattr(voronoi, "voronoi_dimensions", None) == "3D"
+            and getattr(voronoi, "feature", None) == "F1"
+            and voronoi_scale is not None
+            and _scene_close(
+                voronoi_scale.default_value, definition.floor_voronoi_scale
+            )
+            and _scene_ramp_matches(
+                roughness_ramp,
+                (
+                    (
+                        0.0,
+                        (
+                            definition.floor_roughness_minimum,
+                            definition.floor_roughness_minimum,
+                            definition.floor_roughness_minimum,
+                            1.0,
+                        ),
+                    ),
+                    (
+                        1.0,
+                        (
+                            definition.floor_roughness_maximum,
+                            definition.floor_roughness_maximum,
+                            definition.floor_roughness_maximum,
+                            1.0,
+                        ),
+                    ),
+                ),
+            )
+            and bump_strength is not None
+            and _scene_close(
+                bump_strength.default_value, definition.floor_bump_strength
+            )
+            and bump_distance is not None
+            and _scene_close(
+                bump_distance.default_value, definition.floor_bump_distance
+            )
+            and _scene_ramp_matches(
+                emission_ramp,
+                (
+                    (0.0, (0.0, 0.0, 0.0, 1.0)),
+                    (1.0, definition.floor_emission_color),
+                ),
+            )
+            and base_color is not None
+            and _scene_vector_close(
+                base_color.default_value, definition.floor_base_color
+            )
+            and metallic is not None
+            and _scene_close(metallic.default_value, definition.floor_metallic)
+            and emission_strength is not None
+            and _scene_close(
+                emission_strength.default_value,
+                definition.floor_emission_strength,
+            )
+            and output is not None
+            and _embedded_signature_matches(
+                receipt, floor_material_identity, floor_material
+            )
+        )
+
+    controller_matches = bool(
+        isinstance(controller, bpy.types.Object)
+        and controller.name == definition.controller_object_name
+        and controller.type == "EMPTY"
+        and controller.empty_display_type == "PLAIN_AXES"
+        and controller.parent is camera
+        and _scene_vector_close(controller.location, (0.0, 0.0, 0.0))
+        and _scene_vector_close(controller.rotation_euler, (0.0, 0.0, 0.0))
+        and _scene_vector_close(controller.scale, (1.0, 1.0, 1.0))
+        and isinstance(collection, bpy.types.Collection)
+        and controller.name in collection.objects
+        and trail_texcoord is not None
+        and trail_texcoord.object is controller
+    )
+
+    compositor_matches = False
+    actual_compositor_node_types = _scene_node_types(
+        compositor_tree, normalize_compositor_output=True
+    )
+    if isinstance(compositor_tree, bpy.types.NodeTree):
+        raw_output_type = (
+            "NodeGroupOutput"
+            if compositor_tree.nodes.get("OperatingLine Composite") is not None
+            and compositor_tree.nodes["OperatingLine Composite"].bl_idname
+            == "NodeGroupOutput"
+            else "CompositorNodeComposite"
+        )
+        expected_links = {
+            ("OperatingLine Render Layers", "Image", "OperatingLine Fog Glow", "Image"),
+            ("OperatingLine Fog Glow", "Image", "OperatingLine Composite", "Image"),
+        }
+        glare = compositor_tree.nodes.get("OperatingLine Fog Glow")
+        glare_matches = False
+        if glare is not None and glare.bl_idname == "CompositorNodeGlare":
+            threshold_socket = _scene_input(
+                glare, "Highlights Threshold", "Threshold"
+            )
+            size_socket = _scene_input(glare, "Size")
+            threshold_matches = (
+                _scene_close(threshold_socket.default_value, 0.8)
+                if threshold_socket is not None
+                and hasattr(threshold_socket, "default_value")
+                else _scene_close(getattr(glare, "threshold", None), 0.8)
+            )
+            size_matches = (
+                _scene_close(size_socket.default_value, 0.7)
+                if size_socket is not None and hasattr(size_socket, "default_value")
+                else getattr(glare, "size", None) == 7
+            )
+            if hasattr(glare, "glare_type"):
+                glare_matches = bool(
+                    glare.glare_type == "FOG_GLOW"
+                    and glare.quality == "HIGH"
+                    and threshold_matches
+                    and size_matches
+                )
+            else:
+                type_socket = _scene_input(glare, "Type")
+                quality_socket = _scene_input(glare, "Quality")
+                glare_matches = bool(
+                    type_socket is not None
+                    and type_socket.default_value == "Bloom"
+                    and quality_socket is not None
+                    and quality_socket.default_value == "High"
+                    and threshold_matches
+                    and size_matches
+                )
+        signature_matches = (
+            _embedded_signature_matches(receipt, scene_identity, scene)
+            if compositor_identity is None
+            else bool(
+                compositor_tree is compositor_group
+                and _node_group_signature_matches(
+                    receipt, compositor_identity, compositor_tree
+                )
+            )
+        )
+        compositor_matches = bool(
+            isinstance(scene, bpy.types.Scene)
+            and scene.use_nodes
+            and actual_compositor_node_types
+            == _LIGHT_TRAILS_SCENE_COMPOSITOR_NODE_TYPES
+            and raw_output_type in {"CompositorNodeComposite", "NodeGroupOutput"}
+            and _scene_links(compositor_tree) == expected_links
+            and glare_matches
+            and signature_matches
+        )
+
+    forbidden_node_types = {
+        "GeometryNodeBake",
+        "GeometryNodeSimulationInput",
+        "GeometryNodeSimulationOutput",
+    }
+    relevant_trees = tuple(
+        tree
+        for tree in (
+            getattr(trail_material, "node_tree", None),
+            getattr(floor_material, "node_tree", None),
+            getattr(world, "node_tree", None),
+            compositor_tree,
+        )
+        if isinstance(tree, bpy.types.NodeTree)
+    )
+    no_bake_nodes = not any(
+        node.bl_idname in forbidden_node_types
+        for tree in relevant_trees
+        for node in tree.nodes
+    )
+    if isinstance(trail, bpy.types.Object):
+        for modifier in trail.modifiers:
+            if modifier.type != "NODES" or modifier.node_group is None:
+                continue
+            node_types = _recursive_geometry_node_types(modifier.node_group)
+            no_bake_nodes = bool(
+                no_bake_nodes
+                and not forbidden_node_types.intersection(node_types)
+                and len(modifier.bakes) == 0
+                and modifier.bake_directory == ""
+            )
+
+    no_render_artifacts = bool(
+        bpy.data.images.get("Render Result") is None
+        and all(not item.artifacts for item in receipts.values())
+        and all(
+            item.action_name != "blender.render.execute_preview"
+            for item in receipts.values()
+        )
+    )
+    scene_matches = bool(
+        receipt_matches
+        and isinstance(scene, bpy.types.Scene)
+        and scene.name == definition.scene_name
+        and scene.render.engine == "CYCLES"
+        and scene.frame_start == definition.frame_start
+        and scene.frame_end == definition.frame_end
+        and world_matches
+        and camera_matches
+    )
+
+    satisfied = bool(
+        canonical_node_parameters
+        and scene_matches
+        and collection_matches
+        and world_matches
+        and camera_matches
+        and controller_matches
+        and animation_matches
+        and trail_material_matches
+        and floor_material_matches
+        and compositor_matches
+        and no_bake_nodes
+        and no_render_artifacts
+    )
+    details = {
+        "shape": "managed_light_trails_scene",
+        **{
+            key: parameters[key]
+            for key in (
+                "collectionId",
+                "trailTargetId",
+                "floorTargetId",
+                "sceneId",
+                "sceneName",
+                "worldId",
+                "worldName",
+                "cameraId",
+                "cameraObjectName",
+                "cameraDataName",
+                "controllerId",
+                "controllerObjectName",
+                "trailMaterialId",
+                "trailMaterialName",
+                "floorMaterialId",
+                "floorMaterialName",
+                "cameraActionId",
+                "cameraActionName",
+            )
+        },
+        "sceneMatches": scene_matches,
+        "collectionMatches": collection_matches,
+        "worldMatches": world_matches,
+        "cameraMatches": camera_matches,
+        "controllerMatches": controller_matches,
+        "animationMatches": animation_matches,
+        "trailMaterialMatches": trail_material_matches,
+        "floorMaterialMatches": floor_material_matches,
+        "compositorMatches": compositor_matches,
+        "noBakeNodes": no_bake_nodes,
+        "noRenderArtifacts": no_render_artifacts,
+        "frameStart": definition.frame_start,
+        "frameEnd": definition.frame_end,
+        "cameraKeyframeCount": camera_keyframe_count,
+        "trailMaterialNodeTypes": list(_scene_node_types(getattr(trail_material, "node_tree", None))),
+        "floorMaterialNodeTypes": list(_scene_node_types(getattr(floor_material, "node_tree", None))),
+        "compositorNodeTypes": list(actual_compositor_node_types),
+    }
+    return satisfied, details
+
+
 OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "object_exists": _object_exists,
     "resource_exists": _resource_exists,
@@ -3581,6 +5450,8 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "mesh_faces_poked": _mesh_faces_poked,
     "modifier_ready": _modifier_ready,
     "geometry_nodes_ready": _geometry_nodes_ready,
+    "light_trails_ready": _light_trails_ready,
+    "light_trails_scene_ready": _light_trails_scene_ready,
 }
 
 

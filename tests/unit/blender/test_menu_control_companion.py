@@ -212,6 +212,8 @@ class MenuControlCompanionTests(unittest.TestCase):
             companion.CompanionController
         )
         self.controller._transport = _Transport()
+        self.controller._execution_track_driver = None
+        self.controller._execution_track_delivery = None
         self.controller._shortcut_proof_driver = None
         self.controller._seen_shortcut_proof_request_ids = set()
         self.controller._menu_control_proof_driver = None

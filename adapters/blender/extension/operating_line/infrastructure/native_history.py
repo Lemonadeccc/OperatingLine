@@ -24,6 +24,7 @@ from .snowman_actions.common import (
 
 
 NATIVE_HISTORY_MARKER_KEY = "_operating_line_native_history_v1"
+NATIVE_HISTORY_RECOVERY_KEY = "_operating_line_native_history_recovery_v1"
 POKE_COMPOUND_HISTORY_MARKER_KEY = "_operating_line_poke_compound_history_v1"
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_ARTIFACT_CACHE_BYTES = 256 * 1024 * 1024
@@ -39,6 +40,7 @@ class NativeHistoryCheckpoint:
     snapshot: SessionSnapshot
     artifacts: tuple[ArtifactIdentity, ...]
     committed_at: str | None = None
+    alternate_snapshots: tuple[SessionSnapshot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +52,38 @@ class NativeHistoryRestore:
     target_operation: str
     before: SessionSnapshot
     after: SessionSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class NativeUndoRestorationWitness:
+    """One-shot in-process proof that the guarded native Undo fully restored."""
+
+    direction: str
+    source_checkpoint_id: str | None
+    restored_checkpoint_id: str | None
+    recovery_token_sha256: str
+    restored_at: str
+    recovery_probe_satisfied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class NativeUndoRecoveryGuard:
+    """Hashed identity of the exact guarded checkpoint that Undo must restore."""
+
+    expected_restored_checkpoint_id: str | None
+    recovery_token_sha256: str
+
+
+class NativeUndoRequiredError(RuntimeError):
+    """A native commit recovery that only a proven Blender Undo may release."""
+
+
+@dataclass(frozen=True, slots=True)
+class NativeHistoryRecovery:
+    """A narrowly validated replacement snapshot produced by trusted replay."""
+
+    snapshot: SessionSnapshot
+    recovery_probe: Callable[[], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -981,6 +1015,14 @@ class NativeHistoryController:
         self._current_id: str | None = None
         self._prepared_from: str | None = None
         self._prepared_operation: str | None = None
+        self._requires_native_undo = False
+        self._native_undo_recovery_id: str | None = None
+        self._native_undo_recovery_probe: Callable[[], bool] | None = None
+        self._native_undo_recovery_token: str | None = None
+        self._native_undo_restoration_witness: NativeUndoRestorationWitness | None = None
+        self._native_undo_redo_guard_id: str | None = None
+        self._native_undo_redo_guard_probe: Callable[[], bool] | None = None
+        self._native_undo_redo_guard_token: str | None = None
         self._registered = False
         self._handling = False
         self.error = ""
@@ -992,6 +1034,10 @@ class NativeHistoryController:
     @property
     def checkpoint_count(self) -> int:
         return len(self._checkpoints)
+
+    @property
+    def requires_native_undo(self) -> bool:
+        return self._requires_native_undo
 
     def _owner_scene(self) -> bpy.types.Scene | None:
         if self._owner_scene_uid is None:
@@ -1019,6 +1065,8 @@ class NativeHistoryController:
         for scene in bpy.data.scenes:
             if NATIVE_HISTORY_MARKER_KEY in scene:
                 del scene[NATIVE_HISTORY_MARKER_KEY]
+            if NATIVE_HISTORY_RECOVERY_KEY in scene:
+                del scene[NATIVE_HISTORY_RECOVERY_KEY]
 
     def _clear_journal(self) -> None:
         self._checkpoints.clear()
@@ -1027,6 +1075,14 @@ class NativeHistoryController:
         self._current_id = None
         self._prepared_from = None
         self._prepared_operation = None
+        self._requires_native_undo = False
+        self._native_undo_recovery_id = None
+        self._native_undo_recovery_probe = None
+        self._native_undo_recovery_token = None
+        self._native_undo_restoration_witness = None
+        self._native_undo_redo_guard_id = None
+        self._native_undo_redo_guard_probe = None
+        self._native_undo_redo_guard_token = None
         self._handling = False
         self.error = ""
 
@@ -1077,11 +1133,18 @@ class NativeHistoryController:
         self,
         snapshot: SessionSnapshot,
     ) -> tuple[ArtifactIdentity, ...]:
-        artifacts = tuple(
+        formal_artifacts = tuple(
             artifact
             for _step_id, receipt in snapshot.receipts
             for artifact in receipt.artifacts
         )
+        partial_artifacts = tuple(
+            artifact
+            for _step_id, run in snapshot.leaf_operation_runs
+            if run.partial_action_receipt is not None
+            for artifact in run.partial_action_receipt.artifacts
+        )
+        artifacts = (*formal_artifacts, *partial_artifacts)
         seen_paths: dict[str, str] = {}
         for artifact in artifacts:
             path = Path(artifact.path)
@@ -1172,7 +1235,7 @@ class NativeHistoryController:
                 marker = self._marker(scene)
             except RuntimeError as error:
                 self._set_error(error)
-                raise RuntimeError(self.error) from error
+                raise NativeUndoRequiredError(self.error) from error
             if marker is not None:
                 error = RuntimeError("Blender native Undo marker is already in use")
                 self._set_error(error)
@@ -1203,6 +1266,11 @@ class NativeHistoryController:
             error = RuntimeError("Blender native Undo checkpoint is unavailable")
             self._set_error(error)
             raise RuntimeError(self.error) from error
+        if current.operation == "leaf_operation_failure":
+            raise RuntimeError(
+                "Blender native Undo must restore the failed guided operation "
+                "before any further scene mutation"
+            )
         self._checkpoints[self._current_id] = self._checkpoint(
             current.checkpoint_id,
             current.previous_id,
@@ -1210,6 +1278,11 @@ class NativeHistoryController:
             session,
             current.committed_at,
         )
+        if current.alternate_snapshots:
+            self._checkpoints[self._current_id] = replace(
+                self._checkpoints[self._current_id],
+                alternate_snapshots=current.alternate_snapshots,
+            )
         self._prepared_from = self._current_id
         self._prepared_operation = operation
 
@@ -1223,21 +1296,70 @@ class NativeHistoryController:
         checkpoint = self._checkpoints.get(self._prepared_from)
         return checkpoint is not None and session.snapshot_state() != checkpoint.snapshot
 
-    def commit(self, session: DemoSession) -> str:
+    def _restore_session_snapshot(
+        self,
+        session: DemoSession,
+        snapshot: SessionSnapshot,
+    ) -> SessionSnapshot:
+        rebound_receipts = rebind_receipts_after_native_restore(
+            dict(snapshot.receipts)
+        )
+        rebound_runs = {}
+        for step_id, run in snapshot.leaf_operation_runs:
+            partial = run.partial_action_receipt
+            if partial is not None:
+                partial = rebind_receipts_after_native_restore(
+                    {step_id: partial}
+                )[step_id]
+            rebound_runs[step_id] = replace(
+                run,
+                partial_action_receipt=partial,
+            )
+        managed_receipts = dict(rebound_receipts)
+        for step_id, run in rebound_runs.items():
+            partial = run.partial_action_receipt
+            if partial is not None:
+                if step_id in managed_receipts:
+                    raise RuntimeError(
+                        "Native history partial receipt collides with a formal receipt"
+                    )
+                managed_receipts[step_id] = partial
+        ensure_receipts_intact(managed_receipts)
+        session.restore_state(
+            snapshot,
+            receipts=rebound_receipts,
+            leaf_operation_runs=rebound_runs,
+        )
+        return session.snapshot_state()
+
+    def commit(
+        self,
+        session: DemoSession,
+        *,
+        rollback: Callable[[], NativeHistoryRecovery | None] | None = None,
+        quarantine: bool = False,
+        recovery_probe: Callable[[], bool] | None = None,
+    ) -> str:
         operation = self._prepared_operation
         if operation is None:
             raise RuntimeError("No Blender native Undo checkpoint was prepared")
+        previous_id = self._prepared_from
+        prepared = self._checkpoints.get(previous_id)
+        if prepared is None:
+            raise RuntimeError("Prepared Blender native Undo checkpoint is unavailable")
+        checkpoints_before = dict(self._checkpoints)
+        artifacts_before = dict(self._artifact_blobs)
+        owner = None
         try:
             owner = self._owner_scene()
             if owner is None:
                 raise RuntimeError("Blender native Undo owner Scene is unavailable")
-            previous_id = self._prepared_from
             self._prune_redo_branches()
             checkpoint_id = str(uuid.uuid4())
             checkpoint = self._checkpoint(
                 checkpoint_id,
                 previous_id,
-                operation,
+                "leaf_operation_failure" if quarantine else operation,
                 session,
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             )
@@ -1245,16 +1367,178 @@ class NativeHistoryController:
             if self._marker(owner) != checkpoint_id:
                 raise RuntimeError("Blender rejected the native Undo marker")
         except Exception as error:
-            self._set_error(error)
-            raise RuntimeError(self.error) from error
+            if quarantine:
+                recovery_errors: list[Exception] = []
+                try:
+                    self._checkpoints = checkpoints_before
+                    self._artifact_blobs = artifacts_before
+                    self._restore_session_snapshot(session, prepared.snapshot)
+                except Exception as recovery_error:
+                    recovery_errors.append(recovery_error)
+                if owner is not None:
+                    try:
+                        if previous_id is None:
+                            if NATIVE_HISTORY_MARKER_KEY in owner:
+                                del owner[NATIVE_HISTORY_MARKER_KEY]
+                        else:
+                            owner[NATIVE_HISTORY_MARKER_KEY] = previous_id
+                        if self._marker(owner) != previous_id:
+                            raise RuntimeError(
+                                "Blender native Undo marker recovery was rejected"
+                            )
+                    except Exception as recovery_error:
+                        recovery_errors.append(recovery_error)
+                detail = (
+                    f"; recovery also failed: {recovery_errors[0]}"
+                    if recovery_errors
+                    else ""
+                )
+                quarantine_error = RuntimeError(
+                    "Managed Blender mutation could not be journaled; "
+                    f"use Blender native Undo before continuing ({error}){detail}"
+                )
+                recovery_token = None
+                if owner is not None:
+                    try:
+                        recovery_token = self._arm_native_undo_recovery(owner)
+                    except Exception as recovery_error:
+                        quarantine_error = RuntimeError(
+                            f"{quarantine_error}; native Undo recovery witness "
+                            f"could not be armed ({recovery_error}); reload the .blend"
+                        )
+                self._require_native_undo(
+                    previous_id,
+                    recovery_probe,
+                    recovery_token=recovery_token,
+                )
+                self._set_error(quarantine_error)
+                raise RuntimeError(self.error) from error
+            try:
+                recovery_snapshot = prepared.snapshot
+                restored_probe = recovery_probe
+                trusted_replay = False
+                if rollback is not None:
+                    rollback_result = rollback()
+                    if rollback_result is not None:
+                        if not isinstance(rollback_result, NativeHistoryRecovery):
+                            raise TypeError(
+                                "Native history rollback returned an invalid recovery"
+                            )
+                        if not callable(rollback_result.recovery_probe):
+                            raise TypeError(
+                                "Native history replay recovery probe is invalid"
+                            )
+                        recovery_snapshot = rollback_result.snapshot
+                        restored_probe = rollback_result.recovery_probe
+                        trusted_replay = True
+                restored_snapshot = self._restore_session_snapshot(
+                    session,
+                    recovery_snapshot,
+                )
+                if owner is not None:
+                    if previous_id is None:
+                        if NATIVE_HISTORY_MARKER_KEY in owner:
+                            del owner[NATIVE_HISTORY_MARKER_KEY]
+                    else:
+                        owner[NATIVE_HISTORY_MARKER_KEY] = previous_id
+                    if self._marker(owner) != previous_id:
+                        raise RuntimeError(
+                            "Blender native Undo marker recovery was rejected"
+                        )
+                if restored_probe is None:
+                    raise RuntimeError(
+                        "Blender host recovery proof is unavailable"
+                    )
+                try:
+                    recovered = restored_probe()
+                except Exception as probe_error:
+                    raise RuntimeError(
+                        "Blender host recovery proof failed"
+                    ) from probe_error
+                if recovered is not True:
+                    raise RuntimeError(
+                        "Blender host recovery proof rejected the restored state"
+                    )
+                alternate_snapshots = prepared.alternate_snapshots
+                if trusted_replay and recovery_snapshot != prepared.snapshot:
+                    alternate_snapshots = (
+                        prepared.snapshot,
+                        *tuple(
+                            snapshot
+                            for snapshot in alternate_snapshots
+                            if snapshot != prepared.snapshot
+                        ),
+                    )
+                checkpoints_before[previous_id] = replace(
+                    prepared,
+                    snapshot=restored_snapshot,
+                    alternate_snapshots=alternate_snapshots,
+                )
+                self._checkpoints = checkpoints_before
+                self._artifact_blobs = artifacts_before
+            except Exception as recovery_error:
+                self._checkpoints = checkpoints_before
+                self._artifact_blobs = artifacts_before
+                recovery_token = None
+                witness_error = None
+                if owner is not None:
+                    try:
+                        recovery_token = self._arm_native_undo_recovery(owner)
+                    except Exception as error:
+                        witness_error = error
+                self._require_native_undo(
+                    previous_id,
+                    recovery_probe,
+                    recovery_token=recovery_token,
+                )
+                if witness_error is not None:
+                    recovery_error = RuntimeError(
+                        f"{recovery_error}; native Undo recovery witness could "
+                        f"not be armed ({witness_error}); reload the .blend"
+                    )
+                self._set_error(recovery_error)
+                raise NativeUndoRequiredError(
+                    f"{self.error}; use Blender native Undo before continuing; "
+                    f"original commit error: {error}"
+                ) from recovery_error
+            self.cancel()
+            raise RuntimeError(
+                "Blender native Undo checkpoint commit failed; "
+                f"operation restored: {error}"
+            ) from error
         self._checkpoints[checkpoint_id] = checkpoint
         self._current_id = checkpoint_id
+        self._native_undo_redo_guard_id = None
+        self._native_undo_redo_guard_probe = None
+        self._native_undo_redo_guard_token = None
+        if quarantine:
+            try:
+                recovery_token = self._arm_native_undo_recovery(owner)
+            except Exception as error:
+                self._require_native_undo(
+                    previous_id,
+                    recovery_probe,
+                    recovery_token=None,
+                )
+                self.cancel()
+                self.error = (
+                    "Native Undo recovery witness could not be armed; "
+                    f"reload the .blend ({error})"
+                )
+                raise NativeUndoRequiredError(self.error) from error
+            self._require_native_undo(
+                previous_id,
+                recovery_probe,
+                recovery_token=recovery_token,
+            )
         self.cancel()
         return checkpoint_id
 
-    def current_checkpoint_attestation(
+    def _current_checkpoint_attestation(
         self,
         session: DemoSession,
+        *,
+        allow_leaf_operation: bool,
     ) -> dict[str, Any] | None:
         """Describe the exact journal entry currently selected by Blender history."""
         if not self._registered or self._current_id is None:
@@ -1263,7 +1547,21 @@ class NativeHistoryController:
         owner = self._owner_scene()
         if checkpoint is None or owner is None:
             raise RuntimeError("Blender native Undo checkpoint is unavailable")
-        if checkpoint.operation not in {"start", "next", "recheck", "back"}:
+        if checkpoint.operation in {
+            "leaf_operation",
+            "leaf_operation_back",
+            "leaf_operation_failure",
+        } and not allow_leaf_operation:
+            return None
+        if checkpoint.operation not in {
+            "start",
+            "next",
+            "recheck",
+            "back",
+            "leaf_operation",
+            "leaf_operation_back",
+            "leaf_operation_failure",
+        }:
             raise RuntimeError("Blender native Undo checkpoint operation is invalid")
         if checkpoint.committed_at is None:
             raise RuntimeError("Blender native Undo checkpoint timestamp is unavailable")
@@ -1286,6 +1584,41 @@ class NativeHistoryController:
                     f"Native Undo artifact backup is unavailable: {artifact.logical_id}"
                 )
         active = session.active_step
+        lineage_checkpoint_ids: list[str] = []
+        lineage_contains_leaf_operation = False
+        lineage_checkpoint = checkpoint
+        visited: set[str] = set()
+        while lineage_checkpoint.checkpoint_id is not None:
+            lineage_id = lineage_checkpoint.checkpoint_id
+            if lineage_id in visited:
+                raise RuntimeError("Blender native Undo checkpoint lineage contains a cycle")
+            visited.add(lineage_id)
+            lineage_checkpoint_ids.append(lineage_id)
+            lineage_contains_leaf_operation = lineage_contains_leaf_operation or (
+                lineage_checkpoint.operation
+                in {
+                    "leaf_operation",
+                    "leaf_operation_back",
+                    "leaf_operation_failure",
+                }
+            )
+            previous_id = lineage_checkpoint.previous_id
+            if previous_id is None:
+                break
+            previous = self._checkpoints.get(previous_id)
+            if previous is None:
+                raise RuntimeError(
+                    "Blender native Undo checkpoint lineage is incomplete"
+                )
+            lineage_checkpoint = previous
+        lineage_checkpoint_ids.reverse()
+        journal: dict[str, Any] = {
+            "entryPresent": True,
+            "snapshotMatchesSession": True,
+            "artifactsBackedUp": True,
+        }
+        if lineage_contains_leaf_operation and len(lineage_checkpoint_ids) >= 2:
+            journal["lineageCheckpointIds"] = lineage_checkpoint_ids
         return {
             "formatVersion": "1.0.0",
             "evidenceClass": "companion_reported_native_undo_checkpoint",
@@ -1297,11 +1630,7 @@ class NativeHistoryController:
                 "key": NATIVE_HISTORY_MARKER_KEY,
                 "matched": True,
             },
-            "journal": {
-                "entryPresent": True,
-                "snapshotMatchesSession": True,
-                "artifactsBackedUp": True,
-            },
+            "journal": journal,
             "session": {
                 "plan": {
                     "id": current_snapshot.plan_id,
@@ -1316,6 +1645,24 @@ class NativeHistoryController:
                 ],
             },
         }
+
+    def current_checkpoint_attestation(
+        self,
+        session: DemoSession,
+    ) -> dict[str, Any] | None:
+        return self._current_checkpoint_attestation(
+            session,
+            allow_leaf_operation=False,
+        )
+
+    def current_leaf_checkpoint_attestation(
+        self,
+        session: DemoSession,
+    ) -> dict[str, Any] | None:
+        return self._current_checkpoint_attestation(
+            session,
+            allow_leaf_operation=True,
+        )
 
     @staticmethod
     def _artifact_map(
@@ -1409,12 +1756,138 @@ class NativeHistoryController:
         self.error = f"Native Undo synchronization failed: {error}"
         print(f"OperatingLine {self.error}")
 
+    def _require_native_undo(
+        self,
+        recovery_id: str | None,
+        recovery_probe: Callable[[], bool] | None,
+        *,
+        recovery_token: str | None = None,
+    ) -> None:
+        self._native_undo_restoration_witness = None
+        self._requires_native_undo = True
+        self._native_undo_recovery_id = recovery_id
+        self._native_undo_recovery_probe = recovery_probe
+        self._native_undo_recovery_token = recovery_token
+
+    @staticmethod
+    def _native_undo_recovery_marker(owner: bpy.types.Scene) -> str | None:
+        value = owner.get(NATIVE_HISTORY_RECOVERY_KEY)
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value:
+            raise RuntimeError("Blender native Undo recovery marker is invalid")
+        return value
+
+    def _arm_native_undo_recovery(self, owner: bpy.types.Scene) -> str:
+        token = str(uuid.uuid4())
+        owner[NATIVE_HISTORY_RECOVERY_KEY] = token
+        if self._native_undo_recovery_marker(owner) != token:
+            raise RuntimeError("Blender rejected the native Undo recovery marker")
+        return token
+
+    def _probe_native_undo_recovery(self, direction: str) -> bool:
+        if not self._requires_native_undo:
+            return True
+        if direction != "undo":
+            return False
+        owner = self._owner_scene()
+        if owner is None or self._marker(owner) != self._native_undo_recovery_id:
+            return False
+        recovery_token = self._native_undo_recovery_token
+        if recovery_token is None:
+            return False
+        if self._native_undo_recovery_marker(owner) is not None:
+            return False
+        probe = self._native_undo_recovery_probe
+        if probe is not None:
+            try:
+                recovered = probe()
+            except Exception as error:
+                print(f"OperatingLine native Undo recovery probe failed: {error}")
+                return False
+            if recovered is not True:
+                return False
+        return True
+
+    def _restore_checkpoint_session(
+        self,
+        session: DemoSession,
+        checkpoint: NativeHistoryCheckpoint,
+    ) -> tuple[SessionSnapshot, tuple[SessionSnapshot, ...]]:
+        """Restore one exact recorded identity variant for a trusted replay checkpoint."""
+
+        candidates = (checkpoint.snapshot, *checkpoint.alternate_snapshots)
+        first_error: Exception | None = None
+        for index, candidate in enumerate(candidates):
+            try:
+                restored = self._restore_session_snapshot(session, candidate)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+                continue
+            remaining = tuple(
+                snapshot
+                for candidate_index, snapshot in enumerate(candidates)
+                if candidate_index != index and snapshot != restored
+            )
+            return restored, remaining
+        if first_error is None:
+            raise RuntimeError("Native history checkpoint has no session snapshot")
+        raise first_error
+
+    def _clear_native_undo_requirement(self) -> None:
+        self._requires_native_undo = False
+        self._native_undo_recovery_id = None
+        self._native_undo_recovery_probe = None
+        self._native_undo_recovery_token = None
+
+    def peek_native_undo_restoration_witness(
+        self,
+    ) -> NativeUndoRestorationWitness | None:
+        return self._native_undo_restoration_witness
+
+    def peek_native_undo_recovery_guard(self) -> NativeUndoRecoveryGuard | None:
+        token = self._native_undo_recovery_token
+        if not self._requires_native_undo or token is None:
+            return None
+        return NativeUndoRecoveryGuard(
+            expected_restored_checkpoint_id=self._native_undo_recovery_id,
+            recovery_token_sha256=_sha256(token.encode("utf-8")),
+        )
+
+    def consume_native_undo_restoration_witness(
+        self,
+    ) -> NativeUndoRestorationWitness | None:
+        witness = self._native_undo_restoration_witness
+        self._native_undo_restoration_witness = None
+        return witness
+
     def sync(self, direction: str) -> None:
         if not self._registered or self._handling or not self._checkpoints:
             return
         self._handling = True
         try:
             owner = self._owner_scene()
+            if (
+                direction == "redo"
+                and owner is not None
+                and self._native_undo_redo_guard_token is not None
+                and self._native_undo_recovery_marker(owner)
+                == self._native_undo_redo_guard_token
+            ):
+                self._require_native_undo(
+                    self._native_undo_redo_guard_id,
+                    self._native_undo_redo_guard_probe,
+                    recovery_token=self._native_undo_redo_guard_token,
+                )
+                self.error = (
+                    "Native Undo synchronization failed: Redo restored an "
+                    "unjournaled failed mutation; use Blender native Undo"
+                )
+                return
+            recovering_native_undo = self._requires_native_undo
+            if not self._probe_native_undo_recovery(direction):
+                return
             if owner is None:
                 raise RuntimeError("owner Scene is unavailable")
             target_id = self._marker(owner)
@@ -1428,22 +1901,43 @@ class NativeHistoryController:
                 raise RuntimeError("session provider is unavailable")
             session = provider()
             before_snapshot = session.snapshot_state()
-            rebound_receipts = rebind_receipts_after_native_restore(
-                dict(target.snapshot.receipts)
-            )
             restore_artifacts = self._apply_artifact_transition(source, target)
             try:
-                ensure_receipts_intact(rebound_receipts)
-                session.restore_state(target.snapshot, receipts=rebound_receipts)
+                rebound_snapshot, alternate_snapshots = (
+                    self._restore_checkpoint_session(session, target)
+                )
             except Exception:
                 restore_artifacts()
                 raise
-            rebound_snapshot = session.snapshot_state()
             self._checkpoints[target_id] = replace(
                 target,
                 snapshot=rebound_snapshot,
+                alternate_snapshots=alternate_snapshots,
             )
             self._current_id = target_id
+            if recovering_native_undo:
+                recovery_token = self._native_undo_recovery_token
+                if recovery_token is None:
+                    raise RuntimeError("Native Undo recovery token is unavailable")
+                self._native_undo_restoration_witness = NativeUndoRestorationWitness(
+                    direction="undo",
+                    source_checkpoint_id=source.checkpoint_id,
+                    restored_checkpoint_id=target.checkpoint_id,
+                    recovery_token_sha256=_sha256(recovery_token.encode("utf-8")),
+                    restored_at=datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    recovery_probe_satisfied=True,
+                )
+                if self._native_undo_recovery_token is not None:
+                    self._native_undo_redo_guard_id = self._native_undo_recovery_id
+                    self._native_undo_redo_guard_probe = (
+                        self._native_undo_recovery_probe
+                    )
+                    self._native_undo_redo_guard_token = (
+                        self._native_undo_recovery_token
+                    )
+                self._clear_native_undo_requirement()
             self.error = ""
             callback = self._restore_callback
             if callback is not None and marker_changed:
@@ -1529,8 +2023,19 @@ def cancel_native_history() -> None:
     _CONTROLLER.cancel()
 
 
-def commit_native_history(session: DemoSession) -> str:
-    return _CONTROLLER.commit(session)
+def commit_native_history(
+    session: DemoSession,
+    *,
+    rollback: Callable[[], NativeHistoryRecovery | None] | None = None,
+    quarantine: bool = False,
+    recovery_probe: Callable[[], bool] | None = None,
+) -> str:
+    return _CONTROLLER.commit(
+        session,
+        rollback=rollback,
+        quarantine=quarantine,
+        recovery_probe=recovery_probe,
+    )
 
 
 def prepared_native_history_changed(session: DemoSession) -> bool:
@@ -1539,6 +2044,22 @@ def prepared_native_history_changed(session: DemoSession) -> bool:
 
 def native_history_error() -> str:
     return _CONTROLLER.error
+
+
+def native_history_requires_native_undo() -> bool:
+    return _CONTROLLER.requires_native_undo
+
+
+def peek_native_undo_restoration_witness() -> NativeUndoRestorationWitness | None:
+    return _CONTROLLER.peek_native_undo_restoration_witness()
+
+
+def peek_native_undo_recovery_guard() -> NativeUndoRecoveryGuard | None:
+    return _CONTROLLER.peek_native_undo_recovery_guard()
+
+
+def consume_native_undo_restoration_witness() -> NativeUndoRestorationWitness | None:
+    return _CONTROLLER.consume_native_undo_restoration_witness()
 
 
 def native_history_checkpoint_count() -> int:
@@ -1551,20 +2072,36 @@ def native_undo_checkpoint_attestation(
     return _CONTROLLER.current_checkpoint_attestation(session)
 
 
+def native_leaf_checkpoint_attestation(
+    session: DemoSession,
+) -> dict[str, Any] | None:
+    return _CONTROLLER.current_leaf_checkpoint_attestation(session)
+
+
 __all__ = (
     "NATIVE_HISTORY_MARKER_KEY",
+    "NATIVE_HISTORY_RECOVERY_KEY",
     "POKE_COMPOUND_HISTORY_MARKER_KEY",
     "NativeHistoryCheckpoint",
     "NativeHistoryController",
+    "NativeHistoryRecovery",
     "NativeHistoryRestore",
+    "NativeUndoRecoveryGuard",
+    "NativeUndoRestorationWitness",
+    "NativeUndoRequiredError",
     "PokeCompoundHistoryLock",
     "PokeCompoundHistoryState",
     "cancel_native_history",
     "commit_native_history",
+    "consume_native_undo_restoration_witness",
     "discard_native_history",
     "native_history_checkpoint_count",
     "native_history_error",
+    "native_history_requires_native_undo",
+    "native_leaf_checkpoint_attestation",
     "native_undo_checkpoint_attestation",
+    "peek_native_undo_restoration_witness",
+    "peek_native_undo_recovery_guard",
     "prepare_native_history",
     "prepared_native_history_changed",
     "register_native_history",

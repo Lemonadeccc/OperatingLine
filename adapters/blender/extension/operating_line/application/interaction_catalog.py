@@ -14,6 +14,12 @@ from ..domain import (
     is_action_level_mcp_primitive,
     is_action_level_mcp_recipe,
 )
+from ..domain.guided_geometry_leaf_profiles import (
+    GUIDED_GEOMETRY_LEAF_OPERATION_PROFILES_BY_RECIPE,
+    GUIDED_LEAF_OPERATION_PARAMETER_TRANSFORMS,
+    TRANSFORM_GEOMETRY_LEAF_OPERATION_IDS as TRANSFORM_GEOMETRY_OPERATION_LEVEL_MCP_IDS,
+    TRANSFORM_GEOMETRY_LEAF_OPERATION_PARAMETER_NAMES as TRANSFORM_GEOMETRY_OPERATION_LEVEL_MCP_PARAMETER_NAMES,
+)
 
 
 RESOURCE_PATH = (
@@ -73,6 +79,7 @@ PARAMETER_ASSIGNMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 SEMANTIC_PARAMETER_TRANSFORMS = frozenset(
     {
         "identity",
+        "json_identity",
         "uniform_vector3",
         "divide_by_two",
         "vector3_x",
@@ -80,6 +87,7 @@ SEMANTIC_PARAMETER_TRANSFORMS = frozenset(
         "vector3_z",
     }
 )
+OPERATION_LEVEL_MCP_PROFILES = GUIDED_GEOMETRY_LEAF_OPERATION_PROFILES_BY_RECIPE
 
 
 class InteractionPathKind(str, Enum):
@@ -87,6 +95,16 @@ class InteractionPathKind(str, Enum):
 
     NATIVE = "native_path"
     SEMANTIC = "semantic_path"
+
+
+@dataclass(frozen=True, slots=True)
+class NodeSocketConnectionDefinition:
+    """Machine-readable endpoints for one semantic node link."""
+
+    from_node: str
+    from_socket: str
+    to_node: str
+    to_socket: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +117,7 @@ class InteractionStepDefinition:
     intent: str
     target_kind: str
     target_id: str
+    connection: NodeSocketConnectionDefinition | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,9 +161,56 @@ class ProcedureMaterializationChannel:
     tool_name: str | None = None
     authorization: str | None = None
     result_binding: str | None = None
+    mcp_operations: tuple["McpOperationDefinition", ...] | None = None
     proof_execution: (
         "MenuProofExecutionDefinition | ShortcutProofExecutionDefinition | None"
     ) = None
+
+
+@dataclass(frozen=True, slots=True)
+class MenuCandidateOperationDefinition:
+    """One non-executable, catalog-owned Blender UI teaching operation."""
+
+    id: str
+    label: str
+    intent: str
+    target_kind: str
+    target_id: str
+    path: tuple[str, ...]
+    parameters: tuple["ParameterAssignmentDefinition", ...]
+    connection: NodeSocketConnectionDefinition | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeMenuCandidateEvidenceDefinition:
+    """Bounded host evidence that never grants managed execution authority."""
+
+    kind: str
+    executor_id: str
+    host_versions: tuple[str, ...]
+    managed_action_executed: bool
+    managed_receipt_created: bool
+    managed_replacement_mesh_created: bool
+    native_mutation_kind: str
+    operation_ids: tuple[str, ...]
+    native_undo_checkpoint_required: bool
+    native_undo_depth: int
+    native_redo_depth: int
+
+
+@dataclass(frozen=True, slots=True)
+class MenuCandidateMaterializationDefinition:
+    """A visible real-UI candidate kept separate from executable menu tracks."""
+
+    source: str
+    projection: str
+    equivalence: str
+    execution_authority: str
+    reason: str
+    preconditions: tuple["ShortcutPreconditionDefinition", ...]
+    operations: tuple[MenuCandidateOperationDefinition, ...]
+    omitted_action_arguments: tuple["OmittedActionArgumentDefinition", ...]
+    native_evidence: NativeMenuCandidateEvidenceDefinition | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +286,14 @@ class ParameterAssignmentDefinition:
 
     name: str
     source: ParameterAssignmentSourceDefinition
+
+
+@dataclass(frozen=True, slots=True)
+class McpOperationDefinition:
+    """One catalog-owned operation in an operation-level MCP projection."""
+
+    source_operation_id: str
+    parameters: tuple[ParameterAssignmentDefinition, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,6 +416,7 @@ class ProcedureMaterializationDefinition:
     """Declared menu, shortcut, and MCP procedure materialization support."""
 
     menu: ProcedureMaterializationChannel
+    menu_candidate: MenuCandidateMaterializationDefinition | None
     shortcut: ProcedureMaterializationChannel
     mcp: ProcedureMaterializationChannel
     semantic: SemanticProcedureMaterializationDefinition | None = None
@@ -478,11 +553,39 @@ def _parse_steps(value: Any, recipe_id: str) -> tuple[InteractionStepDefinition,
         _expect_exact_keys(
             target,
             required={"kind", "hostId"},
+            optional={"connection"},
             label="Interaction target",
         )
         target_kind = _expect_string(target["kind"], "Interaction target kind")
         if target_kind not in TARGET_KINDS:
             raise ValueError(f"Interaction recipe {recipe_id} has unknown target kind")
+        connection = None
+        if "connection" in target:
+            if target_kind != "semantic":
+                raise ValueError(
+                    f"Interaction recipe {recipe_id} node connection requires a "
+                    "semantic target"
+                )
+            raw_connection = _expect_object(
+                target["connection"], "Interaction target connection"
+            )
+            _expect_exact_keys(
+                raw_connection,
+                required={"fromNode", "fromSocket", "toNode", "toSocket"},
+                label="Interaction target connection",
+            )
+            connection = NodeSocketConnectionDefinition(
+                from_node=_expect_string(
+                    raw_connection["fromNode"], "Connection fromNode"
+                ),
+                from_socket=_expect_string(
+                    raw_connection["fromSocket"], "Connection fromSocket"
+                ),
+                to_node=_expect_string(raw_connection["toNode"], "Connection toNode"),
+                to_socket=_expect_string(
+                    raw_connection["toSocket"], "Connection toSocket"
+                ),
+            )
         label = _expect_string(raw["label"], "Interaction step label")
         if label in labels:
             raise ValueError(
@@ -501,8 +604,34 @@ def _parse_steps(value: Any, recipe_id: str) -> tuple[InteractionStepDefinition,
                 target_id=_expect_string(
                     target["hostId"], "Interaction target hostId"
                 ),
+                connection=connection,
             )
         )
+    node_target_counts: dict[str, int] = {}
+    for step in steps:
+        if step.target_kind == "node":
+            node_target_counts[step.target_id] = (
+                node_target_counts.get(step.target_id, 0) + 1
+            )
+    for step in steps:
+        connection = step.connection
+        if connection is None:
+            continue
+        if step.intent != "execute":
+            raise ValueError(
+                f"Interaction recipe {recipe_id} node connection {step.id} "
+                "must use execute intent"
+            )
+        for endpoint, node_id in (
+            ("fromNode", connection.from_node),
+            ("toNode", connection.to_node),
+        ):
+            if node_target_counts.get(node_id) != 1:
+                raise ValueError(
+                    f"Interaction recipe {recipe_id} node connection {step.id} "
+                    f"{endpoint} {node_id} must reference exactly one declared "
+                    "node target"
+                )
     steps.sort(key=lambda step: step.order)
     if tuple(step.order for step in steps) != tuple(range(1, len(steps) + 1)):
         raise ValueError(
@@ -650,6 +779,7 @@ def _parse_parameter_source(
         transform = _expect_string(raw["transform"], f"{label} transform")
         if transform not in {
             "identity",
+            "json_identity",
             "divide_by_two",
             "uniform_vector3",
             "vector3_x",
@@ -1039,6 +1169,273 @@ def _parse_shortcut_preconditions(
             f"{label} missing required kinds: {', '.join(sorted(missing))}"
         )
     return tuple(preconditions)
+
+
+def _parse_menu_candidate_preconditions(
+    value: Any,
+    recipe_id: str,
+) -> tuple[ShortcutPreconditionDefinition, ...]:
+    label = f"Interaction recipe {recipe_id} menuCandidate preconditions"
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty array")
+    preconditions: list[ShortcutPreconditionDefinition] = []
+    kind_labels: set[tuple[str, str]] = set()
+    singleton_kinds: set[str] = set()
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} entry")
+        _expect_exact_keys(
+            raw,
+            required={"kind", "label", "value"},
+            label=f"{label} entry",
+        )
+        kind = _expect_string(raw["kind"], f"{label} kind")
+        if kind not in SHORTCUT_PRECONDITION_KINDS:
+            raise ValueError(f"{label} has unknown kind {kind}")
+        precondition_label = _expect_string(raw["label"], f"{label} label")
+        key = (kind, precondition_label)
+        if key in kind_labels:
+            raise ValueError(
+                f"{label} contains duplicate precondition {kind}:{precondition_label}"
+            )
+        if kind in SINGLETON_SHORTCUT_PRECONDITION_KINDS:
+            if kind in singleton_kinds:
+                raise ValueError(
+                    f"{label} must declare at most one precondition for {kind}"
+                )
+            singleton_kinds.add(kind)
+        kind_labels.add(key)
+        preconditions.append(
+            ShortcutPreconditionDefinition(
+                kind=kind,
+                label=precondition_label,
+                value=_expect_string(raw["value"], f"{label} value"),
+            )
+        )
+    return tuple(preconditions)
+
+
+def _parse_menu_candidate_operations(
+    value: Any,
+    recipe_id: str,
+) -> tuple[MenuCandidateOperationDefinition, ...]:
+    label = f"Interaction recipe {recipe_id} menuCandidate operations"
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty array")
+    operations: list[MenuCandidateOperationDefinition] = []
+    operation_ids: set[str] = set()
+    operation_labels: set[str] = set()
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} operation")
+        _expect_exact_keys(
+            raw,
+            required={"id", "label", "intent", "target", "path", "parameters"},
+            label=f"{label} operation",
+        )
+        operation_id = _expect_string(raw["id"], f"{label} operation id")
+        if STEP_ID_PATTERN.fullmatch(operation_id) is None:
+            raise ValueError(f"{label} has invalid operation id")
+        if operation_id in operation_ids:
+            raise ValueError(f"{label} contains duplicate operation id {operation_id}")
+        operation_label = _expect_string(raw["label"], f"{label} operation label")
+        if operation_label in operation_labels:
+            raise ValueError(
+                f"{label} contains duplicate operation label {operation_label}"
+            )
+        intent = _expect_string(raw["intent"], f"{label} operation intent")
+        if intent not in STEP_INTENTS:
+            raise ValueError(f"{label} has unknown operation intent")
+        target = _expect_object(raw["target"], f"{label} operation target")
+        _expect_exact_keys(
+            target,
+            required={"kind", "hostId"},
+            optional={"connection"},
+            label=f"{label} operation target",
+        )
+        target_kind = _expect_string(target["kind"], f"{label} target kind")
+        if target_kind not in TARGET_KINDS:
+            raise ValueError(f"{label} has unknown target kind")
+        connection = None
+        if "connection" in target:
+            if target_kind != "semantic":
+                raise ValueError(f"{label} connection requires a semantic target")
+            raw_connection = _expect_object(
+                target["connection"], f"{label} operation connection"
+            )
+            _expect_exact_keys(
+                raw_connection,
+                required={"fromNode", "fromSocket", "toNode", "toSocket"},
+                label=f"{label} operation connection",
+            )
+            connection = NodeSocketConnectionDefinition(
+                from_node=_expect_string(
+                    raw_connection["fromNode"], f"{label} connection fromNode"
+                ),
+                from_socket=_expect_string(
+                    raw_connection["fromSocket"], f"{label} connection fromSocket"
+                ),
+                to_node=_expect_string(
+                    raw_connection["toNode"], f"{label} connection toNode"
+                ),
+                to_socket=_expect_string(
+                    raw_connection["toSocket"], f"{label} connection toSocket"
+                ),
+            )
+        raw_path = raw["path"]
+        if not isinstance(raw_path, list) or not raw_path:
+            raise ValueError(f"{label} operation path must be a non-empty array")
+        operation_ids.add(operation_id)
+        operation_labels.add(operation_label)
+        operations.append(
+            MenuCandidateOperationDefinition(
+                id=operation_id,
+                label=operation_label,
+                intent=intent,
+                target_kind=target_kind,
+                target_id=_expect_string(
+                    target["hostId"], f"{label} operation target hostId"
+                ),
+                path=tuple(
+                    _expect_string(item, f"{label} operation path item")
+                    for item in raw_path
+                ),
+                parameters=_parse_parameters(
+                    raw["parameters"], f"{label} operation {operation_id}"
+                ),
+                connection=connection,
+            )
+        )
+    return tuple(operations)
+
+
+def _parse_native_menu_candidate_evidence(
+    value: Any,
+    recipe_id: str,
+    operation_ids: tuple[str, ...],
+) -> NativeMenuCandidateEvidenceDefinition:
+    label = f"Interaction recipe {recipe_id} menuCandidate nativeEvidence"
+    raw = _expect_object(value, label)
+    _expect_exact_keys(
+        raw,
+        required={
+            "kind",
+            "executorId",
+            "hostVersions",
+            "managedActionExecuted",
+            "managedReceiptCreated",
+            "managedReplacementMeshCreated",
+            "nativeMutationKind",
+            "operationIds",
+            "nativeUndoCheckpointRequired",
+            "nativeUndoDepth",
+            "nativeRedoDepth",
+        },
+        label=label,
+    )
+    if raw["kind"] != "bounded_blender_ui_probe":
+        raise ValueError(f"{label} has unsupported kind")
+    for false_field in (
+        "managedActionExecuted",
+        "managedReceiptCreated",
+        "managedReplacementMeshCreated",
+    ):
+        if raw[false_field] is not False:
+            raise ValueError(f"{label} {false_field} must be false")
+    if raw["nativeUndoCheckpointRequired"] is not True:
+        raise ValueError(f"{label} nativeUndoCheckpointRequired must be true")
+    raw_host_versions = raw["hostVersions"]
+    if not isinstance(raw_host_versions, list) or not raw_host_versions:
+        raise ValueError(f"{label} hostVersions must be a non-empty array")
+    host_versions = tuple(
+        _expect_version(version, f"{label} hostVersion")
+        for version in raw_host_versions
+    )
+    if len(set(host_versions)) != len(host_versions):
+        raise ValueError(f"{label} repeats a host version")
+    raw_operation_ids = raw["operationIds"]
+    if not isinstance(raw_operation_ids, list):
+        raise ValueError(f"{label} operationIds must be an array")
+    evidence_operation_ids = tuple(
+        _expect_string(operation_id, f"{label} operationId")
+        for operation_id in raw_operation_ids
+    )
+    if evidence_operation_ids != operation_ids:
+        raise ValueError(f"{label} must bind every ordered operation exactly")
+    depths: dict[str, int] = {}
+    for field in ("nativeUndoDepth", "nativeRedoDepth"):
+        depth = raw[field]
+        if isinstance(depth, bool) or not isinstance(depth, int) or depth <= 0:
+            raise ValueError(f"{label} {field} must be a positive integer")
+        depths[field] = depth
+    return NativeMenuCandidateEvidenceDefinition(
+        kind="bounded_blender_ui_probe",
+        executor_id=_expect_string(raw["executorId"], f"{label} executorId"),
+        host_versions=host_versions,
+        managed_action_executed=False,
+        managed_receipt_created=False,
+        managed_replacement_mesh_created=False,
+        native_mutation_kind=_expect_string(
+            raw["nativeMutationKind"], f"{label} nativeMutationKind"
+        ),
+        operation_ids=evidence_operation_ids,
+        native_undo_checkpoint_required=True,
+        native_undo_depth=depths["nativeUndoDepth"],
+        native_redo_depth=depths["nativeRedoDepth"],
+    )
+
+
+def _parse_menu_candidate_materialization(
+    value: Any,
+    recipe_id: str,
+) -> MenuCandidateMaterializationDefinition:
+    label = f"Interaction recipe {recipe_id} procedureMaterialization menuCandidate"
+    raw = _expect_object(value, label)
+    _expect_exact_keys(
+        raw,
+        required={
+            "source",
+            "projection",
+            "equivalence",
+            "executionAuthority",
+            "reason",
+            "preconditions",
+            "operations",
+            "omittedActionArguments",
+        },
+        optional={"nativeEvidence"},
+        label=label,
+    )
+    expected = {
+        "source": "catalog.ordered_menu_candidate_operations",
+        "projection": "candidate_only",
+        "equivalence": "not_equivalent_to_managed_action",
+        "executionAuthority": "none",
+    }
+    for key, expected_value in expected.items():
+        if raw[key] != expected_value:
+            raise ValueError(f"{label} has unsupported {key}")
+    operations = _parse_menu_candidate_operations(raw["operations"], recipe_id)
+    operation_ids = tuple(operation.id for operation in operations)
+    return MenuCandidateMaterializationDefinition(
+        source=expected["source"],
+        projection=expected["projection"],
+        equivalence=expected["equivalence"],
+        execution_authority=expected["executionAuthority"],
+        reason=_expect_string(raw["reason"], f"{label} reason"),
+        preconditions=_parse_menu_candidate_preconditions(
+            raw["preconditions"], recipe_id
+        ),
+        operations=operations,
+        omitted_action_arguments=_parse_omitted_action_arguments(
+            raw["omittedActionArguments"], recipe_id
+        ),
+        native_evidence=(
+            _parse_native_menu_candidate_evidence(
+                raw["nativeEvidence"], recipe_id, operation_ids
+            )
+            if "nativeEvidence" in raw
+            else None
+        ),
+    )
 
 
 def _parse_shortcut_operations(
@@ -1784,6 +2181,121 @@ def _parse_mcp_materialization(
         return _parse_unavailable_materialization(raw, label)
     if availability != "available":
         raise ValueError(f"{label} has unknown availability")
+    source = _expect_string(raw.get("source"), f"{label} source")
+    if source == "catalog.operation_level_mcp":
+        profile = OPERATION_LEVEL_MCP_PROFILES.get(recipe_id)
+        if profile is None:
+            raise ValueError(
+                f"{label} operation-level MCP is restricted to an exact guided leaf recipe"
+            )
+        _action_name, expected_ids, expected_parameter_names, expected_tool_name = profile
+        profile_title = {
+            "blender.geometry_nodes.create_transform.semantic": "Transform Geometry",
+            "blender.geometry_nodes.create_light_trails.semantic": "Light Trails",
+            "blender.animation.create_pose_keyframes.semantic": "Pose Animation",
+            "blender.rig.create_armature.semantic": "Armature",
+            "blender.rig.bind_skin_weights.semantic": "Skin Weights",
+            "blender.modifier.add_solidify.semantic": "Solidify",
+            "blender.modifier.add_bevel.semantic": "Bevel Modifier",
+            "blender.material.create_and_assign.semantic": "Single Material",
+            "blender.material.create_palette_and_assign.semantic": "Material Palette",
+            "blender.modifier.add_subdivision_surface.semantic": "Subdivision Surface",
+            "blender.modifier.add_mirror.semantic": "Mirror",
+            "blender.mesh.edit_bevel_edges.semantic": "Edit Bevel Edges",
+            "blender.mesh.edit_inset_faces.semantic": "Individual Inset Faces",
+            "blender.mesh.edit_triangulate.semantic": "Triangulate Faces",
+            "blender.mesh.edit_extrude_region.semantic": "Extrude Region",
+            "blender.mesh.edit_poke_faces.semantic": "Poke Faces",
+        }[recipe_id]
+        _expect_exact_keys(
+            raw,
+            required={
+                "availability",
+                "source",
+                "semanticBinding",
+                "parameterBinding",
+                "serverName",
+                "toolName",
+                "authorization",
+                "resultBinding",
+                "operations",
+            },
+            label=label,
+        )
+        expected = {
+            "semanticBinding": "ordered_leaf_operations",
+            "parameterBinding": "ordered_parameter_operations",
+            "serverName": "operating-line",
+            "toolName": expected_tool_name,
+            "authorization": "accepted_replay_next_step",
+            "resultBinding": "companion_leaf_operation_progress",
+        }
+        for key, expected_value in expected.items():
+            if raw[key] != expected_value:
+                raise ValueError(f"{label} has unsupported {key}")
+        raw_operations = raw["operations"]
+        if not isinstance(raw_operations, list) or len(raw_operations) != len(expected_ids):
+            raise ValueError(
+                f"{label} must contain the exact {profile_title} operations"
+            )
+        operations: list[McpOperationDefinition] = []
+        for index, raw_operation_value in enumerate(raw_operations):
+            operation_label = f"{label} operation {index + 1:02d}"
+            raw_operation = _expect_object(raw_operation_value, operation_label)
+            _expect_exact_keys(
+                raw_operation,
+                required={"sourceOperationId", "parameters"},
+                label=operation_label,
+            )
+            source_operation_id = _expect_string(
+                raw_operation["sourceOperationId"],
+                f"{operation_label} sourceOperationId",
+            )
+            if source_operation_id != expected_ids[index]:
+                raise ValueError(
+                    f"{label} operations must preserve the exact {profile_title} order"
+                )
+            parameters = _parse_parameters(
+                raw_operation["parameters"], f"{operation_label} parameters"
+            )
+            operation_parameter_names = expected_parameter_names[index]
+            if tuple(parameter.name for parameter in parameters) != operation_parameter_names:
+                raise ValueError(
+                    f"{operation_label} parameters do not match the exact "
+                    f"{profile_title} operation binding"
+                )
+            for parameter in parameters:
+                expected_transform = GUIDED_LEAF_OPERATION_PARAMETER_TRANSFORMS.get(
+                    (recipe_id, source_operation_id, parameter.name), "identity"
+                )
+                if (
+                    parameter.source.kind != "action_argument"
+                    or parameter.source.argument_name != parameter.name
+                    or parameter.source.transform != expected_transform
+                ):
+                    raise ValueError(
+                        f"{operation_label} parameter {parameter.name} must be an "
+                        f"{expected_transform}-bound action argument"
+                    )
+            operations.append(
+                McpOperationDefinition(
+                    source_operation_id=source_operation_id,
+                    parameters=parameters,
+                )
+            )
+        return ProcedureMaterializationChannel(
+            availability="available",
+            source=source,
+            semantic_binding=expected["semanticBinding"],
+            parameter_binding=expected["parameterBinding"],
+            server_name=expected["serverName"],
+            tool_name=expected["toolName"],
+            authorization=expected["authorization"],
+            result_binding=expected["resultBinding"],
+            mcp_operations=tuple(operations),
+        )
+    if source != "catalog.action_level_mcp":
+        raise ValueError(f"{label} has unsupported source")
     _expect_exact_keys(
         raw,
         required={
@@ -1799,7 +2311,7 @@ def _parse_mcp_materialization(
         label=label,
     )
     expected = {
-        "source": "catalog.action_level_mcp",
+        "source": source,
         "semanticBinding": "all_leaf_operations",
         "parameterBinding": "accepted_action_arguments",
         "serverName": "operating-line",
@@ -1836,7 +2348,7 @@ def _parse_procedure_materialization(
     _expect_exact_keys(
         raw,
         required={"menu", "shortcut", "mcp"},
-        optional={"semantic"},
+        optional={"semantic", "menuCandidate"},
         label=label,
     )
     raw_menu = _expect_object(raw["menu"], f"{label} menu")
@@ -1956,6 +2468,13 @@ def _parse_procedure_materialization(
 
     return ProcedureMaterializationDefinition(
         menu=menu,
+        menu_candidate=(
+            _parse_menu_candidate_materialization(
+                raw["menuCandidate"], recipe_id
+            )
+            if "menuCandidate" in raw
+            else None
+        ),
         shortcut=_parse_shortcut_materialization(
             raw["shortcut"], recipe_id, guidance
         ),
@@ -1982,6 +2501,17 @@ def _is_fixed_numeric_vector3_schema(value: Any) -> bool:
 def _is_semantic_identity_projectable_schema(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
+    def scalar(item: Any) -> bool:
+        return isinstance(item, (bool, str)) or (
+            isinstance(item, (int, float))
+            and not isinstance(item, bool)
+            and math.isfinite(item)
+        )
+    enum_values = value.get("enum")
+    if isinstance(enum_values, list) and all(scalar(item) for item in enum_values):
+        return True
+    if "const" in value and scalar(value["const"]):
+        return True
     schema_type = value.get("type")
     if schema_type in {"boolean", "string", "number", "integer"}:
         return True
@@ -2207,18 +2737,30 @@ def _validate_ordered_parameter_operations(
         if is_action_level_mcp_primitive(recipe.action_name)
         else f"{recipe.action_name}.semantic"
     )
-    if (
-        materialization.mcp.availability == "available"
-        and (
-            not is_action_level_mcp_action(recipe.action_name)
-            or not is_action_level_mcp_recipe(recipe.id)
-            or recipe.id != expected_action_level_mcp_recipe_id
-        )
-    ):
-        raise ValueError(
-            f"Interaction recipe {recipe.id} action-level MCP must bind its exact "
-            "approved recipe"
-        )
+    mcp = materialization.mcp
+    if mcp.availability == "available":
+        if mcp.source == "catalog.action_level_mcp":
+            if (
+                not is_action_level_mcp_action(recipe.action_name)
+                or not is_action_level_mcp_recipe(recipe.id)
+                or recipe.id != expected_action_level_mcp_recipe_id
+            ):
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} action-level MCP must bind "
+                    "its exact approved recipe"
+                )
+        else:
+            operation_profile = OPERATION_LEVEL_MCP_PROFILES.get(recipe.id)
+            if (
+                mcp.source != "catalog.operation_level_mcp"
+                or operation_profile is None
+                or recipe.action_name != operation_profile[0]
+                or mcp.mcp_operations is None
+            ):
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} operation-level MCP must bind "
+                    "an exact guided leaf recipe"
+                )
     semantic = materialization.semantic
     if semantic is not None:
         _validate_parameter_assignment_coverage(
@@ -2250,6 +2792,19 @@ def _validate_ordered_parameter_operations(
         _validate_parameter_assignment_coverage(
             recipe, action, "menu", menu.omitted_action_arguments, parameters
         )
+    menu_candidate = materialization.menu_candidate
+    if menu_candidate is not None:
+        _validate_parameter_assignment_coverage(
+            recipe,
+            action,
+            "menu candidate",
+            menu_candidate.omitted_action_arguments,
+            [
+                parameter
+                for operation in menu_candidate.operations
+                for parameter in operation.parameters
+            ],
+        )
     shortcut = materialization.shortcut
     if shortcut.parameter_binding == "ordered_parameter_operations":
         assert shortcut.shortcut_operations is not None
@@ -2263,6 +2818,19 @@ def _validate_ordered_parameter_operations(
             "shortcut",
             shortcut.omitted_action_arguments,
             parameters,
+        )
+    if mcp.parameter_binding == "ordered_parameter_operations":
+        assert mcp.mcp_operations is not None
+        _validate_parameter_assignment_coverage(
+            recipe,
+            action,
+            "mcp",
+            (),
+            [
+                parameter
+                for operation in mcp.mcp_operations
+                for parameter in operation.parameters
+            ],
         )
 
 
@@ -2407,8 +2975,12 @@ __all__ = (
     "InteractionPathKind",
     "InteractionRecipe",
     "InteractionStepDefinition",
+    "MenuCandidateMaterializationDefinition",
+    "MenuCandidateOperationDefinition",
     "MenuProofArgumentsDefinition",
     "MenuProofExecutionDefinition",
+    "NativeMenuCandidateEvidenceDefinition",
+    "NodeSocketConnectionDefinition",
     "OmittedActionArgumentDefinition",
     "ParameterAssignmentDefinition",
     "ParameterAssignmentSourceDefinition",

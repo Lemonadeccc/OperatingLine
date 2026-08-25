@@ -1,5 +1,6 @@
 """Real Blender coverage for explicit skin weights and pose transform clips."""
 
+from copy import deepcopy
 import importlib.util
 import math
 from pathlib import Path
@@ -48,6 +49,7 @@ from operating_line_deform_animation_extension.operating_line.infrastructure.sno
 
 ROOT_BONE = "OperatingLine.DeformRoot"
 TIP_BONE = "OperatingLine.DeformTip"
+AXIS_BONE = "OperatingLine.DeformAxis"
 
 
 def step(
@@ -105,18 +107,20 @@ WEIGHTS = [
         "vertexIndex": 4,
         "influences": [
             {"boneName": ROOT_BONE, "weight": 0.25},
-            {"boneName": TIP_BONE, "weight": 0.75},
+            {"boneName": TIP_BONE, "weight": 0.25},
+            {"boneName": AXIS_BONE, "weight": 0.5},
         ],
     },
     {
         "vertexIndex": 5,
         "influences": [
             {"boneName": ROOT_BONE, "weight": 0.25},
-            {"boneName": TIP_BONE, "weight": 0.75},
+            {"boneName": TIP_BONE, "weight": 0.25},
+            {"boneName": AXIS_BONE, "weight": 0.5},
         ],
     },
-    {"vertexIndex": 6, "influences": [{"boneName": TIP_BONE, "weight": 1.0}]},
-    {"vertexIndex": 7, "influences": [{"boneName": TIP_BONE, "weight": 1.0}]},
+    {"vertexIndex": 6, "influences": [{"boneName": AXIS_BONE, "weight": 1.0}]},
+    {"vertexIndex": 7, "influences": [{"boneName": AXIS_BONE, "weight": 1.0}]},
 ]
 
 
@@ -137,6 +141,12 @@ ARMATURE_ARGUMENTS = {
             "head": [0.0, 0.0, 1.0],
             "tail": [0.0, 0.0, 2.0],
             "parentName": ROOT_BONE,
+        },
+        {
+            "boneName": AXIS_BONE,
+            "head": [0.0, 0.0, 2.0],
+            "tail": [0.0, 0.0, 3.0],
+            "parentName": TIP_BONE,
         },
     ],
     "bindings": [{"targetId": "deform.control", "boneName": ROOT_BONE}],
@@ -171,7 +181,13 @@ ANIMATION_ARGUMENTS = {
                 },
                 {
                     "boneName": TIP_BONE,
-                    "rotationEuler": [0.0, 0.0, 0.0],
+                    "rotationQuaternion": [1.0, 0.0, 0.0, 0.0],
+                    "location": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0],
+                },
+                {
+                    "boneName": AXIS_BONE,
+                    "rotationAxisAngle": [0.0, 0.0, 0.0, 1.0],
                     "location": [0.0, 0.0, 0.0],
                     "scale": [1.0, 1.0, 1.0],
                 },
@@ -188,9 +204,20 @@ ANIMATION_ARGUMENTS = {
                 },
                 {
                     "boneName": TIP_BONE,
-                    "rotationEuler": [0.0, 0.6, 0.0],
+                    "rotationQuaternion": [
+                        math.cos(0.3),
+                        0.0,
+                        math.sin(0.3),
+                        0.0,
+                    ],
                     "location": [0.0, 0.15, 0.0],
                     "scale": [1.0, 1.15, 1.0],
+                },
+                {
+                    "boneName": AXIS_BONE,
+                    "rotationAxisAngle": [0.5, 0.0, 0.0, 1.0],
+                    "location": [0.0, 0.0, 0.1],
+                    "scale": [1.1, 1.0, 1.0],
                 },
             ],
         },
@@ -205,7 +232,13 @@ ANIMATION_ARGUMENTS = {
                 },
                 {
                     "boneName": TIP_BONE,
-                    "rotationEuler": [0.0, 0.0, 0.0],
+                    "rotationQuaternion": [1.0, 0.0, 0.0, 0.0],
+                    "location": [0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0],
+                },
+                {
+                    "boneName": AXIS_BONE,
+                    "rotationAxisAngle": [0.0, 0.0, 0.0, 1.0],
                     "location": [0.0, 0.0, 0.0],
                     "scale": [1.0, 1.0, 1.0],
                 },
@@ -328,6 +361,46 @@ def assert_validation_boundaries() -> None:
         assert "arguments.interpolation" in str(error)
     else:
         raise AssertionError("Non-string interpolation must fail cleanly")
+    invalid_pose_cases = []
+    both = deepcopy(ANIMATION_ARGUMENTS)
+    both["keyframes"][0]["poses"][1]["rotationEuler"] = [0.0, 0.0, 0.0]
+    invalid_pose_cases.append((both, "exactly one"))
+    neither = deepcopy(ANIMATION_ARGUMENTS)
+    del neither["keyframes"][0]["poses"][1]["rotationQuaternion"]
+    invalid_pose_cases.append((neither, "exactly one"))
+    nonunit = deepcopy(ANIMATION_ARGUMENTS)
+    nonunit["keyframes"][0]["poses"][1]["rotationQuaternion"] = [
+        0.5,
+        0.0,
+        0.0,
+        0.0,
+    ]
+    invalid_pose_cases.append((nonunit, "unit length"))
+    mixed = deepcopy(ANIMATION_ARGUMENTS)
+    mixed_tip = mixed["keyframes"][1]["poses"][1]
+    del mixed_tip["rotationQuaternion"]
+    mixed_tip["rotationEuler"] = [0.0, 0.6, 0.0]
+    invalid_pose_cases.append((mixed, "cannot mix rotation channels"))
+    nonunit_axis = deepcopy(ANIMATION_ARGUMENTS)
+    nonunit_axis["keyframes"][1]["poses"][2]["rotationAxisAngle"] = [
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+    ]
+    invalid_pose_cases.append((nonunit_axis, "axis must have unit length"))
+    mixed_axis = deepcopy(ANIMATION_ARGUMENTS)
+    mixed_axis_pose = mixed_axis["keyframes"][1]["poses"][2]
+    del mixed_axis_pose["rotationAxisAngle"]
+    mixed_axis_pose["rotationQuaternion"] = [1.0, 0.0, 0.0, 0.0]
+    invalid_pose_cases.append((mixed_axis, "cannot mix rotation channels"))
+    for arguments, message in invalid_pose_cases:
+        try:
+            rigging_actions.validate_pose_animation(arguments)
+        except ValueError as error:
+            assert message in str(error)
+        else:
+            raise AssertionError(f"Invalid pose arguments should fail: {message}")
 
 
 def main() -> None:
@@ -335,11 +408,59 @@ def main() -> None:
     root = load_task_tree_data(plan())
     session = DemoSession(root, action_registry(root))
     session.start()
-    for expected_id in PLAN_STEPS[1:4]:
+    for expected_id in PLAN_STEPS[1:3]:
         assert session.next().id == expected_id
 
     registry = build_resource_registry(session.receipts)
     target = resolve_resource(registry["deform.target"])
+    control = resolve_resource(registry["deform.control"])
+    assert target.type == "MESH" and control.type == "MESH"
+
+    # Fail after all parent fields were assigned but before the mutation record
+    # could capture its after-state.  execute_armature must restore every parent
+    # field locally and remove its newly created armature IDs.
+    original_parent_state = rigging_actions._parent_state
+    bpy.context.view_layer.update()
+    control_parent_before = control.parent
+    control_parent_type_before = control.parent_type
+    control_parent_bone_before = control.parent_bone
+    control_world_before = control.matrix_world.copy()
+    control_parent_inverse_before = control.matrix_parent_inverse.copy()
+    control_basis_before = control.matrix_basis.copy()
+
+    def fail_after_parent_write(obj, parent):
+        if parent is not None:
+            raise RuntimeError("Injected parent after-state failure")
+        return original_parent_state(obj, parent)
+
+    rigging_actions._parent_state = fail_after_parent_write
+    try:
+        try:
+            session.next()
+        except RuntimeError as error:
+            assert "Injected parent after-state failure" in str(error)
+        else:
+            raise AssertionError("Unjournaled parent mutation failure must propagate")
+    finally:
+        rigging_actions._parent_state = original_parent_state
+    assert session.active_step.id == "deform.geometry.control"
+    assert control.parent is control_parent_before
+    assert control.parent_type == control_parent_type_before
+    assert control.parent_bone == control_parent_bone_before
+    assert rigging_actions._matrix_rows(
+        control.matrix_world
+    ) == rigging_actions._matrix_rows(control_world_before)
+    assert rigging_actions._matrix_rows(
+        control.matrix_parent_inverse
+    ) == rigging_actions._matrix_rows(control_parent_inverse_before)
+    assert rigging_actions._matrix_rows(control.matrix_basis) == rigging_actions._matrix_rows(
+        control_basis_before
+    )
+    assert bpy.data.objects.get(ARMATURE_ARGUMENTS["objectName"]) is None
+    assert bpy.data.armatures.get(ARMATURE_ARGUMENTS["dataName"]) is None
+
+    assert session.next().id == "deform.rig"
+    registry = build_resource_registry(session.receipts)
     armature = resolve_resource(registry["deform.armature"])
     assert target.type == "MESH" and armature.type == "ARMATURE"
     assert all(not bone.use_deform for bone in armature.data.bones)
@@ -366,6 +487,27 @@ def main() -> None:
     )[0]["satisfied"] is False
     armature.name = original_armature_name
 
+    # The managed parent link makes control a legitimate mutation target, but
+    # that must not authorize a second, untracked reference from the same ID.
+    # Removing the armature while this user constraint exists would silently
+    # clear constraint.target even though the receipt never recorded it.
+    external_constraint = control.constraints.new(type="COPY_LOCATION")
+    external_constraint.name = "OperatingLine.ExternalArmatureReference"
+    external_constraint.target = armature
+    managed_parent = control.parent
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "untracked" in str(error).lower() or "reference" in str(error).lower()
+    else:
+        raise AssertionError(
+            "An untracked constraint reference on a managed parent target must block rollback"
+        )
+    assert session.active_step.id == "deform.rig"
+    assert control.parent is managed_parent is armature
+    assert external_constraint.target is armature
+    control.constraints.remove(external_constraint)
+
     incomplete = rigging_actions.validate_skin_weights(
         {**SKIN_ARGUMENTS, "weights": WEIGHTS[:-1]}
     )
@@ -380,6 +522,29 @@ def main() -> None:
         assert "cover every target vertex exactly once" in str(error)
     else:
         raise AssertionError("Incomplete vertex coverage must fail before mutation")
+    assert not target.vertex_groups and not target.modifiers
+    assert all(not bone.use_deform for bone in armature.data.bones)
+
+    original_new_vertex_group = rigging_actions._new_vertex_group
+    group_creation_calls = [0]
+
+    def fail_second_group_creation(target_object, bone_name):
+        group_creation_calls[0] += 1
+        if group_creation_calls[0] == 2:
+            raise RuntimeError("Injected vertex group creation failure")
+        return original_new_vertex_group(target_object, bone_name)
+
+    rigging_actions._new_vertex_group = fail_second_group_creation
+    try:
+        try:
+            session.next()
+        except RuntimeError as error:
+            assert "Injected vertex group creation failure" in str(error)
+        else:
+            raise AssertionError("Partial vertex group creation failure must propagate")
+    finally:
+        rigging_actions._new_vertex_group = original_new_vertex_group
+    assert session.active_step.id == "deform.rig"
     assert not target.vertex_groups and not target.modifiers
     assert all(not bone.use_deform for bone in armature.data.bones)
 
@@ -407,12 +572,19 @@ def main() -> None:
     assert all(not bone.use_deform for bone in armature.data.bones)
 
     assert session.next().id == "deform.skin"
-    assert tuple(group.name for group in target.vertex_groups) == (ROOT_BONE, TIP_BONE)
+    assert tuple(group.name for group in target.vertex_groups) == (
+        ROOT_BONE,
+        TIP_BONE,
+        AXIS_BONE,
+    )
     modifier = target.modifiers.get(SKIN_ARGUMENTS["modifierName"])
     assert modifier is not None and modifier.type == "ARMATURE"
     assert modifier.object is armature and modifier.use_vertex_groups
     assert not modifier.use_bone_envelopes and modifier.use_deform_preserve_volume
-    assert all(armature.data.bones[name].use_deform for name in (ROOT_BONE, TIP_BONE))
+    assert all(
+        armature.data.bones[name].use_deform
+        for name in (ROOT_BONE, TIP_BONE, AXIS_BONE)
+    )
     skin_receipt = session.receipts["deform.skin"]
     assert any(
         mutation.attribute == "mesh_content" for mutation in skin_receipt.mutations
@@ -461,12 +633,64 @@ def main() -> None:
     )[0]
     assert invalid_skin_observation["satisfied"] is False
 
+    before_animation_pose = {
+        bone_name: rigging_actions._pose_state(armature.pose.bones[bone_name])
+        for bone_name in (ROOT_BONE, TIP_BONE, AXIS_BONE)
+    }
+    original_insert_pose_keyframe = rigging_actions._insert_pose_keyframe
+
+    def fail_axis_angle_keyframe(pose_bone, frame, bone_name, data_path="rotation_euler"):
+        if data_path == "rotation_axis_angle" and frame == 10:
+            return False
+        return original_insert_pose_keyframe(pose_bone, frame, bone_name, data_path)
+
+    rigging_actions._insert_pose_keyframe = fail_axis_angle_keyframe
+    try:
+        try:
+            session.next()
+        except RuntimeError as error:
+            assert "Blender rejected keyframe 10" in str(error)
+        else:
+            raise AssertionError("Partial axis-angle animation failure must propagate")
+    finally:
+        rigging_actions._insert_pose_keyframe = original_insert_pose_keyframe
+    assert session.active_step.id == "deform.skin"
+    assert bpy.data.actions.get(ANIMATION_ARGUMENTS["actionName"]) is None
+    assert {
+        bone_name: rigging_actions._pose_state(armature.pose.bones[bone_name])
+        for bone_name in (ROOT_BONE, TIP_BONE, AXIS_BONE)
+    } == before_animation_pose
+
     assert session.next().id == "deform.animation"
     animation = resolve_resource(
         build_resource_registry(session.receipts)["deform.animation.action"]
     )
     curves = action_fcurves(animation)
-    assert len(curves) == 18
+    assert len(curves) == 29
+    assert armature.pose.bones[ROOT_BONE].rotation_mode == "XYZ"
+    assert armature.pose.bones[TIP_BONE].rotation_mode == "QUATERNION"
+    assert armature.pose.bones[AXIS_BONE].rotation_mode == "AXIS_ANGLE"
+    assert {
+        curve.array_index
+        for curve in curves
+        if curve.data_path == armature.pose.bones[TIP_BONE].path_from_id(
+            "rotation_quaternion"
+        )
+    } == {0, 1, 2, 3}
+    assert {
+        curve.array_index
+        for curve in curves
+        if curve.data_path == armature.pose.bones[ROOT_BONE].path_from_id(
+            "rotation_euler"
+        )
+    } == {0, 1, 2}
+    assert {
+        curve.array_index
+        for curve in curves
+        if curve.data_path == armature.pose.bones[AXIS_BONE].path_from_id(
+            "rotation_axis_angle"
+        )
+    } == {0, 1, 2, 3}
     assert all(curve.extrapolation == "LINEAR" for curve in curves)
     assert all(
         point.interpolation == "LINEAR"
@@ -510,7 +734,7 @@ def main() -> None:
                     "actionId": "deform.animation.action",
                     "frames": [1, 10, 20],
                     "boneNames": [ROOT_BONE, TIP_BONE],
-                    "channels": ["rotation_euler", "rotation_euler"],
+                    "channels": ["rotation_euler", "rotation_quaternion"],
                 },
             },
         ),
@@ -555,6 +779,11 @@ def main() -> None:
     bpy.context.scene.frame_set(original_frame)
 
     assert session.back().id == "deform.animation"
+    assert bpy.data.actions.get(ANIMATION_ARGUMENTS["actionName"]) is None
+    assert {
+        bone_name: rigging_actions._pose_state(armature.pose.bones[bone_name])
+        for bone_name in (ROOT_BONE, TIP_BONE, AXIS_BONE)
+    } == before_animation_pose
     tip_group = target.vertex_groups[TIP_BONE]
     tip_group.add((0,), 0.5, "REPLACE")
     try:
@@ -574,7 +803,8 @@ def main() -> None:
     assert owned_resources() == []
     print(
         "OperatingLine deform animation test passed: normalized weights, "
-        "18 transform curves, real deformation, conflict-safe rollback"
+        "29 mixed Euler/quaternion/axis-angle transform curves, real deformation, "
+        "conflict-safe rollback"
     )
 
 

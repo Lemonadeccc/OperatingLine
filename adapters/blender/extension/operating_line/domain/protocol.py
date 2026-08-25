@@ -1,6 +1,6 @@
 """Version constants shared by Blender protocol producers and consumers."""
 
-PROTOCOL_VERSION = "1.6.0"
+PROTOCOL_VERSION = "1.7.0"
 SUPPORTED_PROTOCOL_VERSIONS = frozenset(
     {
         "1.0.0",
@@ -9,6 +9,7 @@ SUPPORTED_PROTOCOL_VERSIONS = frozenset(
         "1.3.0",
         "1.4.0",
         "1.5.0",
+        "1.6.0",
         PROTOCOL_VERSION,
     }
 )

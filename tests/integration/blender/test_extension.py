@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
 from queue import Queue
+import struct
 import sys
 import threading
 import time
@@ -59,6 +60,7 @@ from operating_line_extension.operating_line.infrastructure import (  # noqa: E4
 )
 from operating_line_extension.operating_line.application import (  # noqa: E402
     ActionReceipt,
+    BUNDLED_INTERACTION_CATALOG,
     DemoSession,
     InteractionPathKind,
     MenuGuidanceTracker,
@@ -67,6 +69,13 @@ from operating_line_extension.operating_line.application import (  # noqa: E402
 from operating_line_extension.operating_line.application.session import (  # noqa: E402
     _canonical_json_value_bytes,
     canonical_plan_content_sha256,
+)
+from operating_line_extension.operating_line.infrastructure.guided_geometry_operations import (  # noqa: E402
+    execute_transform_geometry_operation,
+    inverse_transform_geometry_operation,
+)
+from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
+    validate_geometry_nodes_transform,
 )
 from operating_line_extension.operating_line.application.companion import (  # noqa: E402
     CompanionController,
@@ -148,6 +157,7 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
     OWNER_VALUE,
     ensure_receipts_intact,
     mesh_content_signature,
+    rollback_receipt,
     tag_resource,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
@@ -226,7 +236,7 @@ EXPECTED = tuple(step["action"]["arguments"]["objectName"] for step in ACTION_ST
 PLAN_REVISION = BUNDLED_PLAN["revision"]
 DYNAMIC_REVISION = PLAN_REVISION + 1
 FULL_PLAN_CONTENT_SHA256 = (
-    "f896ba6e2d9a927e1dee8875bfae3541cdd1d423b9b9e70d39cdef516ad8617e"
+    "419fe698c106137e9d58e41e8cf92cc1737f039d87b9e88970d65fce50ba8b90"
 )
 
 
@@ -926,6 +936,468 @@ def assert_edit_modifier_geometry_nodes_round_trip() -> None:
     assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
+def assert_guided_geometry_leaf_operation_session_round_trip() -> None:
+    expected_operation_ids = (
+        "semantic.preflight_transform_geometry_resources",
+        "semantic.new_geometry_modifier",
+        "node.group_input",
+        "node.transform_geometry",
+        "projection.semantic.transform_geometry.translation",
+        "projection.semantic.transform_geometry.rotation",
+        "projection.semantic.transform_geometry.scale",
+        "node.group_output",
+        "semantic.connect_group_input_geometry_to_transform",
+        "semantic.connect_transform_geometry_to_group_output",
+        "semantic.verify_node_links",
+    )
+    recipe = BUNDLED_INTERACTION_CATALOG.recipe_for(
+        "blender.geometry_nodes.create_transform"
+    )
+    assert recipe is not None
+
+    def build_session(case_id: str):
+        cube_id = f"guided.{case_id}.cube"
+        cube_name = f"OperatingLine.GuidedGeometry.{case_id}.Cube"
+        transform_id = f"guided.{case_id}.transform"
+        modifier_id = f"guided.{case_id}.modifier"
+        modifier_name = f"OperatingLine.GuidedGeometry.{case_id}.Modifier"
+        node_group_id = f"guided.{case_id}.node_group"
+        node_group_name = f"OperatingLine.GuidedGeometry.{case_id}.NodeGroup"
+        transform_arguments = {
+            "targetId": cube_id,
+            "modifierId": modifier_id,
+            "modifierName": modifier_name,
+            "nodeGroupId": node_group_id,
+            "nodeGroupName": node_group_name,
+            "translation": [0.25, -0.5, 0.75],
+            "rotation": [0.1, -0.2, 0.3],
+            "scale": [1.5, 1.25, 0.75],
+        }
+        root = load_temporary_plan(
+            [
+                step("root", None, 0),
+                step(
+                    f"{case_id}.cube",
+                    "root",
+                    1,
+                    step_action={
+                        "adapterId": "blender",
+                        "name": "blender.mesh.create_cube",
+                        "arguments": {
+                            "resourceId": cube_id,
+                            "objectName": cube_name,
+                            "size": 2.0,
+                            "location": [0.0, 0.0, 0.0],
+                        },
+                    },
+                ),
+                step(
+                    transform_id,
+                    "root",
+                    2,
+                    depends_on=[f"{case_id}.cube"],
+                    step_action={
+                        "adapterId": "blender",
+                        "name": "blender.geometry_nodes.create_transform",
+                        "arguments": transform_arguments,
+                    },
+                ),
+            ]
+        )
+        session = DemoSession(root, action_registry(root))
+        session.start()
+        assert session.next() is not None
+        assert session.active_index == 0
+        transform_step = session.guidance_step
+        assert transform_step is not None and transform_step.id == transform_id
+        snapshot = MenuGuidanceTracker().snapshot(transform_step)
+        assert snapshot is not None
+        operation_ids = tuple(
+            operation.operation_id for operation in snapshot.operations
+        )
+        assert operation_ids == expected_operation_ids
+        assert snapshot.recipe_id == recipe.id
+        definition = validate_geometry_nodes_transform(transform_step.action.arguments)
+        return (
+            session,
+            transform_step,
+            snapshot,
+            operation_ids,
+            definition,
+            cube_name,
+            modifier_name,
+            node_group_name,
+        )
+
+    def assert_scene_stage(completed_ordinal, definition, modifier_name, node_group_name):
+        node_group = bpy.data.node_groups.get(node_group_name)
+        if completed_ordinal < 2:
+            assert node_group is None
+            return
+        assert node_group is not None
+        modifier_users = [
+            modifier
+            for obj in bpy.data.objects
+            for modifier in obj.modifiers
+            if modifier.name == modifier_name
+        ]
+        assert len(modifier_users) == 1
+        assert modifier_users[0].node_group is node_group
+
+        expected_node_types = set()
+        if completed_ordinal >= 3:
+            expected_node_types.add("NodeGroupInput")
+        if completed_ordinal >= 4:
+            expected_node_types.add("GeometryNodeTransform")
+        if completed_ordinal >= 8:
+            expected_node_types.add("NodeGroupOutput")
+        assert {node.bl_idname for node in node_group.nodes} == expected_node_types
+        interface_directions = {
+            item.in_out
+            for item in node_group.interface.items_tree
+            if item.item_type == "SOCKET"
+        }
+        assert interface_directions == (
+            ({"INPUT", "OUTPUT"} if completed_ordinal >= 8 else {"INPUT"})
+            if completed_ordinal >= 3
+            else set()
+        )
+        if completed_ordinal >= 4:
+            transform = node_group.nodes["OperatingLine Transform"]
+
+            def vector(identifier):
+                socket = next(
+                    item for item in transform.inputs if item.identifier == identifier
+                )
+                return tuple(float(value) for value in socket.default_value)
+
+            expected_translation = (
+                definition.translation
+                if completed_ordinal >= 5
+                else (0.0, 0.0, 0.0)
+            )
+            expected_rotation = (
+                definition.rotation
+                if completed_ordinal >= 6
+                else (0.0, 0.0, 0.0)
+            )
+            expected_scale = (
+                definition.scale
+                if completed_ordinal >= 7
+                else (1.0, 1.0, 1.0)
+            )
+            for actual, expected in (
+                (vector("Translation"), expected_translation),
+                (vector("Rotation"), expected_rotation),
+                (vector("Scale"), expected_scale),
+            ):
+                assert all(
+                    math.isclose(value, wanted, rel_tol=1e-6, abs_tol=1e-7)
+                    for value, wanted in zip(actual, expected, strict=True)
+                )
+        expected_link_count = (
+            2 if completed_ordinal >= 10 else 1 if completed_ordinal >= 9 else 0
+        )
+        assert len(node_group.links) == expected_link_count
+        actual_link_nodes = {
+            (link.from_node.bl_idname, link.to_node.bl_idname)
+            for link in node_group.links
+        }
+        expected_link_nodes = set()
+        if completed_ordinal >= 9:
+            expected_link_nodes.add(("NodeGroupInput", "GeometryNodeTransform"))
+        if completed_ordinal >= 10:
+            expected_link_nodes.add(("GeometryNodeTransform", "NodeGroupOutput"))
+        assert actual_link_nodes == expected_link_nodes
+
+    def assert_stage(
+        ordinal,
+        run,
+        result,
+        operation_ids,
+        definition,
+        modifier_name,
+        node_group_name,
+    ):
+        assert run.next_ordinal == ordinal + 1
+        assert tuple(
+            receipt.operation_id for receipt in run.operation_receipts
+        ) == operation_ids[:ordinal]
+        assert result.observation["satisfied"] is True
+        details = result.observation["details"]
+        assert details["operationOrdinal"] == ordinal
+        assert details["receiptId"] == run.leaf_receipt_id
+        assert details["beforeFingerprintSha256"] == result.before_fingerprint
+        assert details["afterFingerprintSha256"] == result.after_fingerprint
+        if ordinal in {1, 11}:
+            assert result.before_fingerprint == result.after_fingerprint
+        if ordinal == 1:
+            assert run.partial_action_receipt is None
+        else:
+            assert run.partial_action_receipt == result.receipt
+            assert result.receipt.receipt_id == run.leaf_receipt_id
+            assert len(result.receipt.created) == 1
+            assert len(result.receipt.mutations) == 2
+        assert_scene_stage(ordinal, definition, modifier_name, node_group_name)
+        evidence = details["evidence"]
+        writes = evidence["rnaControlWrites"]
+        if ordinal in {5, 6, 7}:
+            action_argument, socket_identifier, defaults = {
+                5: ("translation", "Translation", (0.0, 0.0, 0.0)),
+                6: ("rotation", "Rotation", (0.0, 0.0, 0.0)),
+                7: ("scale", "Scale", (1.0, 1.0, 1.0)),
+            }[ordinal]
+            accepted = getattr(definition, action_argument)
+            assert len(writes) == 3
+            for index, (write, label, expected_value) in enumerate(
+                zip(writes, ("X", "Y", "Z"), accepted, strict=True)
+            ):
+                assert write["order"] == index + 1
+                assert write["executionMethod"] == "blender_rna_property_write"
+                assert (
+                    write["mcpTool"]
+                    == "operatingline.blender.geometry-nodes.transform.execute-next"
+                )
+                assert write["sourceOperationId"] == operation_ids[ordinal - 1]
+                assert write["semanticAction"] == "node.transform_geometry"
+                assert write["actionArgument"] == action_argument
+                assert write["nodeGroupId"] == definition.node_group_id
+                assert write["nodeGroupName"] == node_group_name
+                assert write["nodeName"] == "OperatingLine Transform"
+                assert write["nodeType"] == "GeometryNodeTransform"
+                assert write["socketIdentifier"] == socket_identifier
+                assert write["propertyName"] == "default_value"
+                assert write["componentIndex"] == index
+                assert write["componentLabel"] == label
+                assert math.isclose(write["beforeValue"], defaults[index])
+                assert math.isclose(write["acceptedValue"], expected_value)
+                assert math.isclose(
+                    write["observedValue"],
+                    expected_value,
+                    rel_tol=1e-6,
+                    abs_tol=1e-7,
+                )
+                assert write["observedValue"] == struct.unpack(
+                    "!f", struct.pack("!f", expected_value)
+                )[0]
+                assert write["uiPath"] == [
+                    "Geometry Nodes",
+                    node_group_name,
+                    "OperatingLine Transform",
+                    socket_identifier,
+                    label,
+                ]
+        else:
+            assert writes == []
+        if ordinal == 11:
+            assert evidence["completeGraph"] is True
+            assert evidence["nodeCount"] == 3
+            assert evidence["interfaceSocketCount"] == 2
+            assert evidence["linkCount"] == 2
+
+    def execute_prefix(session, transform_step, snapshot, operation_ids, definition, count):
+        run = session.begin_leaf_operation_run(
+            transform_step,
+            recipe_id=snapshot.recipe_id,
+            catalog_version=snapshot.catalog_version,
+            operation_ids=operation_ids,
+        )
+        transaction = None
+        result = None
+        for ordinal in range(1, count + 1):
+            result = execute_transform_geometry_operation(
+                operation_ordinal=ordinal,
+                receipt_id=run.leaf_receipt_id,
+                step_id=transform_step.id,
+                action_name=transform_step.action.name,
+                receipts=session.receipts,
+                definition=definition,
+                transaction=transaction,
+            )
+            transaction = result.transaction
+            run = session.record_leaf_operation(
+                transform_step,
+                run_id=run.run_id,
+                operation_id=operation_ids[ordinal - 1],
+                ordinal=ordinal,
+                before_sha256=result.before_fingerprint,
+                after_sha256=result.after_fingerprint,
+                observation=result.observation,
+                partial_action_receipt=None if ordinal == 1 else result.receipt,
+            )
+            assert transform_step.id not in session.receipts
+            assert_stage(
+                ordinal,
+                run,
+                result,
+                operation_ids,
+                definition,
+                definition.modifier_name,
+                definition.node_group_name,
+            )
+        return run, transaction, result
+
+    (
+        session,
+        transform_step,
+        snapshot,
+        operation_ids,
+        definition,
+        cube_name,
+        modifier_name,
+        node_group_name,
+    ) = build_session("complete")
+    run, transaction, final_result = execute_prefix(
+        session,
+        transform_step,
+        snapshot,
+        operation_ids,
+        definition,
+        11,
+    )
+    assert transaction.completed_operations == tuple(range(1, 12))
+    assert final_result.observation["details"]["evidence"]["completeGraph"] is True
+    partial_receipt = run.partial_action_receipt
+    completed = session.complete_leaf_operation_run(
+        transform_step,
+        run_id=run.run_id,
+    )
+    assert completed.status == "completed"
+    assert completed.partial_action_receipt is None
+    assert session.pending_leaf_operation_run is None
+    assert session.active_index == 1
+    assert session.receipts[transform_step.id] == partial_receipt
+    assert session.receipt_for_step(transform_step.id) == partial_receipt
+    assert session.back() is transform_step
+    assert session.active_index == 0
+    assert bpy.data.node_groups.get(node_group_name) is None
+    cube = bpy.data.objects.get(cube_name)
+    assert cube is not None and cube.modifiers.get(modifier_name) is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(cube_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+    (
+        session,
+        transform_step,
+        snapshot,
+        operation_ids,
+        definition,
+        cube_name,
+        modifier_name,
+        node_group_name,
+    ) = build_session("rewind")
+    run, transaction, _result = execute_prefix(
+        session,
+        transform_step,
+        snapshot,
+        operation_ids,
+        definition,
+        11,
+    )
+    try:
+        inverse_transform_geometry_operation(
+            operation_ordinal=10,
+            receipt_id=run.leaf_receipt_id,
+            step_id=transform_step.id,
+            action_name=transform_step.action.name,
+            receipts=session.receipts,
+            definition=definition,
+            transaction=transaction,
+        )
+    except RuntimeError as error:
+        assert "latest operation" in str(error)
+    else:
+        raise AssertionError("Guided Geometry inverse must reject non-LIFO rewind")
+    try:
+        session.rewind_leaf_operation(
+            transform_step,
+            run_id=run.run_id,
+            operation_id=operation_ids[9],
+            ordinal=10,
+            partial_action_receipt=run.partial_action_receipt,
+        )
+    except ValueError as error:
+        assert "latest leaf operation" in str(error)
+    else:
+        raise AssertionError("Session rewind must reject non-LIFO operation evidence")
+
+    for ordinal in range(11, 0, -1):
+        inverse = inverse_transform_geometry_operation(
+            operation_ordinal=ordinal,
+            receipt_id=run.leaf_receipt_id,
+            step_id=transform_step.id,
+            action_name=transform_step.action.name,
+            receipts=session.receipts,
+            definition=definition,
+            transaction=transaction,
+        )
+        transaction = inverse.transaction
+        run = session.rewind_leaf_operation(
+            transform_step,
+            run_id=run.run_id,
+            operation_id=operation_ids[ordinal - 1],
+            ordinal=ordinal,
+            partial_action_receipt=(
+                None if ordinal in {1, 2} else inverse.receipt
+            ),
+        )
+        if ordinal > 1:
+            assert run is not None and run.next_ordinal == ordinal
+            assert tuple(
+                receipt.operation_id for receipt in run.operation_receipts
+            ) == operation_ids[: ordinal - 1]
+        else:
+            assert run is None
+        assert transform_step.id not in session.receipts
+        assert_scene_stage(
+            ordinal - 1,
+            definition,
+            modifier_name,
+            node_group_name,
+        )
+    assert transaction.completed_operations == ()
+    assert session.pending_leaf_operation_run is None
+    assert session.active_index == 0
+    assert bpy.data.node_groups.get(node_group_name) is None
+    cube = bpy.data.objects.get(cube_name)
+    assert cube is not None and cube.modifiers.get(modifier_name) is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(cube_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+    (
+        session,
+        transform_step,
+        snapshot,
+        operation_ids,
+        definition,
+        cube_name,
+        modifier_name,
+        node_group_name,
+    ) = build_session("abort")
+    run, _transaction, _result = execute_prefix(
+        session,
+        transform_step,
+        snapshot,
+        operation_ids,
+        definition,
+        10,
+    )
+    assert run.next_ordinal == 11
+    assert session.abort_leaf_operation_run() is transform_step
+    assert session.pending_leaf_operation_run is None
+    assert transform_step.id not in session.leaf_operation_runs
+    assert transform_step.id not in session.receipts
+    assert session.active_index == 0
+    assert bpy.data.node_groups.get(node_group_name) is None
+    cube = bpy.data.objects.get(cube_name)
+    assert cube is not None and cube.modifiers.get(modifier_name) is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(cube_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
 def triangulate_steps(
     *,
     object_name: str = "OperatingLine.TriangulateCube",
@@ -997,7 +1469,10 @@ def assert_triangulate_round_trip_and_guards() -> None:
     assert tuple(mutation.attribute for mutation in receipt.mutations) == (
         "data",
         "mesh_content",
+        "mesh_content",
     )
+    assert receipt.mutations[1].resource.pointer == source_mesh.as_pointer()
+    assert receipt.mutations[1].before == receipt.mutations[1].after
     ensure_receipts_intact(session.receipts)
     cube.data = source_mesh
     try:
@@ -2023,7 +2498,10 @@ def assert_extrude_region_round_trip_and_guards() -> None:
     assert tuple(mutation.attribute for mutation in receipt.mutations) == (
         "data",
         "mesh_content",
+        "mesh_content",
     )
+    assert receipt.mutations[1].resource.pointer == source_mesh.as_pointer()
+    assert receipt.mutations[1].before == receipt.mutations[1].after
 
     parameters = {
         "targetId": "extrude.cube",
@@ -9095,6 +9573,15 @@ def assert_subdivision_surface_round_trip_and_guards() -> None:
         session.receipts,
     )
     assert observation[0]["satisfied"] is True
+    details = observation[0]["details"]
+    assert details["sourceContentIntact"] is True
+    assert details["evaluatedFinite"] is True
+    assert details["evaluatedWithinLimits"] is True
+    assert (
+        details["evaluatedVertexCount"],
+        details["evaluatedEdgeCount"],
+        details["evaluatedFaceCount"],
+    ) == (98, 192, 96)
     for field, wrong_value in (
         ("levels", True),
         ("renderLevels", 1),
@@ -9122,6 +9609,18 @@ def assert_subdivision_surface_round_trip_and_guards() -> None:
             session.receipts,
         )
         assert malformed_observation[0]["satisfied"] is False, field
+
+    original_coordinate = source_mesh.vertices[0].co.copy()
+    source_mesh.vertices[0].co.x += 0.125
+    source_mesh.update()
+    source_tampered = observation_module.evaluate_observations(
+        ({"kind": "modifier_ready", "parameters": observation_parameters},),
+        session.receipts,
+    )[0]
+    assert source_tampered["satisfied"] is False
+    assert source_tampered["details"]["sourceContentIntact"] is False
+    source_mesh.vertices[0].co = original_coordinate
+    source_mesh.update()
 
     modifier.levels = 1
     try:
@@ -9380,6 +9879,554 @@ def assert_action_level_uv_sphere_companion_execution() -> None:
     controller._transport = original_transport
 
 
+def assert_rollback_preserves_external_id_users() -> None:
+    """Deletion preflight must never clear pointers owned by user data-blocks."""
+
+    from operating_line_extension.operating_line.application.session import (
+        MutationRecord,
+    )
+    from operating_line_extension.operating_line.infrastructure.snowman_actions.common import (
+        reference_data_block,
+    )
+
+    object_receipt_id = "external-object-user-receipt"
+    managed_mesh = bpy.data.meshes.new("OperatingLine.ExternalUser.ManagedMesh")
+    managed_object = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.ManagedObject", managed_mesh
+    )
+    object_receipt = ActionReceipt(
+        object_receipt_id,
+        "external-object-user",
+        "test.external_object_user",
+        created=(
+            tag_resource(
+                managed_object,
+                "external-user.object",
+                object_receipt_id,
+                "external-object-user",
+                "test.external_object_user",
+            ),
+            tag_resource(
+                managed_mesh,
+                "external-user.object.mesh",
+                object_receipt_id,
+                "external-object-user",
+                "test.external_object_user",
+            ),
+        ),
+    )
+    external_mesh = bpy.data.meshes.new("OperatingLine.ExternalUser.UserMesh")
+    external_object = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.UserObject", external_mesh
+    )
+    external_object.parent = managed_object
+    try:
+        rollback_receipt(object_receipt)
+    except RuntimeError as error:
+        assert "Cannot rollback externally referenced resource" in str(error)
+        assert "external-user.object" in str(error)
+    else:
+        raise AssertionError("External object parenting must block rollback")
+    assert bpy.data.objects.get(managed_object.name) is managed_object
+    assert external_object.parent is managed_object
+    external_object.parent = None
+    bpy.data.objects.remove(external_object)
+    bpy.data.meshes.remove(external_mesh)
+    rollback_receipt(object_receipt)
+    assert bpy.data.objects.get("OperatingLine.ExternalUser.ManagedObject") is None
+    assert bpy.data.meshes.get("OperatingLine.ExternalUser.ManagedMesh") is None
+
+    scene_receipt_id = "external-scene-user-receipt"
+    managed_scene = bpy.data.scenes.new("OperatingLine.ExternalUser.ManagedScene")
+    scene_receipt = ActionReceipt(
+        scene_receipt_id,
+        "external-scene-user",
+        "test.external_scene_user",
+        created=(
+            tag_resource(
+                managed_scene,
+                "external-user.scene",
+                scene_receipt_id,
+                "external-scene-user",
+                "test.external_scene_user",
+            ),
+        ),
+    )
+    external_scene = bpy.data.scenes.new("OperatingLine.ExternalUser.UserScene")
+    external_scene.use_nodes = True
+    external_compositor = getattr(external_scene, "node_tree", None)
+    external_compositor_is_owned = False
+    if external_compositor is None:
+        external_compositor = bpy.data.node_groups.new(
+            "OperatingLine.ExternalUser.UserCompositor",
+            "CompositorNodeTree",
+        )
+        external_scene.compositing_node_group = external_compositor
+        external_compositor_is_owned = True
+    render_layers = external_compositor.nodes.new("CompositorNodeRLayers")
+    render_layers.scene = managed_scene
+    try:
+        rollback_receipt(scene_receipt)
+    except RuntimeError as error:
+        assert "Cannot rollback externally referenced resource" in str(error)
+        assert "external-user.scene" in str(error)
+    else:
+        raise AssertionError("External compositor Scene pointer must block rollback")
+    assert bpy.data.scenes.get(managed_scene.name) is managed_scene
+    assert render_layers.scene is managed_scene
+    render_layers.scene = None
+    bpy.data.scenes.remove(external_scene)
+    if external_compositor_is_owned:
+        bpy.data.node_groups.remove(external_compositor)
+    rollback_receipt(scene_receipt)
+    assert bpy.data.scenes.get("OperatingLine.ExternalUser.ManagedScene") is None
+
+    missed_external_reference_guards: list[str] = []
+    camera_receipt_id = "external-camera-before-value-receipt"
+    camera_scene = bpy.data.scenes.new(
+        "OperatingLine.ExternalUser.CameraMutationScene"
+    )
+    old_camera_data = bpy.data.cameras.new(
+        "OperatingLine.ExternalUser.OldCameraData"
+    )
+    old_camera = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.OldCamera", old_camera_data
+    )
+    created_camera_data = bpy.data.cameras.new(
+        "OperatingLine.ExternalUser.CreatedCameraData"
+    )
+    created_camera = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.CreatedCamera", created_camera_data
+    )
+    camera_scene_name = camera_scene.name
+    old_camera_name = old_camera.name
+    old_camera_data_name = old_camera_data.name
+    created_camera_name = created_camera.name
+    created_camera_data_name = created_camera_data.name
+    camera_scene_identity = tag_resource(
+        camera_scene,
+        "external-user.camera-scene",
+        camera_receipt_id,
+        "external-camera-before-value",
+        "test.external_camera_before_value",
+    )
+    created_camera_data_identity = tag_resource(
+        created_camera_data,
+        "external-user.created-camera.data",
+        camera_receipt_id,
+        "external-camera-before-value",
+        "test.external_camera_before_value",
+    )
+    created_camera_identity = tag_resource(
+        created_camera,
+        "external-user.created-camera",
+        camera_receipt_id,
+        "external-camera-before-value",
+        "test.external_camera_before_value",
+    )
+    camera_scene.camera = old_camera
+    camera_scene.camera = created_camera
+    camera_receipt = ActionReceipt(
+        camera_receipt_id,
+        "external-camera-before-value",
+        "test.external_camera_before_value",
+        created=(created_camera_data_identity, created_camera_identity),
+        mutations=(
+            MutationRecord(
+                camera_scene_identity,
+                "camera",
+                reference_data_block(old_camera),
+                created_camera_identity,
+            ),
+        ),
+    )
+    camera_constraint = old_camera.constraints.new("COPY_LOCATION")
+    camera_constraint.target = created_camera
+    camera_rollback_was_rejected = False
+    try:
+        try:
+            rollback_receipt(camera_receipt)
+        except RuntimeError as error:
+            camera_rollback_was_rejected = True
+            assert "Cannot rollback" in str(error)
+            assert "external-user.created-camera" in str(error)
+            assert camera_scene.camera is created_camera
+            assert camera_constraint.target is created_camera
+        if not camera_rollback_was_rejected:
+            missed_external_reference_guards.append(
+                "A camera referenced by an untracked constraint must block rollback "
+                "even when the constraint owner is a recorded before-value"
+            )
+    finally:
+        if bpy.data.objects.get(old_camera_name) is old_camera:
+            live_constraint = old_camera.constraints.get(camera_constraint.name)
+            if live_constraint is not None:
+                live_constraint.target = None
+                old_camera.constraints.remove(live_constraint)
+        if bpy.data.objects.get(created_camera_name) is created_camera:
+            rollback_receipt(camera_receipt)
+        if bpy.data.scenes.get(camera_scene_name) is camera_scene:
+            bpy.data.scenes.remove(camera_scene)
+        if bpy.data.objects.get(old_camera_name) is old_camera:
+            bpy.data.objects.remove(old_camera)
+        if bpy.data.cameras.get(old_camera_data_name) is old_camera_data:
+            bpy.data.cameras.remove(old_camera_data)
+        if bpy.data.objects.get(created_camera_name) is created_camera:
+            bpy.data.objects.remove(created_camera)
+        if (
+            bpy.data.cameras.get(created_camera_data_name)
+            is created_camera_data
+        ):
+            bpy.data.cameras.remove(created_camera_data)
+
+    mixed_receipt_id = "per-created-resource-user-receipt"
+    mixed_mesh = bpy.data.meshes.new("OperatingLine.ExternalUser.MixedMesh")
+    mixed_object = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.MixedObject", mixed_mesh
+    )
+    mixed_object_identity = tag_resource(
+        mixed_object,
+        "external-user.mixed-object",
+        mixed_receipt_id,
+        "per-created-resource-user",
+        "test.per_created_resource_user",
+    )
+    created_material = bpy.data.materials.new(
+        "OperatingLine.ExternalUser.CreatedMaterial"
+    )
+    created_material_identity = tag_resource(
+        created_material,
+        "external-user.created-material",
+        mixed_receipt_id,
+        "per-created-resource-user",
+        "test.per_created_resource_user",
+    )
+    mixed_camera_data = bpy.data.cameras.new(
+        "OperatingLine.ExternalUser.MixedCameraData"
+    )
+    mixed_camera = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.MixedCamera", mixed_camera_data
+    )
+    mixed_object_name = mixed_object.name
+    mixed_mesh_name = mixed_mesh.name
+    created_material_name = created_material.name
+    mixed_camera_name = mixed_camera.name
+    mixed_camera_data_name = mixed_camera_data.name
+    mixed_camera_data_identity = tag_resource(
+        mixed_camera_data,
+        "external-user.mixed-camera.data",
+        mixed_receipt_id,
+        "per-created-resource-user",
+        "test.per_created_resource_user",
+    )
+    mixed_camera_identity = tag_resource(
+        mixed_camera,
+        "external-user.mixed-camera",
+        mixed_receipt_id,
+        "per-created-resource-user",
+        "test.per_created_resource_user",
+    )
+    mixed_mesh.materials.append(created_material)
+    mixed_receipt = ActionReceipt(
+        mixed_receipt_id,
+        "per-created-resource-user",
+        "test.per_created_resource_user",
+        created=(
+            created_material_identity,
+            mixed_camera_data_identity,
+            mixed_camera_identity,
+        ),
+        mutations=(
+            MutationRecord(
+                mixed_object_identity,
+                "material_slots",
+                (),
+                (created_material_identity,),
+            ),
+        ),
+    )
+    mixed_constraint = mixed_object.constraints.new("COPY_LOCATION")
+    mixed_constraint.target = mixed_camera
+    mixed_rollback_was_rejected = False
+    try:
+        try:
+            rollback_receipt(mixed_receipt)
+        except RuntimeError as error:
+            mixed_rollback_was_rejected = True
+            assert "Cannot rollback" in str(error)
+            assert "external-user.mixed-camera" in str(error)
+            assert mixed_object.material_slots[0].material is created_material
+            assert mixed_constraint.target is mixed_camera
+        if not mixed_rollback_was_rejected:
+            missed_external_reference_guards.append(
+                "A mutation target allowed to use one created resource must not be "
+                "allowed to reference another created resource"
+            )
+    finally:
+        if bpy.data.objects.get(mixed_object_name) is mixed_object:
+            live_constraint = mixed_object.constraints.get(mixed_constraint.name)
+            if live_constraint is not None:
+                live_constraint.target = None
+                mixed_object.constraints.remove(live_constraint)
+        if bpy.data.objects.get(mixed_camera_name) is mixed_camera:
+            rollback_receipt(mixed_receipt)
+        if bpy.data.objects.get(mixed_object_name) is mixed_object:
+            bpy.data.objects.remove(mixed_object)
+        if bpy.data.meshes.get(mixed_mesh_name) is mixed_mesh:
+            bpy.data.meshes.remove(mixed_mesh)
+        if bpy.data.materials.get(created_material_name) is created_material:
+            bpy.data.materials.remove(created_material)
+        if bpy.data.objects.get(mixed_camera_name) is mixed_camera:
+            bpy.data.objects.remove(mixed_camera)
+        if bpy.data.cameras.get(mixed_camera_data_name) is mixed_camera_data:
+            bpy.data.cameras.remove(mixed_camera_data)
+
+    collection_receipt_id = "same-collection-object-user-receipt"
+    reference_collection = bpy.data.collections.new(
+        "OperatingLine.ExternalUser.ReferenceCollection"
+    )
+    reference_collection_name = reference_collection.name
+    reference_collection_identity = tag_resource(
+        reference_collection,
+        "external-user.reference-collection",
+        collection_receipt_id,
+        "same-collection-object-user",
+        "test.same_collection_object_user",
+    )
+    collection_object_mesh = bpy.data.meshes.new(
+        "OperatingLine.ExternalUser.CollectionObjectMesh"
+    )
+    collection_object = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.CollectionObject", collection_object_mesh
+    )
+    collection_object_name = collection_object.name
+    collection_object_mesh_name = collection_object_mesh.name
+    collection_object_mesh_identity = tag_resource(
+        collection_object_mesh,
+        "external-user.collection-object.data",
+        collection_receipt_id,
+        "same-collection-object-user",
+        "test.same_collection_object_user",
+    )
+    collection_object_identity = tag_resource(
+        collection_object,
+        "external-user.collection-object",
+        collection_receipt_id,
+        "same-collection-object-user",
+        "test.same_collection_object_user",
+    )
+    reference_collection.objects.link(collection_object)
+    collection_receipt = ActionReceipt(
+        collection_receipt_id,
+        "same-collection-object-user",
+        "test.same_collection_object_user",
+        created=(collection_object_mesh_identity, collection_object_identity),
+        mutations=(
+            MutationRecord(
+                collection_object_identity,
+                "users_collection",
+                (),
+                (reference_collection_identity,),
+            ),
+        ),
+    )
+    custom_reference_key = "operating_line_untracked_object_reference"
+    reference_collection[custom_reference_key] = collection_object
+    collection_rollback_was_rejected = False
+    try:
+        try:
+            rollback_receipt(collection_receipt)
+        except RuntimeError as error:
+            collection_rollback_was_rejected = True
+            assert "Cannot rollback" in str(error)
+            assert "external-user.collection-object" in str(error)
+            assert collection_object in reference_collection.objects[:]
+            assert reference_collection[custom_reference_key] is collection_object
+        if not collection_rollback_was_rejected:
+            missed_external_reference_guards.append(
+                "A collection that legitimately links a created object must not "
+                "also hold an untracked custom-property reference to that object"
+            )
+    finally:
+        if (
+            bpy.data.collections.get(reference_collection_name)
+            is reference_collection
+            and custom_reference_key in reference_collection
+        ):
+            del reference_collection[custom_reference_key]
+        if bpy.data.objects.get(collection_object_name) is collection_object:
+            rollback_receipt(collection_receipt)
+        if (
+            bpy.data.collections.get(reference_collection_name)
+            is reference_collection
+        ):
+            bpy.data.collections.remove(reference_collection)
+        if bpy.data.objects.get(collection_object_name) is collection_object:
+            bpy.data.objects.remove(collection_object)
+        if (
+            bpy.data.meshes.get(collection_object_mesh_name)
+            is collection_object_mesh
+        ):
+            bpy.data.meshes.remove(collection_object_mesh)
+
+    lazy_receipt_id = "lazy-view-layer-user-receipt"
+    lazy_scene_names = (
+        "OperatingLine.ExternalUser.LazySceneA",
+        "OperatingLine.ExternalUser.LazySceneB",
+    )
+    lazy_scenes = tuple(bpy.data.scenes.new(name) for name in lazy_scene_names)
+    lazy_collection = bpy.data.collections.new(
+        "OperatingLine.ExternalUser.LazyCollection"
+    )
+    lazy_collection_name = lazy_collection.name
+    lazy_collection_identity = tag_resource(
+        lazy_collection,
+        "external-user.lazy-collection",
+        lazy_receipt_id,
+        "lazy-view-layer-user",
+        "test.lazy_view_layer_user",
+    )
+    for lazy_scene in lazy_scenes:
+        lazy_scene.collection.children.link(lazy_collection)
+    lazy_mesh = bpy.data.meshes.new("OperatingLine.ExternalUser.LazyMesh")
+    lazy_object = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.LazyObject", lazy_mesh
+    )
+    lazy_object_name = lazy_object.name
+    lazy_mesh_name = lazy_mesh.name
+    lazy_object_identity = tag_resource(
+        lazy_object,
+        "external-user.lazy-object",
+        lazy_receipt_id,
+        "lazy-view-layer-user",
+        "test.lazy_view_layer_user",
+    )
+    lazy_mesh_identity = tag_resource(
+        lazy_mesh,
+        "external-user.lazy-object.data",
+        lazy_receipt_id,
+        "lazy-view-layer-user",
+        "test.lazy_view_layer_user",
+    )
+    lazy_collection.objects.link(lazy_object)
+    lazy_receipt = ActionReceipt(
+        lazy_receipt_id,
+        "lazy-view-layer-user",
+        "test.lazy_view_layer_user",
+        created=(lazy_mesh_identity, lazy_object_identity),
+        mutations=(
+            MutationRecord(
+                lazy_object_identity,
+                "users_collection",
+                (),
+                (lazy_collection_identity,),
+            ),
+        ),
+    )
+    try:
+        rollback_receipt(lazy_receipt)
+        assert bpy.data.objects.get(lazy_object_name) is None
+        assert bpy.data.meshes.get(lazy_mesh_name) is None
+    finally:
+        if bpy.data.objects.get(lazy_object_name) is lazy_object:
+            bpy.data.objects.remove(lazy_object, do_unlink=True)
+        if bpy.data.meshes.get(lazy_mesh_name) is lazy_mesh:
+            bpy.data.meshes.remove(lazy_mesh)
+        for lazy_scene in lazy_scenes:
+            if bpy.data.scenes.get(lazy_scene.name) is lazy_scene:
+                bpy.data.scenes.remove(lazy_scene)
+        if bpy.data.collections.get(lazy_collection_name) is lazy_collection:
+            bpy.data.collections.remove(lazy_collection)
+
+    marker_receipt_id = "same-scene-camera-user-receipt"
+    marker_scene = bpy.data.scenes.new(
+        "OperatingLine.ExternalUser.MarkerCameraScene"
+    )
+    marker_scene_name = marker_scene.name
+    marker_scene_identity = tag_resource(
+        marker_scene,
+        "external-user.marker-scene",
+        marker_receipt_id,
+        "same-scene-camera-user",
+        "test.same_scene_camera_user",
+    )
+    marker_camera_data = bpy.data.cameras.new(
+        "OperatingLine.ExternalUser.MarkerCameraData"
+    )
+    marker_camera = bpy.data.objects.new(
+        "OperatingLine.ExternalUser.MarkerCamera", marker_camera_data
+    )
+    marker_camera_name = marker_camera.name
+    marker_camera_data_name = marker_camera_data.name
+    marker_camera_data_identity = tag_resource(
+        marker_camera_data,
+        "external-user.marker-camera.data",
+        marker_receipt_id,
+        "same-scene-camera-user",
+        "test.same_scene_camera_user",
+    )
+    marker_camera_identity = tag_resource(
+        marker_camera,
+        "external-user.marker-camera",
+        marker_receipt_id,
+        "same-scene-camera-user",
+        "test.same_scene_camera_user",
+    )
+    marker_scene.camera = marker_camera
+    marker_receipt = ActionReceipt(
+        marker_receipt_id,
+        "same-scene-camera-user",
+        "test.same_scene_camera_user",
+        created=(marker_camera_data_identity, marker_camera_identity),
+        mutations=(
+            MutationRecord(
+                marker_scene_identity,
+                "camera",
+                None,
+                marker_camera_identity,
+            ),
+        ),
+    )
+    timeline_marker = marker_scene.timeline_markers.new(
+        "OperatingLine Untracked Camera Marker", frame=1
+    )
+    timeline_marker.camera = marker_camera
+    marker_rollback_was_rejected = False
+    try:
+        try:
+            rollback_receipt(marker_receipt)
+        except RuntimeError as error:
+            marker_rollback_was_rejected = True
+            assert "Cannot rollback" in str(error)
+            assert "external-user.marker-camera" in str(error)
+            assert marker_scene.camera is marker_camera
+            assert timeline_marker.camera is marker_camera
+        if not marker_rollback_was_rejected:
+            missed_external_reference_guards.append(
+                "A scene with a recorded camera mutation must not also hold an "
+                "untracked timeline-marker reference to the created camera"
+            )
+    finally:
+        if bpy.data.scenes.get(marker_scene_name) is marker_scene:
+            live_marker = marker_scene.timeline_markers.get(timeline_marker.name)
+            if live_marker is not None:
+                live_marker.camera = None
+                marker_scene.timeline_markers.remove(live_marker)
+        if bpy.data.objects.get(marker_camera_name) is marker_camera:
+            rollback_receipt(marker_receipt)
+        if bpy.data.scenes.get(marker_scene_name) is marker_scene:
+            bpy.data.scenes.remove(marker_scene)
+        if bpy.data.objects.get(marker_camera_name) is marker_camera:
+            bpy.data.objects.remove(marker_camera)
+        if (
+            bpy.data.cameras.get(marker_camera_data_name)
+            is marker_camera_data
+        ):
+            bpy.data.cameras.remove(marker_camera_data)
+    if missed_external_reference_guards:
+        raise AssertionError("; ".join(missed_external_reference_guards))
+
+
 def main() -> None:
     namespace = bpy.app.driver_namespace
     namespace[operating_line_core._COMPANION_SESSION_ID_SLOT] = "INVALID"
@@ -9556,11 +10603,13 @@ def main() -> None:
     assert_sized_primitive_ready_observations()
     assert_cube_resource_id_boundaries()
     assert_cube_action_round_trip()
+    assert_rollback_preserves_external_id_users()
     assert_uv_sphere_ready_observation()
     assert_cube_candidate_shortcut_projection_contract()
     assert_plane_candidate_shortcut_projection_contract()
     assert_editing_argument_boundaries()
     assert_edit_modifier_geometry_nodes_round_trip()
+    assert_guided_geometry_leaf_operation_session_round_trip()
     assert_extrude_region_round_trip_and_guards()
     assert_extrude_region_connectivity_guards()
     assert_extrude_region_rejects_modified_source()
@@ -9825,8 +10874,12 @@ def main() -> None:
         )
         assert session.is_expanded("snowman")
         assert bpy.ops.operating_line.toggle_branch(node_id="snowman") == {"FINISHED"}
-        assert not session.is_expanded("snowman")
-        assert bpy.ops.operating_line.toggle_branch(node_id="snowman") == {"FINISHED"}
+        assert session.is_expanded("snowman")
+        assert session.is_expanded("snowman.model")
+        assert bpy.ops.operating_line.toggle_branch(node_id="snowman.model") == {
+            "FINISHED"
+        }
+        assert session.is_expanded("snowman.model")
 
         # Safe default: merely starting a guide preserves Blender's factory
         # scene unless the user explicitly opts into replacement.

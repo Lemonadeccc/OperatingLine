@@ -9,6 +9,7 @@ import {
   companionExecutionTrackPreflightBindingSchema,
   companionExecutionTrackPreflightCreateRequestSchema,
   computeProtocolCanonicalJsonSha256,
+  guideProtocolVersion,
   guideStepSchema,
   procedureAuthoringCandidateTreeSchema,
   type CompanionExecutionTrackPreflightBinding,
@@ -58,6 +59,17 @@ function candidate() {
       location: [1.25, -2, 0.75],
     },
   };
+  leaf['expectedObservations'] = [
+    {
+      kind: 'uv_sphere_ready',
+      parameters: {
+        resourceId: 'proof.uv_sphere.eye',
+        objectName: 'OperatingLine.TutorialEye',
+        radius: 1.5,
+        location: [1.25, -2, 0.75],
+      },
+    },
+  ];
   leaf['menuTracks'] = [
     {
       id: 'tutorial.execution-track-preflight.menu.pending',
@@ -140,7 +152,7 @@ export function executionTrackPreflightFixture(): {
       contentSha256: '2'.repeat(64),
     },
     plan: {
-      protocolVersion: '1.6.0' as const,
+      protocolVersion: guideProtocolVersion,
       id: 'tutorial.execution-track-preflight',
       revision: 2,
       contentSha256: '3'.repeat(64),
@@ -174,7 +186,7 @@ export function executionTrackPreflightFixture(): {
     },
     acceptance: {
       decision: {
-        protocolVersion: '1.6.0' as const,
+        protocolVersion: guideProtocolVersion,
         decisionId: preflightIds.decision,
         proposalId: preflightIds.proposal,
         adapterId: 'blender' as const,

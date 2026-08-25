@@ -182,12 +182,16 @@ def _load_operators(session: _Session, companion: _Companion, history_calls: lis
 
     infrastructure.prepare_native_history = prepare
     infrastructure.cancel_native_history = lambda: history_calls.append("cancel")
+    infrastructure.clear_native_rna_badge = lambda: None
     infrastructure.commit_native_history = lambda *_args: history_calls.append("commit")
     infrastructure.prepared_native_history_changed = lambda *_args: False
+    infrastructure.remember_native_rna_badge = lambda *_args, **_kwargs: True
     infrastructure.disable_overlay = lambda *_args: None
     infrastructure.enable_overlay = lambda *_args: None
     infrastructure.overlay_enabled = lambda: False
     infrastructure.remove_factory_startup_objects = lambda *_args: False
+    infrastructure.resolve_resource = lambda *_args: None
+    infrastructure.try_activate_native_rna_button = lambda *_args, **_kwargs: None
     sys.modules[infrastructure.__name__] = infrastructure
 
     presentation = ModuleType(f"{PACKAGE_NAME}.presentation")
@@ -197,10 +201,14 @@ def _load_operators(session: _Session, companion: _Companion, history_calls: lis
     for name in (
         "disable_native_menu_guidance",
         "enable_native_menu_guidance",
+        "focus_next_leaf_operation",
+        "focus_previous_leaf_operation",
         "guided_menu_action_matches",
         "interaction_guidance_snapshot",
+        "leaf_guidance_snapshot",
         "native_menu_snapshot",
         "refresh_native_menu_guidance",
+        "retry_leaf_operation",
     ):
         setattr(native_guidance, name, lambda *_args, **_kwargs: None)
     sys.modules[native_guidance.__name__] = native_guidance
@@ -239,6 +247,11 @@ class _Layout:
 def _load_panel():
     application = sys.modules[f"{PACKAGE_NAME}.application"]
     application.GuidanceState = SimpleNamespace(BACK="back", NEXT="next")
+    application.MenuGuidanceTracker = type(
+        "MenuGuidanceTracker",
+        (),
+        {"snapshot": lambda _self, _step: None},
+    )
     application.node_state = lambda *_args: None
     infrastructure = sys.modules[f"{PACKAGE_NAME}.infrastructure"]
     infrastructure.native_history_error = lambda: ""
@@ -257,6 +270,31 @@ def _load_panel():
 
 
 class ExecutionTrackOverrideOperatorTests(unittest.TestCase):
+    def test_history_lock_has_one_explicit_managed_commit_bypass(self) -> None:
+        step = domain.load_task_tree_data(plan_with_override())
+        session = _Session(step)
+        companion = _Companion()
+        companion.shortcut_mutation_blocked = True
+        history_calls: list[str] = []
+        operators = _load_operators(session, companion, history_calls)
+        operator = _Operator()
+        context = SimpleNamespace(scene={})
+
+        self.assertFalse(
+            operators._prepare_history(operator, context, session, "next")
+        )
+        self.assertEqual(history_calls, [])
+        self.assertTrue(
+            operators._prepare_history(
+                operator,
+                context,
+                session,
+                "next",
+                allow_execution_track_override=True,
+            )
+        )
+        self.assertEqual(history_calls, ["prepare"])
+
     def test_next_fails_before_history_or_session_mutation(self) -> None:
         step = domain.load_task_tree_data(plan_with_override())
         session = _Session(step)
@@ -284,7 +322,7 @@ class ExecutionTrackOverrideOperatorTests(unittest.TestCase):
             ],
         )
 
-    def test_panel_locks_next_and_identifies_missing_executor(self) -> None:
+    def test_panel_locks_next_and_identifies_reviewed_mcp_path(self) -> None:
         step = domain.load_task_tree_data(plan_with_override())
         session = _Session(step)
         companion = _Companion()
@@ -305,7 +343,7 @@ class ExecutionTrackOverrideOperatorTests(unittest.TestCase):
         forward = controls.rows[1]
         self.assertFalse(forward.enabled)
         self.assertIn(
-            "Next 01  Locked: execution track executor unavailable",
+            "Next 01  Locked: use reviewed execution-track MCP",
             layout.boxes[0].labels,
         )
 
@@ -327,6 +365,124 @@ class ExecutionTrackOverrideOperatorTests(unittest.TestCase):
         )
 
         self.assertFalse(layout.rows[2].enabled)
+
+
+class GuidedNativeHighlightOperatorTests(unittest.TestCase):
+    def _fixture(self, *, focused_ordinal: int = 5):
+        operation = SimpleNamespace(
+            ordinal=5,
+            operation_id="projection.semantic.transform_geometry.translation",
+            label="Set Translation",
+            parameters=(
+                SimpleNamespace(
+                    name="translation",
+                    resolved=True,
+                    value=[1.0, 2.0, 3.0],
+                    display_value="[1.0, 2.0, 3.0]",
+                ),
+            ),
+            connection=None,
+        )
+        step = SimpleNamespace(
+            id="geometry-step",
+            action=SimpleNamespace(
+                name="blender.geometry_nodes.create_transform",
+                arguments={},
+            ),
+        )
+        snapshot = SimpleNamespace(
+            step_id=step.id,
+            recipe_id="blender.geometry_nodes.create_transform.semantic",
+            cursor_token="cursor-1",
+            focused_ordinal=focused_ordinal,
+            operations=(operation,),
+        )
+        session = SimpleNamespace(guidance_step=step)
+        companion = _Companion()
+        operators = _load_operators(session, companion, [])
+        operators.leaf_guidance_snapshot = lambda _step: snapshot
+        target_region = SimpleNamespace()
+        target_node = SimpleNamespace()
+        target_data = SimpleNamespace()
+        operators.resolve_guided_geometry_native_target = lambda *_args, **_kwargs: (
+            SimpleNamespace(
+                ready=True,
+                region=target_region,
+                node=target_node,
+                data=target_data,
+                property_name="default_value",
+                component_indexes=(0, 1, 2),
+                component_labels=("X", "Y", "Z"),
+                detail=None,
+            )
+        )
+        native_calls = []
+        operators.try_activate_native_rna_button = lambda *args, **kwargs: (
+            native_calls.append((args, kwargs))
+            or SimpleNamespace(
+                is_exact=True,
+                window_xy=(200, 300),
+                detail=None,
+            )
+        )
+        remembered = []
+        operators.remember_native_rna_badge = lambda *args, **kwargs: (
+            remembered.append((args, kwargs)) or True
+        )
+        return operators, operation, native_calls, remembered
+
+    def test_highlight_operator_cursor_binds_exact_native_component(self) -> None:
+        operators, operation, native_calls, remembered = self._fixture()
+        operator = operators.OPERATINGLINE_OT_highlight_guided_geometry_parameter()
+        operator.step_id = "geometry-step"
+        operator.operation_id = operation.operation_id
+        operator.ordinal = 5
+        operator.cursor_token = "cursor-1"
+        operator.argument_name = "translation"
+        operator.component_index = 2
+        operator.write_order = 1
+        reports = []
+        operator.report = lambda level, message: reports.append((level, message))
+        redraws = []
+        context = SimpleNamespace(
+            window_manager=SimpleNamespace(),
+            area=SimpleNamespace(tag_redraw=lambda: redraws.append(True)),
+        )
+
+        result = operator.execute(context)
+
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(native_calls[0][1]["property"], "default_value")
+        self.assertEqual(native_calls[0][1]["index"], 2)
+        self.assertEqual(remembered[0][1]["ordinal"], 5)
+        self.assertEqual(remembered[0][1]["cursor_token"], "cursor-1")
+        self.assertIn("target_node", remembered[0][1])
+        self.assertIn("target_data", remembered[0][1])
+        self.assertEqual(redraws, [True])
+        self.assertIn("EXACT NATIVE · 05.01 translation.Z", reports[-1][1])
+
+    def test_highlight_operator_refuses_nonfocused_instruction(self) -> None:
+        operators, operation, native_calls, remembered = self._fixture(
+            focused_ordinal=4
+        )
+        operator = operators.OPERATINGLINE_OT_highlight_guided_geometry_parameter()
+        operator.step_id = "geometry-step"
+        operator.operation_id = operation.operation_id
+        operator.ordinal = 5
+        operator.cursor_token = "cursor-1"
+        operator.argument_name = "translation"
+        operator.component_index = 0
+        reports = []
+        operator.report = lambda level, message: reports.append((level, message))
+
+        result = operator.execute(
+            SimpleNamespace(window_manager=SimpleNamespace(), area=None)
+        )
+
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertEqual(native_calls, [])
+        self.assertEqual(remembered, [])
+        self.assertIn("Focus this numbered instruction", reports[-1][1])
 
 
 if __name__ == "__main__":

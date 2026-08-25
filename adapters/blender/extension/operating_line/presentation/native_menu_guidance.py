@@ -35,6 +35,8 @@ _session_provider: Callable | None = None
 _original_editor_draw = None
 _original_add_draw = None
 _original_mesh_draw = None
+_original_select_edit_mesh_draw = None
+_original_edit_mesh_edges_draw = None
 _original_add_label: str | None = None
 
 
@@ -42,16 +44,11 @@ def _supported_blender() -> bool:
     return tuple(bpy.app.version[:2]) in _SUPPORTED_BLENDER_SERIES
 
 
-def _next_step():
+def _guidance_step():
     if _session_provider is None:
         return None
     session = _session_provider()
-    if session.observation_blocked:
-        return None
-    next_index = session.active_index + 1
-    if next_index < 0 or next_index >= len(session.steps):
-        return None
-    return session.steps[next_index]
+    return session.guidance_step
 
 
 def _localized(value: str) -> str:
@@ -87,12 +84,78 @@ def native_menu_snapshot() -> MenuGuidanceSnapshot | None:
     return snapshot if snapshot is not None and snapshot.native else None
 
 
+def candidate_menu_snapshot() -> MenuGuidanceSnapshot | None:
+    """Return display-only native UI instructions with no managed authority."""
+
+    snapshot = interaction_guidance_snapshot()
+    return snapshot if snapshot is not None and snapshot.candidate_only else None
+
+
 def interaction_guidance_snapshot() -> MenuGuidanceSnapshot | None:
     """Return the active leaf's catalog path, including semantic fallbacks."""
 
     if not native_menu_guidance_enabled():
         return None
-    return _tracker.snapshot(_next_step())
+    return _tracker.snapshot(_guidance_step())
+
+
+def leaf_guidance_snapshot(step) -> MenuGuidanceSnapshot | None:
+    """Return the shared leaf rail even when editor markers are hidden.
+
+    Marker visibility controls Blender menu patches and viewport drawing only.
+    The leaf-local instruction position belongs to the walkthrough, so hiding
+    those presentation surfaces must not create a second cursor or reset it.
+    """
+
+    return _tracker.snapshot(step)
+
+
+def focus_previous_leaf_operation(
+    step,
+    expected_operation_id: str,
+    expected_ordinal: int,
+    expected_cursor_token: str,
+) -> bool:
+    """Move the shared instructional cursor backward without scene mutation."""
+
+    return _tracker.focus_back(
+        step,
+        expected_operation_id,
+        expected_ordinal,
+        expected_cursor_token,
+    )
+
+
+def focus_next_leaf_operation(
+    step,
+    expected_operation_id: str,
+    expected_ordinal: int,
+    expected_cursor_token: str,
+) -> bool:
+    """Move the shared instructional cursor forward without scene mutation."""
+
+    return _tracker.focus_next(
+        step,
+        expected_operation_id,
+        expected_ordinal,
+        expected_cursor_token,
+    )
+
+
+def retry_leaf_operation(
+    step,
+    expected_operation_id: str,
+    expected_ordinal: int,
+    expected_cursor_token: str,
+) -> bool:
+    """Re-focus the same instruction without repeating its Blender action."""
+
+    return _tracker.retry_focus(
+        step,
+        expected_operation_id,
+        expected_ordinal,
+        expected_cursor_token,
+    )
 
 
 def reveal_native_menu(label: str) -> bool:
@@ -100,7 +163,7 @@ def reveal_native_menu(label: str) -> bool:
 
     if not native_menu_guidance_enabled():
         return False
-    step = _next_step()
+    step = _guidance_step()
     if step is None or not _tracker.reveal(step, label):
         return False
     return True
@@ -109,6 +172,8 @@ def reveal_native_menu(label: str) -> bool:
 def guided_menu_action_matches(step_id: str, operator_id: str) -> bool:
     """Fail closed unless the visible final menu item matches the next leaf."""
 
+    if _session_provider is None or _session_provider().observation_blocked:
+        return False
     snapshot = native_menu_snapshot()
     return (
         snapshot is not None
@@ -247,6 +312,45 @@ def _draw_add_guided(self, context) -> None:
 
 
 def _draw_editor_guided(self, context) -> None:
+    candidate = candidate_menu_snapshot()
+    if candidate is not None and context.mode == "EDIT_MESH":
+        operation_by_target = {
+            operation.target_id: operation for operation in candidate.operations
+        }
+        select_operation = operation_by_target.get("VIEW3D_MT_select_edit_mesh")
+        edge_operation = operation_by_target.get("VIEW3D_MT_edit_mesh_edges")
+        assert _original_editor_draw is not None
+        _original_editor_draw(self, context)
+        layout = self.layout
+        layout.separator()
+        layout.menu(
+            "VIEW3D_MT_select_edit_mesh",
+            text=(
+                f"{_localized('Select')}    {select_operation.ordinal:02d} CANDIDATE"
+                if select_operation is not None
+                else _localized("Select")
+            ),
+            icon=(
+                STATE_ICONS[select_operation.state]
+                if select_operation is not None
+                else "NONE"
+            ),
+        )
+        layout.menu(
+            "VIEW3D_MT_edit_mesh_edges",
+            text=(
+                f"{_localized('Edge')}    {edge_operation.ordinal:02d} CANDIDATE"
+                if edge_operation is not None
+                else _localized("Edge")
+            ),
+            icon=(
+                STATE_ICONS[edge_operation.state]
+                if edge_operation is not None
+                else "NONE"
+            ),
+        )
+        return
+
     snapshot = native_menu_snapshot()
     if snapshot is None or context.mode != "OBJECT":
         assert _original_editor_draw is not None
@@ -332,11 +436,59 @@ def _draw_mesh_guided(self, context) -> None:
     layout.template_node_operator_asset_menu_items(catalog_path="Add")
 
 
+def _draw_select_edit_mesh_guided(self, context) -> None:
+    snapshot = candidate_menu_snapshot()
+    operation = next(
+        (
+            candidate
+            for candidate in snapshot.operations
+            if candidate.target_id == "mesh.select_all"
+        ),
+        None,
+    ) if snapshot is not None else None
+    if operation is not None and context.mode == "EDIT_MESH":
+        row = self.layout.row(align=True)
+        row.alert = operation.role is MenuGuidanceRole.CURRENT
+        action = row.operator(
+            "mesh.select_all",
+            text=f"All    {operation.ordinal:02d} CANDIDATE ONLY",
+            icon=STATE_ICONS[operation.state],
+        )
+        action.action = "SELECT"
+        self.layout.separator()
+    assert _original_select_edit_mesh_draw is not None
+    _original_select_edit_mesh_draw(self, context)
+
+
+def _draw_edit_mesh_edges_guided(self, context) -> None:
+    snapshot = candidate_menu_snapshot()
+    operation = next(
+        (
+            candidate
+            for candidate in snapshot.operations
+            if candidate.target_id == "mesh.subdivide"
+        ),
+        None,
+    ) if snapshot is not None else None
+    if operation is not None and context.mode == "EDIT_MESH":
+        row = self.layout.row(align=True)
+        row.alert = operation.role is MenuGuidanceRole.CURRENT
+        row.operator(
+            "mesh.subdivide",
+            text=f"Subdivide    {operation.ordinal:02d} CANDIDATE ONLY",
+            icon=STATE_ICONS[operation.state],
+        )
+        self.layout.separator()
+    assert _original_edit_mesh_edges_draw is not None
+    _original_edit_mesh_edges_draw(self, context)
+
+
 def enable_native_menu_guidance(session_provider: Callable) -> bool:
     """Patch only the verified Blender menu classes while Guidance is visible."""
 
     global _session_provider
     global _original_editor_draw, _original_add_draw, _original_mesh_draw
+    global _original_select_edit_mesh_draw, _original_edit_mesh_edges_draw
     global _original_add_label
     if native_menu_guidance_enabled():
         _session_provider = session_provider
@@ -344,7 +496,13 @@ def enable_native_menu_guidance(session_provider: Callable) -> bool:
         return True
     if any(
         original is not None
-        for original in (_original_editor_draw, _original_add_draw, _original_mesh_draw)
+        for original in (
+            _original_editor_draw,
+            _original_add_draw,
+            _original_mesh_draw,
+            _original_select_edit_mesh_draw,
+            _original_edit_mesh_edges_draw,
+        )
     ):
         disable_native_menu_guidance()
     if not _supported_blender():
@@ -354,19 +512,32 @@ def enable_native_menu_guidance(session_provider: Callable) -> bool:
     _original_editor_draw = bpy.types.VIEW3D_MT_editor_menus.draw
     _original_add_draw = bpy.types.VIEW3D_MT_add.draw
     _original_mesh_draw = bpy.types.VIEW3D_MT_mesh_add.draw
+    select_edit_mesh = getattr(bpy.types, "VIEW3D_MT_select_edit_mesh", None)
+    edit_mesh_edges = getattr(bpy.types, "VIEW3D_MT_edit_mesh_edges", None)
+    _original_select_edit_mesh_draw = (
+        select_edit_mesh.draw if select_edit_mesh is not None else None
+    )
+    _original_edit_mesh_edges_draw = (
+        edit_mesh_edges.draw if edit_mesh_edges is not None else None
+    )
     _original_add_label = bpy.types.VIEW3D_MT_add.bl_label
     bpy.types.VIEW3D_MT_editor_menus.draw = _draw_editor_guided
     bpy.types.VIEW3D_MT_add.draw = _draw_add_guided
     bpy.types.VIEW3D_MT_mesh_add.draw = _draw_mesh_guided
+    if select_edit_mesh is not None:
+        select_edit_mesh.draw = _draw_select_edit_mesh_guided
+    if edit_mesh_edges is not None:
+        edit_mesh_edges.draw = _draw_edit_mesh_edges_guided
     refresh_native_menu_guidance()
     return True
 
 
-def disable_native_menu_guidance() -> None:
-    """Restore exact host class methods without touching plan state."""
+def disable_native_menu_guidance(*, reset_tracker: bool = True) -> None:
+    """Restore host class methods and optionally retain instruction progress."""
 
     global _session_provider
     global _original_editor_draw, _original_add_draw, _original_mesh_draw
+    global _original_select_edit_mesh_draw, _original_edit_mesh_edges_draw
     global _original_add_label
     if (
         _original_editor_draw is not None
@@ -383,15 +554,34 @@ def disable_native_menu_guidance() -> None:
         and bpy.types.VIEW3D_MT_mesh_add.draw is _draw_mesh_guided
     ):
         bpy.types.VIEW3D_MT_mesh_add.draw = _original_mesh_draw
-    _tracker.reset()
+    select_edit_mesh = getattr(bpy.types, "VIEW3D_MT_select_edit_mesh", None)
+    if (
+        select_edit_mesh is not None
+        and _original_select_edit_mesh_draw is not None
+        and select_edit_mesh.draw is _draw_select_edit_mesh_guided
+    ):
+        select_edit_mesh.draw = _original_select_edit_mesh_draw
+    edit_mesh_edges = getattr(bpy.types, "VIEW3D_MT_edit_mesh_edges", None)
+    if (
+        edit_mesh_edges is not None
+        and _original_edit_mesh_edges_draw is not None
+        and edit_mesh_edges.draw is _draw_edit_mesh_edges_guided
+    ):
+        edit_mesh_edges.draw = _original_edit_mesh_edges_draw
+    if reset_tracker:
+        _tracker.reset()
     _session_provider = None
     _original_editor_draw = None
     _original_add_draw = None
     _original_mesh_draw = None
+    _original_select_edit_mesh_draw = None
+    _original_edit_mesh_edges_draw = None
     _original_add_label = None
 
 
 def native_menu_guidance_enabled() -> bool:
+    select_edit_mesh = getattr(bpy.types, "VIEW3D_MT_select_edit_mesh", None)
+    edit_mesh_edges = getattr(bpy.types, "VIEW3D_MT_edit_mesh_edges", None)
     return (
         _session_provider is not None
         and _original_editor_draw is not None
@@ -400,17 +590,30 @@ def native_menu_guidance_enabled() -> bool:
         and bpy.types.VIEW3D_MT_editor_menus.draw is _draw_editor_guided
         and bpy.types.VIEW3D_MT_add.draw is _draw_add_guided
         and bpy.types.VIEW3D_MT_mesh_add.draw is _draw_mesh_guided
+        and (
+            select_edit_mesh is None
+            or select_edit_mesh.draw is _draw_select_edit_mesh_guided
+        )
+        and (
+            edit_mesh_edges is None
+            or edit_mesh_edges.draw is _draw_edit_mesh_edges_guided
+        )
     )
 
 
 __all__ = (
     "disable_native_menu_guidance",
+    "candidate_menu_snapshot",
     "enable_native_menu_guidance",
+    "focus_next_leaf_operation",
+    "focus_previous_leaf_operation",
     "guided_menu_action_matches",
     "interaction_guidance_snapshot",
+    "leaf_guidance_snapshot",
     "native_menu_guidance_enabled",
     "native_menu_snapshot",
     "refresh_native_menu_guidance",
     "reset_native_menu_guidance",
+    "retry_leaf_operation",
     "reveal_native_menu",
 )

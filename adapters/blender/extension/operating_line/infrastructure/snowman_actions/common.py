@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from typing import Any
 import uuid
 
@@ -18,6 +18,7 @@ from ...application import ActionReceipt
 from ...application.session import (
     ArtifactIdentity,
     DataBlockReference,
+    MaterialSurfaceState,
     ModifierState,
     MutationRecord,
     ParentIdentity,
@@ -37,6 +38,28 @@ ROLLBACK_TOKEN_KEY = "operating_line_rollback_token"
 LOGICAL_ID_KEY = "operating_line_resource_id"
 OWNED_KEY = "operating_line_action_owned"
 LOGICAL_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
+
+
+class ActionAtomicityError(RuntimeError):
+    """An action failed and its partial Blender mutation could not be rolled back."""
+
+
+_ACTION_HOST_STATE_RESTORED_PROOF = object()
+
+
+def attest_action_host_state_restored(error: Exception) -> None:
+    """Attach a process-local proof while preserving the original exception type."""
+
+    error._operating_line_host_state_restored = (  # type: ignore[attr-defined]
+        _ACTION_HOST_STATE_RESTORED_PROOF
+    )
+
+
+def action_host_state_restored(error: Exception) -> bool:
+    return (
+        getattr(error, "_operating_line_host_state_restored", None)
+        is _ACTION_HOST_STATE_RESTORED_PROOF
+    )
 
 
 def new_receipt_id() -> str:
@@ -155,6 +178,8 @@ ALLOWED_ACTIONS = frozenset(
         "blender.modifier.add_solidify",
         "blender.modifier.add_subdivision_surface",
         "blender.geometry_nodes.create_transform",
+        "blender.geometry_nodes.create_light_trails",
+        "blender.lookdev.create_light_trails_scene",
         "blender.material.create_and_assign",
         "blender.material.create_palette_and_assign",
         "blender.rig.create_armature",
@@ -203,19 +228,7 @@ def _collection_parent_links(
     )
 
 
-def tag_resource(
-    resource: Any,
-    logical_id: str,
-    receipt_id: str,
-    step_id: str,
-    action_name: str,
-) -> ResourceIdentity:
-    resource[OWNED_KEY] = True
-    resource[OWNER_KEY] = OWNER_VALUE
-    resource[ACTION_KEY] = action_name
-    resource[STEP_KEY] = step_id
-    resource[ROLLBACK_TOKEN_KEY] = receipt_id
-    resource[LOGICAL_ID_KEY] = logical_id
+def _resource_type(resource: Any) -> str:
     resource_type = next(
         (
             kind
@@ -238,16 +251,107 @@ def tag_resource(
     )
     if not resource_type:
         raise TypeError(f"Unsupported Blender resource type: {type(resource).__name__}")
+    return resource_type
+
+
+def tag_resource(
+    resource: Any,
+    logical_id: str,
+    receipt_id: str,
+    step_id: str,
+    action_name: str,
+) -> ResourceIdentity:
+    # Resolve every identity field before the first custom-property write.  A
+    # caller using journal_created_resource can then delete a just-created ID if
+    # any subsequent tag write fails, without leaving a partially owned block.
+    resource_type = _resource_type(resource)
+    display_name = resource.name
+    pointer = resource.as_pointer()
+    session_uid = resource.session_uid
+    resource[OWNED_KEY] = True
+    resource[OWNER_KEY] = OWNER_VALUE
+    resource[ACTION_KEY] = action_name
+    resource[STEP_KEY] = step_id
+    resource[ROLLBACK_TOKEN_KEY] = receipt_id
+    resource[LOGICAL_ID_KEY] = logical_id
     return ResourceIdentity(
         resource_type=resource_type,
         logical_id=logical_id,
-        display_name=resource.name,
-        pointer=resource.as_pointer(),
-        session_uid=resource.session_uid,
+        display_name=display_name,
+        pointer=pointer,
+        session_uid=session_uid,
         receipt_token=receipt_id,
         step_id=step_id,
         action_name=action_name,
     )
+
+
+def _remove_unjournaled_resource(resource: Any, resource_type: str) -> None:
+    """Delete a newly created Blender ID before it can escape unjournaled."""
+
+    if resource_type == "OBJECT":
+        bpy.data.objects.remove(resource, do_unlink=True)
+    elif resource_type == "MESH":
+        bpy.data.meshes.remove(resource)
+    elif resource_type == "MATERIAL":
+        bpy.data.materials.remove(resource)
+    elif resource_type == "COLLECTION":
+        bpy.data.collections.remove(resource)
+    elif resource_type == "SCENE":
+        bpy.data.scenes.remove(resource)
+    elif resource_type == "WORLD":
+        bpy.data.worlds.remove(resource)
+    elif resource_type == "LIGHT":
+        bpy.data.lights.remove(resource)
+    elif resource_type == "CAMERA":
+        bpy.data.cameras.remove(resource)
+    elif resource_type == "ARMATURE":
+        bpy.data.armatures.remove(resource)
+    elif resource_type == "ACTION":
+        bpy.data.actions.remove(resource)
+    elif resource_type == "NODE_GROUP":
+        bpy.data.node_groups.remove(resource)
+    else:  # pragma: no cover - _resource_type defines the closed set
+        raise TypeError(f"Unsupported Blender resource type: {resource_type}")
+
+
+def journal_created_resource(
+    created: list[ResourceIdentity],
+    resource: Any,
+    logical_id: str,
+    receipt_id: str,
+    step_id: str,
+    action_name: str,
+) -> ResourceIdentity:
+    """Atomically tag and journal a newly created Blender data-block.
+
+    The data-block is removed if identity capture, custom-property tagging, or
+    journal insertion fails.  This closes the otherwise untracked interval
+    between ``bpy.data.*.new`` and ``created.append``.
+    """
+
+    resource_type: str | None = None
+    try:
+        resource_type = _resource_type(resource)
+        identity = tag_resource(
+            resource,
+            logical_id,
+            receipt_id,
+            step_id,
+            action_name,
+        )
+        created.append(identity)
+    except Exception:
+        try:
+            resource_type = resource_type or _resource_type(resource)
+            _remove_unjournaled_resource(resource, resource_type)
+        except Exception as cleanup_error:
+            raise ActionAtomicityError(
+                f"{action_name} could not journal or remove a newly created "
+                f"Blender resource: {logical_id}"
+            ) from cleanup_error
+        raise
+    return identity
 
 
 def reference_data_block(resource: Any) -> DataBlockReference:
@@ -594,6 +698,154 @@ def node_tree_signature(node_group: bpy.types.NodeTree) -> tuple[Any, ...]:
     return interface, nodes, links
 
 
+_NODE_PRESENTATION_PROPERTIES = frozenset(
+    {
+        "bl_idname",
+        "bl_label",
+        "bl_static_type",
+        "color",
+        "dimensions",
+        "draw_buttons_ext",
+        "height",
+        "hide",
+        "label",
+        "location",
+        "name",
+        "parent",
+        "rna_type",
+        "select",
+        "show_options",
+        "show_preview",
+        "show_texture",
+        "use_custom_color",
+        "width",
+        "width_hidden",
+    }
+)
+
+
+def node_tree_semantic_signature(node_group: bpy.types.NodeTree) -> tuple[Any, ...]:
+    """Capture graph semantics for newer bounded node recipes.
+
+    The original signature remains stable for existing receipts. New recipes use
+    this versioned mutation attribute so enum modes such as Math.operation and
+    node output defaults are also protected without invalidating old sessions.
+    """
+    base = node_tree_signature(node_group)
+    semantics = tuple(
+        sorted(
+            (
+                node.name,
+                tuple(
+                    sorted(
+                        _writable_scalar_properties(
+                            node,
+                            excluded=_NODE_PRESENTATION_PROPERTIES,
+                        ).items()
+                    )
+                ),
+                tuple(
+                    (socket.identifier, _socket_default_value(socket))
+                    for socket in node.outputs
+                ),
+            )
+            for node in node_group.nodes
+        )
+    )
+    return base, semantics
+
+
+def embedded_node_tree_semantic_signature(resource: Any) -> tuple[Any, ...]:
+    """Capture the semantic node tree embedded in an owned ID datablock.
+
+    Materials, worlds, and scenes own their shader/compositor trees rather than
+    exposing those trees as independently removable Blender IDs.  New bounded
+    recipes use this signature to make later graph edits fail closed during
+    receipt integrity checks and compensation.
+    """
+    node_tree = getattr(resource, "node_tree", None)
+    if not isinstance(node_tree, bpy.types.NodeTree):
+        raise TypeError(
+            f"Resource has no embedded node tree: {type(resource).__name__}"
+        )
+    return node_tree_semantic_signature(node_tree)
+
+
+def _material_principled_surface(
+    material: bpy.types.Material,
+) -> tuple[Any, Any, Any, Any]:
+    if not material.use_nodes or not isinstance(material.node_tree, bpy.types.NodeTree):
+        raise RuntimeError(f"Material has no enabled node tree: {material.name}")
+    principled_nodes = tuple(
+        node
+        for node in material.node_tree.nodes
+        if node.bl_idname == "ShaderNodeBsdfPrincipled"
+    )
+    output_nodes = tuple(
+        node
+        for node in material.node_tree.nodes
+        if node.bl_idname == "ShaderNodeOutputMaterial"
+    )
+    if len(principled_nodes) != 1 or len(output_nodes) != 1:
+        raise RuntimeError(
+            "Material surface must contain exactly one Principled BSDF and "
+            f"one Material Output node: {material.name}"
+        )
+    principled = principled_nodes[0]
+    sockets = []
+    for identifier in ("Base Color", "Roughness", "Metallic"):
+        matches = tuple(
+            socket for socket in principled.inputs if socket.identifier == identifier
+        )
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Material Principled input is unavailable: {material.name}.{identifier}"
+            )
+        sockets.append(matches[0])
+    return principled, sockets[0], sockets[1], sockets[2]
+
+
+def snapshot_material_surface(material: bpy.types.Material) -> MaterialSurfaceState:
+    """Capture the bounded material and Principled values owned by one action."""
+
+    _principled, base_color, roughness, metallic = _material_principled_surface(
+        material
+    )
+    return MaterialSurfaceState(
+        display_name=material.name,
+        use_nodes=bool(material.use_nodes),
+        diffuse_color=tuple(float(channel) for channel in material.diffuse_color),
+        roughness=float(material.roughness),
+        metallic=float(material.metallic),
+        principled_base_color=tuple(
+            float(channel) for channel in base_color.default_value
+        ),
+        principled_roughness=float(roughness.default_value),
+        principled_metallic=float(metallic.default_value),
+        node_tree_signature=embedded_node_tree_semantic_signature(material),
+    )
+
+
+def restore_material_surface(
+    material: bpy.types.Material, state: MaterialSurfaceState
+) -> None:
+    """Restore a previously captured bounded material surface state."""
+
+    material.name = state.display_name
+    material.use_nodes = state.use_nodes
+    _principled, base_color, roughness, metallic = _material_principled_surface(
+        material
+    )
+    material.diffuse_color = state.diffuse_color
+    material.roughness = state.roughness
+    material.metallic = state.metallic
+    base_color.default_value = state.principled_base_color
+    roughness.default_value = state.principled_roughness
+    metallic.default_value = state.principled_metallic
+    if snapshot_material_surface(material) != state:
+        raise RuntimeError(f"Material surface restore changed: {material.name}")
+
+
 _RESOURCE_COLLECTIONS = {
     "OBJECT": lambda: bpy.data.objects,
     "MESH": lambda: bpy.data.meshes,
@@ -798,8 +1050,17 @@ def owned_resource(
 
 
 def ensure_name_available(collection: Any, name: str, label: str) -> None:
+    """Read-only action preflight for a Blender data-block name.
+
+    Every action call site invokes this before its first host mutation.  That
+    invariant lets the operator cancel without creating a quarantine checkpoint
+    when the requested name already exists.
+    """
+
     if collection.get(name) is not None:
-        raise RuntimeError(f"Cannot replace existing {label}: {name}")
+        error = RuntimeError(f"Cannot replace existing {label}: {name}")
+        attest_action_host_state_restored(error)
+        raise error
 
 
 def ensure_logical_ids_available(
@@ -953,6 +1214,10 @@ def _pose_bone_matches(
         == recorded.location
         and tuple(float(value) for value in pose_bone.rotation_euler)
         == recorded.rotation_euler
+        and tuple(float(value) for value in pose_bone.rotation_quaternion)
+        == recorded.rotation_quaternion
+        and tuple(float(value) for value in pose_bone.rotation_axis_angle)
+        == recorded.rotation_axis_angle
         and tuple(float(value) for value in pose_bone.scale) == recorded.scale
     )
 
@@ -1030,6 +1295,12 @@ def _mutation_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
         return _modifier_matches_value(mutation, recorded)
     if mutation.attribute.startswith("armature_bone_use_deform:"):
         return _armature_bone_deform_matches(target, mutation.attribute, recorded)
+    if mutation.attribute == "material_surface":
+        return bool(
+            isinstance(target, bpy.types.Material)
+            and isinstance(recorded, MaterialSurfaceState)
+            and snapshot_material_surface(target) == recorded
+        )
     if mutation.attribute == "mesh_content":
         return (
             isinstance(target, bpy.types.Mesh)
@@ -1041,6 +1312,19 @@ def _mutation_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
             isinstance(target, bpy.types.NodeTree)
             and recorded is not None
             and node_tree_signature(target) == recorded
+        )
+    if mutation.attribute == "node_tree_semantic_signature_v2":
+        return (
+            isinstance(target, bpy.types.NodeTree)
+            and recorded is not None
+            and node_tree_semantic_signature(target) == recorded
+        )
+    if mutation.attribute == "embedded_node_tree_semantic_signature_v1":
+        node_tree = getattr(target, "node_tree", None)
+        return (
+            isinstance(node_tree, bpy.types.NodeTree)
+            and recorded is not None
+            and node_tree_semantic_signature(node_tree) == recorded
         )
     if mutation.attribute == "collection_children":
         current = tuple(target.collection.children)
@@ -1131,7 +1415,21 @@ def _restore_mutation(mutation: MutationRecord) -> None:
             raise RuntimeError(f"Armature bone is unavailable: {bone_name}")
         bone.use_deform = mutation.before
         return
-    if mutation.attribute in {"mesh_content", "node_tree_signature"}:
+    if mutation.attribute == "material_surface":
+        if mutation.before is None:
+            return
+        if not isinstance(target, bpy.types.Material) or not isinstance(
+            mutation.before, MaterialSurfaceState
+        ):
+            raise RuntimeError("Material surface mutation state is invalid")
+        restore_material_surface(target, mutation.before)
+        return
+    if mutation.attribute in {
+        "mesh_content",
+        "node_tree_signature",
+        "node_tree_semantic_signature_v2",
+        "embedded_node_tree_semantic_signature_v1",
+    }:
         return
     if mutation.attribute == "collection_children":
         for child in tuple(target.collection.children):
@@ -1191,6 +1489,8 @@ def _restore_mutation(mutation: MutationRecord) -> None:
         pose_bone.rotation_mode = mutation.before.rotation_mode
         pose_bone.location = mutation.before.location
         pose_bone.rotation_euler = mutation.before.rotation_euler
+        pose_bone.rotation_quaternion = mutation.before.rotation_quaternion
+        pose_bone.rotation_axis_angle = mutation.before.rotation_axis_angle
         pose_bone.scale = mutation.before.scale
         return
     if mutation.attribute == "action_keyframes":
@@ -1244,6 +1544,231 @@ def _created_objects(receipt: ActionReceipt) -> tuple[bpy.types.Object, ...]:
         for resource in (resolve_resource(identity),)
         if isinstance(resource, bpy.types.Object)
     )
+
+
+def _parent_link_resource(identity: ParentIdentity) -> Any | None:
+    resources = (
+        bpy.data.scenes
+        if identity.resource_type == "SCENE"
+        else bpy.data.collections
+        if identity.resource_type == "COLLECTION"
+        else ()
+    )
+    return next(
+        (
+            resource
+            for resource in resources
+            if resource.session_uid == identity.session_uid
+        ),
+        None,
+    )
+
+
+def _stored_id_resources(value: Any) -> tuple[Any, ...]:
+    if isinstance(value, ResourceIdentity):
+        resource = resolve_resource(value)
+        return () if resource is None else (resource,)
+    if isinstance(value, DataBlockReference):
+        resource = resolve_data_block(value)
+        return () if resource is None else (resource,)
+    if isinstance(value, (tuple, list)):
+        return tuple(
+            resource
+            for item in value
+            for resource in _stored_id_resources(item)
+        )
+    if isinstance(value, dict):
+        return tuple(
+            resource
+            for item in value.values()
+            for resource in _stored_id_resources(item)
+        )
+    if is_dataclass(value):
+        return tuple(
+            resource
+            for field in fields(value)
+            for resource in _stored_id_resources(getattr(value, field.name))
+        )
+    return ()
+
+
+def _layer_collection_reference_count(
+    layer_collection: Any,
+    target: bpy.types.Collection,
+) -> int:
+    count = int(layer_collection.collection is target)
+    return count + sum(
+        _layer_collection_reference_count(child, target)
+        for child in layer_collection.children
+    )
+
+
+def _scene_layer_reference_count(scene: bpy.types.Scene, target: Any) -> int:
+    """Count derived ViewLayer references included by ``ID.user_of_id``."""
+
+    if isinstance(target, bpy.types.Object):
+        target_pointer = target.as_pointer()
+        return sum(
+            any(
+                candidate is not None
+                and candidate.as_pointer() == target_pointer
+                for candidate in view_layer.objects
+            )
+            for view_layer in scene.view_layers
+        )
+    if isinstance(target, bpy.types.Collection):
+        return sum(
+            _layer_collection_reference_count(view_layer.layer_collection, target)
+            for view_layer in scene.view_layers
+        )
+    return 0
+
+
+def _expected_created_resource_user_counts(
+    receipt: ActionReceipt,
+    resolved_created: tuple[tuple[ResourceIdentity, Any], ...],
+) -> dict[int, dict[int, int]]:
+    """Count every receipt-authorized reference for each surviving owner ID."""
+
+    expected = {
+        resource.as_pointer(): {}
+        for _identity, resource in resolved_created
+    }
+
+    def allow(created_resource: Any, user: Any | None, count: int = 1) -> None:
+        if user is None or count <= 0 or not hasattr(user, "as_pointer"):
+            return
+        users = expected.get(created_resource.as_pointer())
+        if users is None:
+            return
+        pointer = user.as_pointer()
+        users[pointer] = users.get(pointer, 0) + count
+
+    for identity, resource in resolved_created:
+        for parent_identity_value in identity.parent_links:
+            parent = _parent_link_resource(parent_identity_value)
+            allow(resource, parent)
+
+    for mutation in receipt.mutations:
+        # Only a relation still in its recorded after-state can authorize an
+        # owner edge.  In particular, before-values never grant authority.
+        if not _mutation_matches_after(mutation):
+            continue
+        owner = resolve_resource(mutation.resource)
+        if owner is None:
+            continue
+        after_resources = _stored_id_resources(mutation.after)
+        if mutation.attribute == "users_collection":
+            if owner.as_pointer() not in expected:
+                continue
+            for collection in after_resources:
+                if not isinstance(collection, bpy.types.Collection):
+                    continue
+                allow(owner, collection)
+            continue
+        if mutation.attribute == "material_slots":
+            if not isinstance(owner, bpy.types.Object):
+                continue
+            for resource in after_resources:
+                if isinstance(resource, bpy.types.Material):
+                    allow(resource, owner.data)
+            continue
+        if mutation.attribute.startswith("modifier:"):
+            for resource in after_resources:
+                if isinstance(resource, bpy.types.NodeTree):
+                    allow(resource, owner)
+            continue
+        allowed_types = {
+            "data": (
+                bpy.types.Mesh,
+                bpy.types.Light,
+                bpy.types.Camera,
+                bpy.types.Armature,
+            ),
+            "camera": (bpy.types.Object,),
+            "animation_action": (bpy.types.Action,),
+            "bone_parent": (bpy.types.Object,),
+            "collection_children": (bpy.types.Collection,),
+            "world": (bpy.types.World,),
+            "compositing_node_group": (bpy.types.NodeTree,),
+        }.get(mutation.attribute, ())
+        for resource in after_resources:
+            if allowed_types and isinstance(resource, allowed_types):
+                allow(resource, owner)
+    for _identity, resource in resolved_created:
+        if not isinstance(resource, (bpy.types.Object, bpy.types.Collection)):
+            continue
+        for scene in bpy.data.scenes:
+            allow(resource, scene, _scene_layer_reference_count(scene, resource))
+    return expected
+
+
+def _preflight_created_resource_id_users(receipt: ActionReceipt) -> None:
+    """Reject ID users outside the receipt before Blender can unlink them.
+
+    ``bpy.data.*.remove`` may rewrite arbitrary RNA pointers owned by another
+    data-block.  Blender's ID user map catches those references even when they
+    live inside nodes, constraints, parenting, or other nested RNA structures.
+    Type-specific checks below still validate the exact expected relation and
+    user count for managed users.
+    """
+
+    resolved_created = tuple(
+        (identity, resource)
+        for identity in receipt.created
+        for resource in (resolve_resource(identity),)
+        if resource is not None
+    )
+    if not resolved_created:
+        return
+    created_pointers = {
+        resource.as_pointer() for _identity, resource in resolved_created
+    }
+
+    # Building Blender's ID user map synchronizes lazily-created ViewLayer
+    # bases for newly linked objects.  Derive the expected Scene counts only
+    # after that synchronization, otherwise a fresh light or camera can appear
+    # in ``user_map`` while still being absent from ``view_layer.objects``.
+    user_map = bpy.data.user_map(
+        subset=tuple(resource for _identity, resource in resolved_created)
+    )
+    expected_user_counts = _expected_created_resource_user_counts(
+        receipt,
+        resolved_created,
+    )
+    for identity, resource in resolved_created:
+        expected = expected_user_counts[resource.as_pointer()]
+        actual_users = tuple(
+            user
+            for user in user_map.get(resource, ())
+            if user.as_pointer() not in created_pointers
+        )
+        external_users = tuple(
+            user for user in actual_users if user.as_pointer() not in expected
+        )
+        if not external_users:
+            mismatched_users = tuple(
+                user
+                for user in actual_users
+                if user.user_of_id(resource) != expected[user.as_pointer()]
+            )
+            if not mismatched_users:
+                continue
+            user = min(
+                mismatched_users,
+                key=lambda candidate: (type(candidate).__name__, candidate.name),
+            )
+            raise RuntimeError(
+                "Cannot rollback resource with untracked references: "
+                f"{identity.logical_id} ({type(user).__name__}:{user.name}; "
+                f"expected {expected[user.as_pointer()]}, "
+                f"found {user.user_of_id(resource)})"
+            )
+        external = min(external_users, key=lambda user: (type(user).__name__, user.name))
+        raise RuntimeError(
+            "Cannot rollback externally referenced resource: "
+            f"{identity.logical_id} ({type(external).__name__}:{external.name})"
+        )
 
 
 def _preflight_created_resources(
@@ -1312,8 +1837,16 @@ def _preflight_created_resources(
                 if modifier.type == "NODES"
                 and getattr(modifier, "node_group", None) is resource
             }
-            if not modifier_users.issubset(mutation_target_pointers) or (
-                resource.users != len(modifier_users)
+            compositor_scene_users = {
+                scene.as_pointer()
+                for scene in bpy.data.scenes
+                if getattr(scene, "compositing_node_group", None) is resource
+            }
+            internal_user_count = len(modifier_users) + len(compositor_scene_users)
+            if (
+                not modifier_users.issubset(mutation_target_pointers)
+                or not compositor_scene_users.issubset(created_scenes)
+                or resource.users != internal_user_count
             ):
                 raise RuntimeError(
                     f"Cannot rollback externally used node group: {identity.logical_id}"
@@ -1397,6 +1930,7 @@ def _preflight_created_resources(
                 raise RuntimeError(
                     f"Cannot rollback scene with external contents: {identity.logical_id}"
                 )
+    _preflight_created_resource_id_users(receipt)
 
 
 def _remove_resource(identity: ResourceIdentity) -> None:
@@ -1427,11 +1961,11 @@ def _remove_resource(identity: ResourceIdentity) -> None:
         bpy.data.scenes.remove(resource)
 
 
-def rollback_receipt(
+def _preflight_rollback_receipt(
     receipt: ActionReceipt,
     *,
-    allow_incomplete: bool = False,
-) -> None:
+    allow_incomplete: bool,
+) -> list[MutationRecord]:
     mutations_to_restore: list[MutationRecord] = []
     for mutation in receipt.mutations:
         if _mutation_matches_after(mutation):
@@ -1449,6 +1983,13 @@ def rollback_receipt(
         ):
             raise RuntimeError(f"Cannot rollback modified artifact: {artifact.logical_id}")
     _preflight_created_resources(receipt, allow_incomplete=allow_incomplete)
+    return mutations_to_restore
+
+
+def _apply_rollback_receipt(
+    receipt: ActionReceipt,
+    mutations_to_restore: list[MutationRecord],
+) -> None:
     for mutation in reversed(mutations_to_restore):
         _restore_mutation(mutation)
     for artifact in reversed(receipt.artifacts):
@@ -1485,6 +2026,31 @@ def rollback_receipt(
         raise RuntimeError(
             f"Rollback left owned resources behind: {', '.join(remaining)}"
         )
+
+
+def rollback_receipt(
+    receipt: ActionReceipt,
+    *,
+    allow_incomplete: bool = False,
+) -> None:
+    try:
+        mutations_to_restore = _preflight_rollback_receipt(
+            receipt,
+            allow_incomplete=allow_incomplete,
+        )
+    except Exception as error:
+        # No restore/delete has started, so the caller's Blender state is still
+        # exactly the state from before this rollback attempt.
+        attest_action_host_state_restored(error)
+        raise
+    try:
+        _apply_rollback_receipt(receipt, mutations_to_restore)
+    except ActionAtomicityError:
+        raise
+    except Exception as error:
+        raise ActionAtomicityError(
+            f"{receipt.action_name} rollback failed after mutation began"
+        ) from error
 
 
 def make_receipt(
@@ -1524,7 +2090,12 @@ def rollback_partial(
         artifacts,
         None,
     )
-    rollback_receipt(receipt, allow_incomplete=True)
+    try:
+        rollback_receipt(receipt, allow_incomplete=True)
+    except Exception as error:
+        raise ActionAtomicityError(
+            f"{action_name} failed and partial Blender rollback failed"
+        ) from error
 
 
 def render_output_root() -> Path:

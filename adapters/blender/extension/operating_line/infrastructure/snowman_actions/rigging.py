@@ -12,6 +12,7 @@ from ...application import ActionReceipt
 from ...application.session import MutationRecord, PoseBoneState, ResourceIdentity
 from ...domain import ActionSpec
 from .common import (
+    ActionAtomicityError,
     COLLECTION_LOGICAL_ID,
     action_fcurves,
     action_keyframe_signature,
@@ -22,6 +23,7 @@ from .common import (
     ensure_name_available,
     ensure_receipts_intact,
     integer,
+    journal_created_resource,
     logical_id,
     make_receipt,
     mesh_content_signature,
@@ -34,7 +36,6 @@ from .common import (
     rollback_partial,
     snapshot_modifier,
     snapshot_skin_weights,
-    tag_resource,
     text,
     vector,
 )
@@ -96,7 +97,9 @@ class SkinWeightsDefinition:
 @dataclass(frozen=True, slots=True)
 class PoseDefinition:
     bone_name: str
-    rotation_euler: tuple[float, float, float]
+    rotation_euler: tuple[float, float, float] | None
+    rotation_quaternion: tuple[float, float, float, float] | None
+    rotation_axis_angle: tuple[float, float, float, float] | None
     location: tuple[float, float, float] | None
     scale: tuple[float, float, float] | None
 
@@ -348,22 +351,79 @@ def validate_skin_weights(arguments: Mapping[str, Any]) -> SkinWeightsDefinition
 
 
 def _pose(raw: Mapping[str, Any], label: str) -> PoseDefinition:
-    required = {"boneName", "rotationEuler"}
-    allowed = required | {"location", "scale"}
+    required = {"boneName"}
+    allowed = required | {
+        "rotationEuler",
+        "rotationQuaternion",
+        "rotationAxisAngle",
+        "location",
+        "scale",
+    }
     require_keys(raw, required, allowed, label)
+    has_euler = "rotationEuler" in raw
+    has_quaternion = "rotationQuaternion" in raw
+    has_axis_angle = "rotationAxisAngle" in raw
+    if sum((has_euler, has_quaternion, has_axis_angle)) != 1:
+        raise ValueError(
+            f"{label} must contain exactly one of rotationEuler, "
+            "rotationQuaternion, or rotationAxisAngle"
+        )
+    rotation_euler = (
+        vector(
+            raw["rotationEuler"],
+            f"{label}.rotationEuler",
+            3,
+            minimum=-2.0 * math.pi,
+            maximum=2.0 * math.pi,
+        )
+        if has_euler
+        else None
+    )
+    rotation_quaternion = (
+        vector(
+            raw["rotationQuaternion"],
+            f"{label}.rotationQuaternion",
+            4,
+            minimum=-1.0,
+            maximum=1.0,
+        )
+        if has_quaternion
+        else None
+    )
+    if rotation_quaternion is not None and not math.isclose(
+        math.sqrt(sum(component * component for component in rotation_quaternion)),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=1e-6,
+    ):
+        raise ValueError(f"{label}.rotationQuaternion must have unit length")
+    rotation_axis_angle = (
+        vector(
+            raw["rotationAxisAngle"],
+            f"{label}.rotationAxisAngle",
+            4,
+            minimum=-2.0 * math.pi,
+            maximum=2.0 * math.pi,
+        )
+        if has_axis_angle
+        else None
+    )
+    if rotation_axis_angle is not None and not math.isclose(
+        math.sqrt(sum(component * component for component in rotation_axis_angle[1:])),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=1e-6,
+    ):
+        raise ValueError(f"{label}.rotationAxisAngle axis must have unit length")
     return PoseDefinition(
         bone_name=text(
             raw["boneName"],
             f"{label}.boneName",
             prefix="OperatingLine.",
         ),
-        rotation_euler=vector(
-            raw["rotationEuler"],
-            f"{label}.rotationEuler",
-            3,
-            minimum=-2.0 * math.pi,
-            maximum=2.0 * math.pi,
-        ),
+        rotation_euler=rotation_euler,
+        rotation_quaternion=rotation_quaternion,
+        rotation_axis_angle=rotation_axis_angle,
         location=(
             vector(
                 raw["location"],
@@ -435,6 +495,24 @@ def validate_pose_animation(
     frames = [keyframe.frame for keyframe in keyframes]
     if any(current <= previous for previous, current in zip(frames, frames[1:])):
         raise ValueError("arguments.keyframes frames must be strictly increasing")
+    rotation_channel_by_bone: dict[str, str] = {}
+    for keyframe in keyframes:
+        for pose in keyframe.poses:
+            channel = (
+                "rotation_euler"
+                if pose.rotation_euler is not None
+                else (
+                    "rotation_quaternion"
+                    if pose.rotation_quaternion is not None
+                    else "rotation_axis_angle"
+                )
+            )
+            previous = rotation_channel_by_bone.setdefault(pose.bone_name, channel)
+            if previous != channel:
+                raise ValueError(
+                    "arguments.keyframes cannot mix rotation channels for "
+                    f"{pose.bone_name}"
+                )
     interpolation = arguments.get("interpolation", "BEZIER")
     if not isinstance(interpolation, str) or interpolation not in {
         "BEZIER",
@@ -482,6 +560,33 @@ def _parent_state(
         _matrix_rows(obj.matrix_parent_inverse),
         _matrix_rows(obj.matrix_basis),
     )
+
+
+def _restore_parent_state_locally(
+    obj: bpy.types.Object,
+    parent: bpy.types.Object | None,
+    parent_type: str,
+    parent_bone: str,
+    matrix_world: Any,
+    matrix_parent_inverse: Any,
+    matrix_basis: Any,
+) -> None:
+    obj.parent = parent
+    obj.parent_type = parent_type
+    obj.parent_bone = parent_bone
+    obj.matrix_world = matrix_world
+    obj.matrix_parent_inverse = matrix_parent_inverse
+    obj.matrix_basis = matrix_basis
+    if (
+        obj.parent is not parent
+        or obj.parent_type != parent_type
+        or obj.parent_bone != parent_bone
+        or _matrix_rows(obj.matrix_world) != _matrix_rows(matrix_world)
+        or _matrix_rows(obj.matrix_parent_inverse)
+        != _matrix_rows(matrix_parent_inverse)
+        or _matrix_rows(obj.matrix_basis) != _matrix_rows(matrix_basis)
+    ):
+        raise RuntimeError("Blender did not restore the exact parent state")
 
 
 def _object_in_view_layer(obj: bpy.types.Object, view_layer: Any) -> bool:
@@ -574,23 +679,23 @@ def execute_armature(
     mutations: list[MutationRecord] = []
     try:
         armature_data = bpy.data.armatures.new(definition.data_name)
-        data_identity = tag_resource(
+        data_identity = journal_created_resource(
+            created,
             armature_data,
             f"{definition.logical_id}.data",
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(data_identity)
         armature = bpy.data.objects.new(definition.object_name, armature_data)
-        armature_identity = tag_resource(
+        armature_identity = journal_created_resource(
+            created,
             armature,
             definition.logical_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(armature_identity)
         armature.show_in_front = True
         armature.display_type = "WIRE"
         collection.objects.link(armature)
@@ -607,18 +712,46 @@ def execute_armature(
             pose_bone.rotation_mode = "XYZ"
 
         for binding, target_identity, target in targets:
+            # matrix_world may still expose a lazy pre-update value immediately
+            # after earlier receipt-driven object creation.  Force evaluation
+            # before freezing the transform that bone parenting must preserve.
+            bpy.context.view_layer.update()
             before = _parent_state(target, None)
+            before_parent = target.parent
+            before_parent_type = target.parent_type
+            before_parent_bone = target.parent_bone
             world_matrix = target.matrix_world.copy()
-            target.parent = armature
-            target.parent_type = "BONE"
-            target.parent_bone = binding.bone_name
-            target.matrix_world = world_matrix
+            before_parent_inverse = target.matrix_parent_inverse.copy()
+            before_basis = target.matrix_basis.copy()
+            try:
+                target.parent = armature
+                target.parent_type = "BONE"
+                target.parent_bone = binding.bone_name
+                target.matrix_world = world_matrix
+                after = _parent_state(target, armature_identity)
+            except Exception:
+                try:
+                    _restore_parent_state_locally(
+                        target,
+                        before_parent,
+                        before_parent_type,
+                        before_parent_bone,
+                        world_matrix,
+                        before_parent_inverse,
+                        before_basis,
+                    )
+                except Exception as restore_error:
+                    raise ActionAtomicityError(
+                        f"{action.name} could not restore armature binding target "
+                        f"{binding.target_id}"
+                    ) from restore_error
+                raise
             mutations.append(
                 MutationRecord(
                     target_identity,
                     "bone_parent",
                     before,
-                    _parent_state(target, armature_identity),
+                    after,
                 )
             )
         return make_receipt(
@@ -637,6 +770,10 @@ def execute_armature(
 
 def _add_vertex_weight(group: Any, vertex_index: int, weight: float) -> None:
     group.add((vertex_index,), weight, "REPLACE")
+
+
+def _new_vertex_group(target: bpy.types.Object, bone_name: str) -> Any:
+    return target.vertex_groups.new(name=bone_name)
 
 
 def execute_skin_weights(
@@ -733,11 +870,11 @@ def execute_skin_weights(
                 )
             )
 
-        groups = {
-            bone_name: target.vertex_groups.new(name=bone_name)
-            for bone_name in bone_names
-        }
-        created_groups.extend(groups.values())
+        groups: dict[str, Any] = {}
+        for bone_name in bone_names:
+            group = _new_vertex_group(target, bone_name)
+            created_groups.append(group)
+            groups[bone_name] = group
         for item in definition.weights:
             for influence in item.influences:
                 _add_vertex_weight(
@@ -820,6 +957,12 @@ def _pose_state(pose_bone: Any) -> PoseBoneState:
         rotation_mode=pose_bone.rotation_mode,
         location=tuple(float(value) for value in pose_bone.location),
         rotation_euler=tuple(float(value) for value in pose_bone.rotation_euler),
+        rotation_quaternion=tuple(
+            float(value) for value in pose_bone.rotation_quaternion
+        ),
+        rotation_axis_angle=tuple(
+            float(value) for value in pose_bone.rotation_axis_angle
+        ),
         scale=tuple(float(value) for value in pose_bone.scale),
     )
 
@@ -887,14 +1030,14 @@ def execute_pose_animation(
     before_pose = {name: _pose_state(pose_bones[name]) for name in bone_names}
     try:
         animation = bpy.data.actions.new(definition.name)
-        action_identity = tag_resource(
+        action_identity = journal_created_resource(
+            created,
             animation,
             definition.logical_id,
             receipt_id,
             step_id,
             action.name,
         )
-        created.append(action_identity)
         armature.animation_data_create().action = animation
         for bone_name in bone_names:
             mutations.append(
@@ -916,12 +1059,24 @@ def execute_pose_animation(
         for keyframe in definition.keyframes:
             for pose in keyframe.poses:
                 pose_bone = pose_bones[pose.bone_name]
-                pose_bone.rotation_mode = "XYZ"
-                pose_bone.rotation_euler = pose.rotation_euler
+                if pose.rotation_euler is not None:
+                    rotation_data_path = "rotation_euler"
+                    pose_bone.rotation_mode = "XYZ"
+                    pose_bone.rotation_euler = pose.rotation_euler
+                elif pose.rotation_quaternion is not None:
+                    rotation_data_path = "rotation_quaternion"
+                    pose_bone.rotation_mode = "QUATERNION"
+                    pose_bone.rotation_quaternion = pose.rotation_quaternion
+                else:
+                    assert pose.rotation_axis_angle is not None
+                    rotation_data_path = "rotation_axis_angle"
+                    pose_bone.rotation_mode = "AXIS_ANGLE"
+                    pose_bone.rotation_axis_angle = pose.rotation_axis_angle
                 inserted = _insert_pose_keyframe(
                     pose_bone,
                     keyframe.frame,
                     pose.bone_name,
+                    rotation_data_path,
                 )
                 if not inserted:
                     raise RuntimeError(

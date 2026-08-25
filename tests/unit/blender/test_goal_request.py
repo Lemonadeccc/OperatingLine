@@ -62,7 +62,7 @@ class GoalRequestPayloadTests(unittest.TestCase):
                 "occurredAt",
             },
         )
-        self.assertEqual(payload["protocolVersion"], "1.6.0")
+        self.assertEqual(payload["protocolVersion"], domain.PROTOCOL_VERSION)
         self.assertEqual(payload["adapterId"], "blender")
         self.assertEqual(
             payload["catalogVersion"], domain.BLENDER_ACTION_CATALOG_VERSION
@@ -433,6 +433,14 @@ class GoalRequestTransportTests(unittest.TestCase):
                 }
             if path.startswith("/api/v1/companion/action?"):
                 return {"request": None}
+            if path.startswith("/api/v1/companion/poke-compound-recovery?"):
+                return {"request": None}
+            if path.startswith("/api/v1/companion/poke-compound?"):
+                return {"request": None}
+            if path.startswith("/api/v1/companion/leaf-operation-recovery?"):
+                return {"request": None}
+            if path.startswith("/api/v1/companion/leaf-operation?"):
+                return {"request": None}
             if path.startswith("/api/v1/companion/menu-control-proof?"):
                 return {"request": None}
             if path.startswith("/api/v1/companion/shortcut-proof?"):
@@ -544,6 +552,24 @@ class GoalRequestTransportTests(unittest.TestCase):
             "blender.modifier.add_mirror",
             domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS,
         )
+        self.assertNotIn(
+            "blender.modifier.add_subdivision_surface",
+            domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS,
+        )
+        self.assertNotIn(
+            "blender.modifier.add_bevel",
+            domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS,
+        )
+        self.assertTrue(
+            domain.is_action_level_mcp_recipe(
+                "blender.modifier.add_subdivision_surface.semantic"
+            )
+        )
+        self.assertFalse(
+            domain.is_action_level_mcp_recipe(
+                "blender.modifier.add_subdivision_surface.native"
+            )
+        )
         self.assertEqual(
             domain.ACTION_LEVEL_MCP_ACTIONS,
             domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS
@@ -554,7 +580,11 @@ class GoalRequestTransportTests(unittest.TestCase):
                 "blender.mesh.edit_bevel_edges",
                 "blender.mesh.edit_inset_faces",
                 "blender.mesh.edit_poke_faces",
+                "blender.modifier.add_subdivision_surface",
+                "blender.geometry_nodes.create_light_trails",
+                "blender.lookdev.create_light_trails_scene",
                 "blender.modifier.add_mirror",
+                "blender.modifier.add_bevel",
                 "blender.modifier.add_solidify",
                 "blender.rig.create_armature",
                 "blender.rig.bind_skin_weights",
@@ -576,7 +606,11 @@ class GoalRequestTransportTests(unittest.TestCase):
             "blender.mesh.edit_bevel_edges",
             "blender.mesh.edit_inset_faces",
             "blender.mesh.edit_poke_faces",
+            "blender.modifier.add_subdivision_surface",
+            "blender.geometry_nodes.create_light_trails",
+            "blender.lookdev.create_light_trails_scene",
             "blender.modifier.add_mirror",
+            "blender.modifier.add_bevel",
             "blender.modifier.add_solidify",
             "blender.rig.create_armature",
             "blender.rig.bind_skin_weights",

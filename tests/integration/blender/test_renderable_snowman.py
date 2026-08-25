@@ -45,6 +45,7 @@ from operating_line_renderable_extension.operating_line.infrastructure.snowman_a
     OWNER_KEY,
     OWNER_VALUE,
     action_fcurves,
+    mesh_content_signature,
 )
 
 
@@ -70,6 +71,17 @@ def call_next_expect_failure(message: str) -> None:
         assert result == {"CANCELLED"}
         report = operating_line.get_companion().last_report
         assert message in report["error"]
+
+
+def call_session_next_expect_failure(session, message: str) -> None:
+    """Exercise action compensation without claiming operator-level host proof."""
+
+    try:
+        session.next()
+    except (OSError, RuntimeError, ValueError) as error:
+        assert message in str(error), f"Expected {message!r}, received {error!r}"
+    else:
+        raise AssertionError("Blender action should surface the session error")
 
 
 def call_back_expect_failure(message: str) -> None:
@@ -350,19 +362,26 @@ def main() -> None:
         ):
             assert not registry
             collection = bpy.data.collections.new(model_actions.COLLECTION_NAME)
-            collection_identity = model_actions.tag_resource(
+            model_actions.journal_created_resource(
+                created,
                 collection,
                 model_actions.COLLECTION_LOGICAL_ID,
                 receipt_id,
                 step_id,
                 action_name,
             )
-            created.append(collection_identity)
             raise RuntimeError("Injected failure before collection link")
 
         model_actions._ensure_collection = fail_before_collection_link
         try:
-            call_next_expect_failure("Injected failure before collection link")
+            try:
+                session.next()
+            except RuntimeError as error:
+                assert "Injected failure before collection link" in str(error)
+            else:
+                raise AssertionError(
+                    "Failure before collection link must propagate"
+                )
         finally:
             model_actions._ensure_collection = original_ensure_collection
         assert session.active_index == -1
@@ -410,7 +429,8 @@ def main() -> None:
 
         material_actions._configure_material_nodes = reject_missing_principled
         try:
-            call_next_expect_failure(
+            call_session_next_expect_failure(
+                session,
                 "must contain exactly one ShaderNodeBsdfPrincipled node; found 0"
             )
         finally:
@@ -445,6 +465,52 @@ def main() -> None:
         bpy.data.materials.remove(conflict_material)
 
         execute_through(session, "snowman.materials.ground")
+
+        # Material assignment receipts also prove that the target still owns the
+        # same mesh data-block and that assigning material slots did not alter its
+        # geometry.  Each target records the guards before its reversible slot
+        # replacement so tampering fails closed before rollback begins.
+        registry = build_resource_registry(session.receipts)
+        for step_id in (
+            "snowman.materials.snow",
+            "snowman.materials.accessories",
+            "snowman.materials.ground",
+        ):
+            receipt = session.receipts[step_id]
+            definitions = (
+                [ACTION_BY_ID[step_id]["action"]["arguments"]]
+                if step_id != "snowman.materials.accessories"
+                else ACTION_BY_ID[step_id]["action"]["arguments"]["materials"]
+            )
+            assert len(receipt.mutations) == sum(
+                1 + 3 * len(definition["targets"])
+                for definition in definitions
+            )
+            cursor = 0
+            for definition in definitions:
+                surface_mutation = receipt.mutations[cursor]
+                cursor += 1
+                assert surface_mutation.resource == registry[definition["materialId"]]
+                assert surface_mutation.attribute == "material_surface"
+                assert surface_mutation.before is None
+                for target_id in definition["targets"]:
+                    target = resolve_resource(registry[target_id])
+                    mesh_identity = registry[f"{target_id}.mesh"]
+                    data_guard, content_guard, slot_mutation = receipt.mutations[
+                        cursor : cursor + 3
+                    ]
+                    cursor += 3
+                    assert data_guard.resource == registry[target_id]
+                    assert data_guard.attribute == "data"
+                    assert data_guard.before == data_guard.after == mesh_identity
+                    assert target.data is resolve_resource(mesh_identity)
+                    assert content_guard.resource == mesh_identity
+                    assert content_guard.attribute == "mesh_content"
+                    assert content_guard.before == content_guard.after
+                    assert content_guard.after == mesh_content_signature(target.data)
+                    assert slot_mutation.resource == registry[target_id]
+                    assert slot_mutation.attribute == "material_slots"
+            assert cursor == len(receipt.mutations)
 
         # Armature preflight rejects name conflicts before creating data or
         # changing any target parent. Successful binding preserves world space.
@@ -499,15 +565,21 @@ def main() -> None:
         original_insert_pose_keyframe = rigging_actions._insert_pose_keyframe
         insertion_count = [0]
 
-        def fail_during_keyframe_insert(pose_bone, frame, bone_name):
+        def fail_during_keyframe_insert(
+            pose_bone, frame, bone_name, data_path="rotation_euler"
+        ):
             insertion_count[0] += 1
             if insertion_count[0] == 2:
                 raise RuntimeError("Injected failure during pose keyframes")
-            return original_insert_pose_keyframe(pose_bone, frame, bone_name)
+            return original_insert_pose_keyframe(
+                pose_bone, frame, bone_name, data_path
+            )
 
         rigging_actions._insert_pose_keyframe = fail_during_keyframe_insert
         try:
-            call_next_expect_failure("Injected failure during pose keyframes")
+            call_session_next_expect_failure(
+                session, "Injected failure during pose keyframes"
+            )
         finally:
             rigging_actions._insert_pose_keyframe = original_insert_pose_keyframe
         assert session.active_index == ACTION_INDEX["snowman.animation.rig"]
@@ -554,7 +626,9 @@ def main() -> None:
 
         render_actions._configure_world = fail_before_world_assignment
         try:
-            call_next_expect_failure("Injected failure before world assignment")
+            call_session_next_expect_failure(
+                session, "Injected failure before world assignment"
+            )
         finally:
             render_actions._configure_world = original_configure_world
         assert session.active_index == ACTION_INDEX["snowman.animation.pose"]
@@ -578,7 +652,8 @@ def main() -> None:
         render_scene.collection.children.link(external_scene_collection)
         scene_index = session.active_index
         scene_receipt = session.receipts["snowman.lighting.scene"]
-        call_next_expect_failure(
+        call_session_next_expect_failure(
+            session,
             "Completed resource was modified: "
             "snowman.render.scene.collection_children"
         )
@@ -617,7 +692,8 @@ def main() -> None:
         intruder_mesh = bpy.data.meshes.new("UserRenderIntruder.Mesh")
         intruder = bpy.data.objects.new("UserRenderIntruder", intruder_mesh)
         render_collection.objects.link(intruder)
-        call_next_expect_failure(
+        call_session_next_expect_failure(
+            session,
             "OperatingLine collection contains an untracked object or child collection"
         )
         assert session.active_index == ACTION_INDEX["snowman.lighting.rig"]
@@ -647,7 +723,8 @@ def main() -> None:
 
         render_actions._eevee_samples_attribute = reject_missing_samples_capability
         try:
-            call_next_expect_failure(
+            call_session_next_expect_failure(
+                session,
                 "This Blender build does not expose a supported Eevee sample setting"
             )
         finally:
@@ -925,6 +1002,29 @@ def main() -> None:
         )
         factory_cube.data.materials.pop(index=len(factory_cube.data.materials) - 1)
         assert tuple(factory_cube.data.materials) == factory_cube_materials
+
+        original_roughness = snow_material.roughness
+        snow_material.roughness = original_roughness - 0.1
+        call_back_expect_failure(
+            "Cannot rollback modified resource: snowman.material.snow.material_surface"
+        )
+        assert session.active_index == material_index
+        assert dict(session.receipts) == material_receipts
+        snow_material.roughness = original_roughness
+
+        # A geometry edit after material assignment is not authorized by that
+        # action.  Back must preserve all state until the edit is restored.
+        snow_body = resolve_resource(registry["snowman.body.lower"])
+        original_coordinate = snow_body.data.vertices[0].co.copy()
+        snow_body.data.vertices[0].co.x += 0.125
+        snow_body.data.update()
+        call_back_expect_failure(
+            "Cannot rollback modified resource: snowman.body.lower.mesh.mesh_content"
+        )
+        assert session.active_index == material_index
+        assert dict(session.receipts) == material_receipts
+        snow_body.data.vertices[0].co = original_coordinate
+        snow_body.data.update()
         assert bpy.ops.operating_line.back() == {"FINISHED"}
         session.reset()
         assert session.active_index == -1

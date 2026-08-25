@@ -1,11 +1,14 @@
 """Blender-side managed execution-track v2 fail-closed consumer tests."""
 
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from importlib import import_module
 import json
 from pathlib import Path
 from queue import Queue
 import subprocess
 import sys
+import threading
 from types import ModuleType, SimpleNamespace
 import unittest
 import uuid
@@ -53,6 +56,143 @@ class FakeScene(dict):
 
 
 class ExecutionTrackExecutionConsumerTests(unittest.TestCase):
+    def test_transport_services_explicit_lease_refresh_on_network_thread(self) -> None:
+        transport = transport_module.CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            str(uuid.uuid4()),
+            session_id=str(uuid.uuid4()),
+            document_incarnation_id=str(uuid.uuid4()),
+        )
+        now = datetime.now(timezone.utc)
+        stale = transport_module.CompanionSessionSnapshot(
+            lease_id=str(uuid.uuid4()),
+            session_id=transport._session_id,
+            document_incarnation_id=transport._document_incarnation_id,
+            negotiated_guide_protocol_version="1.7.0",
+            heartbeat_interval_seconds=5.0,
+            expires_at=(now + timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+            next_heartbeat_at=0.0,
+            heartbeat_sequence=2,
+        )
+        renewed = transport_module.CompanionSessionSnapshot(
+            **{
+                **stale.__dict__,
+                "expires_at": (now + timedelta(seconds=30))
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "heartbeat_sequence": 3,
+            }
+        )
+        transport._session_snapshot = stale
+        transport._send_heartbeat = lambda: setattr(
+            transport, "_session_snapshot", renewed
+        )
+        request = transport_module._LeaseRefreshRequest(
+            minimum_validity_seconds=5.0,
+            completed=threading.Event(),
+        )
+        transport._lease_refresh_requests.put(request)
+
+        self.assertTrue(transport._service_lease_refresh_requests())
+        self.assertTrue(request.completed.is_set())
+        self.assertIsNone(request.error)
+        self.assertEqual(request.lease["expiresAt"], renewed.expires_at)
+
+    def test_execution_track_proof_pushes_native_baseline_guard(self) -> None:
+        calls = []
+        region = SimpleNamespace(type="WINDOW")
+        space = object()
+        area = SimpleNamespace(
+            type="VIEW_3D",
+            regions=[region],
+            spaces=SimpleNamespace(active=space),
+        )
+        window = SimpleNamespace(screen=SimpleNamespace(areas=[area]))
+
+        class Override:
+            def __enter__(self):
+                calls.append("override_enter")
+
+            def __exit__(self, *_args):
+                calls.append("override_exit")
+
+        context = SimpleNamespace(
+            window=window,
+            temp_override=lambda **kwargs: calls.append(kwargs) or Override(),
+        )
+        ops = SimpleNamespace(
+            ed=SimpleNamespace(
+                undo_push=lambda **kwargs: calls.append(kwargs) or {"FINISHED"}
+            )
+        )
+        controller = companion_module.CompanionController.__new__(
+            companion_module.CompanionController
+        )
+        controller._supersede_restored_menu_history = lambda: calls.append(
+            "supersede"
+        ) or False
+
+        with patch.object(companion_module.bpy, "context", context), patch.object(
+            companion_module.bpy, "ops", ops
+        ):
+            self.assertTrue(controller._prepare_execution_track_proof_history())
+
+        self.assertEqual(calls[0], "supersede")
+        self.assertEqual(calls[1]["area"], area)
+        self.assertEqual(calls[1]["region"], region)
+        self.assertEqual(calls[1]["space_data"], space)
+        self.assertEqual(
+            calls[2:],
+            [
+                "override_enter",
+                {
+                    "message": (
+                        "OperatingLine execution-track proof baseline guard"
+                    )
+                },
+                "override_exit",
+            ],
+        )
+
+    def test_execution_track_delivery_accepts_only_monotonic_heartbeat_lease(self) -> None:
+        delivered = {
+            "leaseId": "90000000-0000-4000-8000-000000000001",
+            "sessionId": "90000000-0000-4000-8000-000000000002",
+            "target": {
+                "adapterId": "blender",
+                "instanceId": "90000000-0000-4000-8000-000000000003",
+            },
+            "documentIncarnationId": "90000000-0000-4000-8000-000000000004",
+            "expiresAt": "2026-08-24T12:00:20Z",
+        }
+        renewed = {**delivered, "expiresAt": "2026-08-24T12:00:40Z"}
+
+        self.assertTrue(
+            companion_module.CompanionController._execution_track_lease_is_monotonic(
+                delivered, delivered
+            )
+        )
+        self.assertTrue(
+            companion_module.CompanionController._execution_track_lease_is_monotonic(
+                delivered, renewed
+            )
+        )
+        self.assertFalse(
+            companion_module.CompanionController._execution_track_lease_is_monotonic(
+                renewed, delivered
+            )
+        )
+        self.assertFalse(
+            companion_module.CompanionController._execution_track_lease_is_monotonic(
+                delivered,
+                {
+                    **renewed,
+                    "documentIncarnationId": "90000000-0000-4000-8000-000000000005",
+                },
+            )
+        )
+
     def _managed_repair_fixture(self) -> dict:
         script = r"""
 import {
@@ -97,7 +237,8 @@ const failedObservation = { kind: 'uv_sphere_ready', satisfied: false,
 const failedGate = { stepId: binding.leafId, status: 'repair_required',
   failureStrategy: 'retain_for_repair', message: 'repair required' };
 const failedReport = companionStateReportSchema.parse({
-  protocolVersion: '1.6.0', reportId: '90000000-0000-4000-8000-000000000065',
+  protocolVersion: binding.plan.protocolVersion,
+  reportId: '90000000-0000-4000-8000-000000000065',
   sequence: binding.expectedState.sequence + 1, adapterId: 'blender',
   instanceId: binding.target.instanceId, companionVersion: '0.1.0', hostVersion: '4.5.3',
   plan: { id: binding.plan.id, revision: binding.plan.revision },
@@ -168,6 +309,107 @@ console.log(JSON.stringify({ request, progress: commit, result: failedResult, ma
         )
         return json.loads(completed.stdout)
 
+    def _managed_success_recovery_fixture(self) -> dict:
+        script = r"""
+import {
+  companionExecutionTrackExecutionRecoveryRequestSchema,
+} from './packages/protocol/src/index.ts';
+import {
+  managedExecutionTrackBaseline,
+  managedExecutionTrackBinding,
+  managedExecutionTrackManagedStart,
+  managedExecutionTrackProgressTail,
+  managedExecutionTrackSuccessReport,
+  managedExecutionTrackSuccessResult,
+} from './tests/support/managed-execution-track-scenario.ts';
+const binding = managedExecutionTrackBinding();
+const lease = {
+  leaseId: '90000000-0000-4000-8000-000000000070',
+  sessionId: '90000000-0000-4000-8000-000000000071',
+  target: binding.target,
+  documentIncarnationId: '90000000-0000-4000-8000-000000000072',
+  expiresAt: '2026-08-22T10:10:00Z',
+};
+const delivery = {
+  binding,
+  deliveryId: '90000000-0000-4000-8000-000000000073',
+  lease,
+  dispatchedAt: '2026-08-22T10:00:01Z',
+};
+const baseline = managedExecutionTrackBaseline(delivery);
+const tail = managedExecutionTrackProgressTail(delivery, baseline);
+const commit = tail.at(-1);
+const submission = managedExecutionTrackManagedStart(delivery, commit);
+const report = managedExecutionTrackSuccessReport(delivery, baseline);
+const result = managedExecutionTrackSuccessResult(
+  delivery, baseline, commit, submission, report,
+);
+const replacementLease = {
+  ...lease,
+  leaseId: '90000000-0000-4000-8000-000000000074',
+  expiresAt: '2026-08-22T10:30:00Z',
+};
+const request = companionExecutionTrackExecutionRecoveryRequestSchema.parse({
+  formatVersion: '2.0.0',
+  recoveryId: '90000000-0000-4000-8000-000000000075',
+  requestId: binding.requestId,
+  target: binding.target,
+  originalDeliveryId: delivery.deliveryId,
+  bindingContentSha256: binding.bindingContentSha256,
+  originalLease: lease,
+  replacementLease,
+  acceptedProgress: commit,
+  acceptedProgressChainHeadContentSha256: commit.contentSha256,
+  durableReferences: {
+    terminalMarkerContentSha256: null,
+    managedStartContentSha256: submission.managedStart.contentSha256,
+    baselineContentSha256: commit.baseline.contentSha256,
+    commitIntentId: commit.intent.intentId,
+    commitIntentContentSha256: commit.intent.contentSha256,
+  },
+  source: 'coordinator_restart',
+  mode: 'read_only_reconcile',
+  automaticReplay: false,
+  requestedAt: '2026-08-22T10:15:00Z',
+});
+console.log(JSON.stringify({
+  baseline, commit, submission, report, result, replacementLease, request,
+}));
+"""
+        completed = subprocess.run(
+            ["node", "--import", "tsx", "--input-type=module", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return json.loads(completed.stdout)
+
+    def _assert_recovery_ack_matches_strict_schema(self, ack: dict) -> None:
+        validation_script = r"""
+import {
+  companionExecutionTrackExecutionRecoveryAckSchema,
+} from './packages/protocol/src/index.ts';
+let raw = ''; for await (const chunk of process.stdin) raw += chunk;
+companionExecutionTrackExecutionRecoveryAckSchema.parse(JSON.parse(raw));
+process.stdout.write('accepted');
+"""
+        validated = subprocess.run(
+            [
+                "node",
+                "--import",
+                "tsx",
+                "--input-type=module",
+                "-e",
+                validation_script,
+            ],
+            input=json.dumps(ack),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.assertEqual(validated.stdout, "accepted")
+
     def test_main_thread_persistence_failure_releases_delivery_for_retry(self) -> None:
         request_id = str(uuid.uuid4())
         delivery = {"binding": {"requestId": request_id}}
@@ -195,13 +437,25 @@ console.log(JSON.stringify({ request, progress: commit, result: failedResult, ma
         controller.status = ""
         fake_bpy.context.scene = {}
         outbox = {
-            "formatVersion": "1.0.0",
-            "progress": {"requestId": request_id},
-            "result": {"requestId": request_id},
+            "formatVersion": "2.0.0",
+            "progress": {
+                "binding": {"requestId": request_id},
+                "contentSha256": "a" * 64,
+            },
+            "baselineProgress": {
+                "binding": {"requestId": request_id},
+                "contentSha256": "a" * 64,
+            },
         }
+        controller._execution_track_delivery = None
+        controller._execution_track_outbox_cache = None
 
         with patch.object(consumer, "load_outbox", return_value=None), patch.object(
-            consumer, "build_fail_closed_outbox", return_value=outbox
+            controller, "_validate_execution_track_execution_authority"
+        ), patch.object(
+            consumer, "build_baseline_progress", return_value=outbox["progress"]
+        ), patch.object(
+            consumer, "build_active_outbox", return_value=outbox
         ), patch.object(
             consumer, "persist_outbox", side_effect=[OSError("disk full"), None]
         ):
@@ -211,7 +465,7 @@ console.log(JSON.stringify({ request, progress: commit, result: failedResult, ma
         self.assertEqual(calls[0], ("ack", request_id, False))
         self.assertIn(("ack", request_id, True), calls)
         self.assertIn(("progress", outbox["progress"]), calls)
-        self.assertIn(("result", outbox["result"]), calls)
+        self.assertNotIn("result", outbox)
 
     def test_full_orchestrator_fixture_outputs_pass_strict_protocol_schemas(self) -> None:
         fixture_script = r"""
@@ -229,7 +483,7 @@ const checkpoint = {
     activeStepId: null, completedStepIds: [], receiptStepIds: [] }
 };
 const report = companionStateReportSchema.parse({
-  protocolVersion: '1.6.0', reportId: binding.expectedState.reportId,
+  protocolVersion: binding.plan.protocolVersion, reportId: binding.expectedState.reportId,
   sequence: binding.expectedState.sequence, adapterId: 'blender',
   instanceId: binding.target.instanceId, companionVersion: '0.1.0', hostVersion: '4.5.3',
   plan: { id: binding.plan.id, revision: binding.plan.revision },
@@ -337,6 +591,427 @@ process.stdout.write('accepted');
         validated = subprocess.run(
             ["node", "--import", "tsx", "--input-type=module", "-e", validation_script],
             input=json.dumps({**outbox, "recoveryAck": recovery_ack}),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.assertEqual(validated.stdout, "accepted")
+
+    def test_persisted_managed_terminal_recovery_ack_replays_only_exact_ack(self) -> None:
+        fixture = self._managed_success_recovery_fixture()
+        managed_snapshot = {
+            "activeObject": "OperatingLine.TutorialEye",
+            "selectedObjects": ["OperatingLine.TutorialEye"],
+            "objects": [
+                {
+                    "name": "OperatingLine.TutorialEye",
+                    "type": "MESH",
+                    "mesh": {"vertices": 482, "edges": 992, "polygons": 512},
+                }
+            ],
+        }
+        marker = consumer.build_persisted_managed_terminal_marker(
+            fixture["result"], managed_snapshot
+        )
+        outbox = {
+            "formatVersion": "2.0.0",
+            "progress": fixture["commit"],
+            "baselineProgress": fixture["baseline"],
+            "managedStartSubmission": fixture["submission"],
+            "result": fixture["result"],
+            "terminalMarker": marker,
+        }
+        with patch.object(
+            consumer, "_scene_snapshot", return_value=managed_snapshot
+        ), patch.object(consumer, "_now", return_value="2026-08-22T10:20:00Z"):
+            recovery_ack = consumer.build_persisted_managed_terminal_recovery_ack(
+                fixture["request"],
+                outbox=outbox,
+                current_lease=fixture["replacementLease"],
+            )
+
+        self.assertEqual(recovery_ack["outcome"], "reconciled")
+        self.assertEqual(
+            recovery_ack["evidence"]["kind"], "persisted_managed_terminal"
+        )
+        self.assertFalse(recovery_ack["retainsTargetLock"])
+        self.assertFalse(recovery_ack["automaticReplay"])
+        self._assert_recovery_ack_matches_strict_schema(recovery_ack)
+
+        crash_scene = FakeScene()
+        consumer.persist_outbox(crash_scene, outbox)
+        restarted_outbox = consumer.load_outbox(crash_scene)
+        self.assertIsNotNone(restarted_outbox)
+        assert restarted_outbox is not None
+        consumer.persist_recovery_ack(crash_scene, restarted_outbox, recovery_ack)
+        recovery_posts = []
+        restarted_transport = SimpleNamespace(
+            submit_execution_track_execution_recovery_ack=lambda value: recovery_posts.append(
+                value
+            ),
+            submit_execution_track_execution_progress=lambda _value: self.fail(
+                "accepted commit progress must not be replayed after recovery ACK persistence"
+            ),
+            submit_execution_track_execution_result=lambda _value: self.fail(
+                "managed terminal must travel only inside persisted recovery evidence"
+            ),
+            enable_execution_track_execution_recovery_poll=lambda: None,
+        )
+        self.assertTrue(
+            consumer.resubmit_outbox(restarted_transport, crash_scene)
+        )
+        self.assertEqual(recovery_posts, [recovery_ack])
+
+    def test_unresolved_commit_recovery_ack_retains_lock_without_replay(self) -> None:
+        fixture = self._managed_success_recovery_fixture()
+        current_snapshot = {
+            "activeObject": "OperatingLine.TutorialEye",
+            "selectedObjects": ["OperatingLine.TutorialEye"],
+            "objects": [
+                {
+                    "name": "OperatingLine.TutorialEye",
+                    "type": "MESH",
+                    "mesh": {"vertices": 482, "edges": 992, "polygons": 512},
+                }
+            ],
+        }
+        outbox = {
+            "formatVersion": "2.0.0",
+            "progress": fixture["commit"],
+            "baselineProgress": fixture["baseline"],
+            "managedStartSubmission": fixture["submission"],
+        }
+        with patch.object(
+            consumer, "_scene_snapshot", return_value=current_snapshot
+        ), patch.object(consumer, "_now", return_value="2026-08-22T10:20:00Z"):
+            recovery_ack = consumer.build_unresolved_recovery_ack(
+                fixture["request"],
+                outbox=outbox,
+                current_lease=fixture["replacementLease"],
+                current_report=fixture["report"],
+            )
+
+        self.assertEqual(recovery_ack["outcome"], "recovery_required")
+        self.assertEqual(
+            recovery_ack["evidence"]["kind"], "unresolved_current_state"
+        )
+        self.assertEqual(
+            recovery_ack["evidence"]["reason"], "managed_state_indeterminate"
+        )
+        self.assertTrue(recovery_ack["retainsTargetLock"])
+        self.assertFalse(recovery_ack["automaticReplay"])
+        self._assert_recovery_ack_matches_strict_schema(recovery_ack)
+
+    def test_complete_python_builder_chain_passes_strict_protocol_schemas(self) -> None:
+        fixture_script = r"""
+import {
+  managedExecutionTrackBaseline,
+  managedExecutionTrackBinding,
+  managedExecutionTrackStartReport,
+} from './tests/support/managed-execution-track-scenario.ts';
+const binding = managedExecutionTrackBinding();
+const lease = {
+  leaseId: '91000000-0000-4000-8000-000000000001',
+  sessionId: '91000000-0000-4000-8000-000000000002',
+  target: binding.target,
+  documentIncarnationId: '91000000-0000-4000-8000-000000000003',
+  expiresAt: '2026-08-22T10:30:00Z',
+};
+const delivery = { binding, deliveryId: '91000000-0000-4000-8000-000000000004',
+  lease, dispatchedAt: '2026-08-22T10:00:01Z' };
+const scenarioBaseline = managedExecutionTrackBaseline(delivery);
+const report = managedExecutionTrackStartReport(delivery, scenarioBaseline);
+console.log(JSON.stringify({ delivery, report }));
+"""
+        fixture_run = subprocess.run(
+            ["node", "--import", "tsx", "--input-type=module", "-e", fixture_script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        fixture = json.loads(fixture_run.stdout)
+        delivery = fixture["delivery"]
+        report = fixture["report"]
+        baseline_snapshot = {
+            "activeObject": "Cube",
+            "selectedObjects": ["Cube"],
+            "objects": [
+                {
+                    "name": "Camera",
+                    "type": "CAMERA",
+                    "mesh": None,
+                },
+                {
+                    "name": "Cube",
+                    "type": "MESH",
+                    "mesh": {"vertices": 8, "edges": 12, "polygons": 6},
+                },
+                {
+                    "name": "Light",
+                    "type": "LIGHT",
+                    "mesh": None,
+                },
+            ],
+        }
+        with patch.object(consumer, "_scene_snapshot", return_value=baseline_snapshot), patch.object(
+            consumer, "_now", return_value="2026-08-22T10:00:02Z"
+        ):
+            baseline = consumer.build_baseline_progress(
+                delivery,
+                instance_id=delivery["binding"]["target"]["instanceId"],
+                last_report=report,
+                current_lease=delivery["lease"],
+            )
+
+        final_fingerprint = "f" * 64
+        evidence = {
+            "operationSummaries": [
+                {
+                    "operationId": "workspace.layout",
+                    "status": "precondition_verified",
+                    "path": ["Layout"],
+                    "parameters": {},
+                },
+                {
+                    "operationId": "menu.add",
+                    "status": "control_executed",
+                    "path": ["Layout", "Add"],
+                    "parameters": {},
+                },
+                {
+                    "operationId": "menu.mesh",
+                    "status": "control_executed",
+                    "path": ["Layout", "Add", "Mesh"],
+                    "parameters": {},
+                },
+                {
+                    "operationId": "operator.uv_sphere",
+                    "status": "control_executed",
+                    "path": ["Layout", "Add", "Mesh", "UV Sphere"],
+                    "parameters": {"radius": 1.0},
+                },
+                {
+                    "operationId": "control.location",
+                    "status": "control_executed",
+                    "path": ["Sidebar", "Item", "Transform", "Location"],
+                    "parameters": {"value": [1.25, -2.0, 0.75]},
+                },
+                {
+                    "operationId": "control.scale",
+                    "status": "control_executed",
+                    "path": ["Sidebar", "Item", "Transform", "Scale"],
+                    "parameters": {"value": [1.5, 1.5, 1.5]},
+                },
+                {
+                    "operationId": "control.object_name",
+                    "status": "control_executed",
+                    "path": ["Properties", "Object", "Name"],
+                    "parameters": {"value": "OperatingLine.TutorialEye"},
+                },
+            ],
+            "finalState": {
+                "objectName": "OperatingLine.TutorialEye",
+                "objectType": "MESH",
+                "location": [1.25, -2.0, 0.75],
+                "scale": [1.5, 1.5, 1.5],
+                "meshTopology": {"vertices": 482, "edges": 992, "polygons": 512},
+                "meshSha256": "e" * 64,
+            },
+            "baselineSceneFingerprintSha256": baseline["startAttestation"][
+                "sceneFingerprintSha256"
+            ],
+            "finalSceneFingerprintSha256": final_fingerprint,
+            "restoredSceneFingerprintSha256": baseline["startAttestation"][
+                "sceneFingerprintSha256"
+            ],
+            "reappliedSceneFingerprintSha256": final_fingerprint,
+        }
+        stage_fingerprints = [
+            baseline["startAttestation"]["sceneFingerprintSha256"],
+            *(character * 64 for character in "1234567"),
+            final_fingerprint,
+        ]
+        proof_checkpoint = {
+            "checkpointId": "91000000-0000-4000-8000-000000000005",
+            "undoLockId": "91000000-0000-4000-8000-000000000006",
+            "stageFingerprints": stage_fingerprints,
+            "committedAt": "2026-08-22T10:00:11Z",
+        }
+        proof, observed = consumer.build_proof_progress_pair(
+            baseline,
+            evidence,
+            current_lease=delivery["lease"],
+            checkpoint=proof_checkpoint,
+            observed_at="2026-08-22T10:00:10Z",
+            occurred_at="2026-08-22T10:00:11Z",
+        )
+        transitions = []
+        for index in range(8):
+            internal = {
+                "direction": "undo",
+                "fromCursor": 8 - index,
+                "toCursor": 7 - index,
+                "sceneFingerprintSha256": stage_fingerprints[7 - index],
+                "occurredAt": f"2026-08-22T10:00:{index + 12:02d}Z",
+            }
+            transitions.append(
+                consumer.build_native_undo_transition(
+                    internal,
+                    stage_fingerprints=stage_fingerprints,
+                    order=index + 1,
+                )
+            )
+        restoring = consumer.build_restore_progress(
+            observed,
+            transitions[0],
+            current_lease=delivery["lease"],
+        )
+        with patch.object(consumer, "compute_scene_fingerprint_sha256") as fingerprint:
+            fingerprint.return_value = baseline["startAttestation"][
+                "sceneFingerprintSha256"
+            ]
+            baseline_identity = consumer.build_baseline_identity(
+                baseline, baseline_snapshot
+            )
+        restored = consumer.build_baseline_restored_progress(
+            restoring,
+            transitions,
+            baseline=baseline_identity,
+            current_lease=delivery["lease"],
+            occurred_at="2026-08-22T10:00:19Z",
+        )
+        commit = consumer.build_commit_intent_progress(
+            restored,
+            current_lease=delivery["lease"],
+            occurred_at="2026-08-22T10:00:20Z",
+        )
+        submission = consumer.build_managed_start_submission(
+            commit,
+            current_lease=delivery["lease"],
+            started_at="2026-08-22T10:00:21Z",
+        )
+        binding = delivery["binding"]
+        completed = [
+            *binding["authorizedStartState"]["completedStepIds"],
+            binding["leafId"],
+        ]
+        receipts = [
+            *binding["authorizedStartState"]["receiptStepIds"],
+            binding["leafId"],
+        ]
+        managed_checkpoint = {
+            "formatVersion": "1.0.0",
+            "evidenceClass": "companion_reported_native_undo_checkpoint",
+            "checkpointId": "91000000-0000-4000-8000-000000000007",
+            "previousCheckpointId": baseline["startCheckpoint"]["checkpointId"],
+            "operation": "next",
+            "committedAt": "2026-08-22T10:00:22Z",
+            "marker": {"key": "_operating_line_native_history_v1", "matched": True},
+            "journal": {
+                "entryPresent": True,
+                "snapshotMatchesSession": True,
+                "artifactsBackedUp": True,
+            },
+            "session": {
+                "plan": {"id": binding["plan"]["id"], "revision": binding["plan"]["revision"]},
+                "planContentSha256": binding["plan"]["contentSha256"],
+                "executionId": binding["executionId"],
+                "activeStepId": binding["leafId"],
+                "completedStepIds": completed,
+                "receiptStepIds": receipts,
+            },
+        }
+        managed_observation = {
+            "kind": "uv_sphere_ready",
+            "satisfied": True,
+            "details": deepcopy(
+                binding["preflightBinding"]["step"]["expectedObservations"][0][
+                    "parameters"
+                ]
+            ),
+        }
+        managed_report = {
+            "protocolVersion": binding["plan"]["protocolVersion"],
+            "reportId": "91000000-0000-4000-8000-000000000008",
+            "sequence": binding["expectedState"]["sequence"] + 1,
+            "adapterId": "blender",
+            "instanceId": binding["target"]["instanceId"],
+            "companionVersion": "0.1.0",
+            "hostVersion": "4.5.3",
+            "plan": {"id": binding["plan"]["id"], "revision": binding["plan"]["revision"]},
+            "planContentSha256": binding["plan"]["contentSha256"],
+            "executionId": binding["executionId"],
+            "phase": binding["authorizedStartState"]["successPhase"],
+            "activeStepId": binding["leafId"],
+            "completedStepIds": completed,
+            "transition": "step_succeeded",
+            "stepId": binding["leafId"],
+            "observations": [managed_observation],
+            "observationGate": None,
+            "artifactAttestation": None,
+            "nativeUndoCheckpoint": managed_checkpoint,
+            "error": None,
+            "occurredAt": "2026-08-22T10:00:23Z",
+        }
+        result = consumer.build_terminal_result(
+            baseline,
+            commit,
+            submission,
+            managed_report,
+            current_lease=delivery["lease"],
+            occurred_at="2026-08-22T10:00:24Z",
+        )
+        managed_snapshot = {
+            "activeObject": "OperatingLine.TutorialEye",
+            "selectedObjects": ["OperatingLine.TutorialEye"],
+            "objects": [
+                {
+                    "name": "OperatingLine.TutorialEye",
+                    "type": "MESH",
+                    "mesh": {"vertices": 482, "edges": 992, "polygons": 512},
+                }
+            ],
+        }
+        marker = consumer.build_persisted_managed_terminal_marker(
+            result, managed_snapshot
+        )
+
+        validation_script = r"""
+import {
+  companionExecutionTrackExecutionManagedStartSubmissionSchema,
+  companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema,
+  companionExecutionTrackExecutionProgressChainSchema,
+  companionExecutionTrackExecutionResultSchema,
+  companionStateReportSchema,
+} from './packages/protocol/src/index.ts';
+let raw = ''; for await (const chunk of process.stdin) raw += chunk;
+const value = JSON.parse(raw);
+companionExecutionTrackExecutionProgressChainSchema.parse(value.progress);
+companionExecutionTrackExecutionManagedStartSubmissionSchema.parse(value.submission);
+companionStateReportSchema.parse(value.report);
+companionExecutionTrackExecutionResultSchema.parse(value.result);
+companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema.parse(value.marker);
+process.stdout.write('accepted');
+"""
+        validated = subprocess.run(
+            ["node", "--import", "tsx", "--input-type=module", "-e", validation_script],
+            input=json.dumps(
+                {
+                    "progress": [
+                        baseline,
+                        proof,
+                        observed,
+                        restoring,
+                        restored,
+                        commit,
+                    ],
+                    "submission": submission,
+                    "report": managed_report,
+                    "result": result,
+                    "marker": marker,
+                }
+            ),
             check=False,
             capture_output=True,
             text=True,
@@ -469,6 +1144,231 @@ process.stdout.write('accepted');
             transport.incoming.get_nowait(),
             {"kind": "execution_track_execution_recovery_request", "request": recovery},
         )
+
+    def test_transport_posts_managed_start_and_returns_hash_bound_ack(self) -> None:
+        instance_id = str(uuid.uuid4())
+        request_id = str(uuid.uuid4())
+        managed_start_hash = "a" * 64
+        submission = {
+            "requestId": request_id,
+            "managedStart": {"contentSha256": managed_start_hash},
+        }
+        transport = transport_module.CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+            session_id=str(uuid.uuid4()),
+            document_incarnation_id=str(uuid.uuid4()),
+            poll_interval=0.01,
+        )
+        transport._session_snapshot = transport_module.CompanionSessionSnapshot(
+            lease_id=str(uuid.uuid4()),
+            session_id=transport._session_id,
+            document_incarnation_id=transport._document_incarnation_id,
+            negotiated_guide_protocol_version="1.6.0",
+            heartbeat_interval_seconds=60,
+            expires_at="2099-01-01T00:00:00Z",
+            next_heartbeat_at=10**20,
+            heartbeat_sequence=0,
+        )
+        posts = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/execution-track-execution/managed-start":
+                posts.append(body)
+                transport._stop.set()
+                return {"result": "accepted"}
+            raise AssertionError(path)
+
+        transport._request_json = request_json
+        transport._poll = lambda: None
+        transport.submit_execution_track_execution_managed_start(submission)
+        transport.start()
+        self.assertTrue(transport.wait_stopped(2))
+
+        self.assertEqual(posts, [submission])
+        messages = list(transport.incoming.queue)
+        self.assertIn(
+            {
+                "kind": "execution_track_execution_managed_start_acknowledged",
+                "requestId": request_id,
+                "managedStartContentSha256": managed_start_hash,
+                "result": "accepted",
+            },
+            messages,
+        )
+
+    def test_progress_ack_is_durable_idempotent_and_not_replayed(self) -> None:
+        progress = {
+            "phase": "baseline_attested",
+            "binding": {"requestId": str(uuid.uuid4())},
+            "contentSha256": "a" * 64,
+        }
+        outbox = consumer.build_active_outbox(progress)
+        durable, first = consumer.record_progress_ack(outbox, "a" * 64)
+        duplicate, second = consumer.record_progress_ack(durable, "a" * 64)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertEqual(duplicate, durable)
+        scene = FakeScene()
+        consumer.persist_outbox(scene, durable)
+        queued = SimpleNamespace(progress=[], recovery_polls=0)
+        transport = SimpleNamespace(
+            submit_execution_track_execution_progress=lambda value: queued.progress.append(value),
+            submit_execution_track_execution_result=lambda _value: self.fail(
+                "an active acknowledged progress has no result"
+            ),
+            submit_execution_track_execution_managed_start=lambda _value: self.fail(
+                "an active baseline has no managed start"
+            ),
+            enable_execution_track_execution_recovery_poll=lambda: setattr(
+                queued, "recovery_polls", queued.recovery_polls + 1
+            ),
+        )
+
+        self.assertTrue(consumer.resubmit_outbox(transport, scene))
+        self.assertEqual(queued.progress, [])
+        self.assertEqual(queued.recovery_polls, 1)
+
+    def test_unacknowledged_managed_start_replays_once_then_recovers_read_only(self) -> None:
+        progress = {
+            "phase": "commit_intent_recorded",
+            "binding": {"requestId": str(uuid.uuid4())},
+            "contentSha256": "a" * 64,
+        }
+        submission = {
+            "managedStart": {"contentSha256": "b" * 64},
+            "commitProgress": progress,
+        }
+        outbox = {
+            "formatVersion": "2.0.0",
+            "progress": progress,
+            "baselineProgress": progress,
+            "acknowledgedProgressContentSha256s": ["a" * 64],
+            "managedStartSubmission": submission,
+        }
+        scene = FakeScene()
+        consumer.persist_outbox(scene, outbox)
+        first = SimpleNamespace(managed=[], recovery_polls=0)
+        transport = SimpleNamespace(
+            submit_execution_track_execution_progress=lambda _value: self.fail(
+                "the commit progress was already acknowledged"
+            ),
+            submit_execution_track_execution_result=lambda _value: self.fail(
+                "the managed action has no result yet"
+            ),
+            submit_execution_track_execution_managed_start=lambda value: first.managed.append(
+                value
+            ),
+            enable_execution_track_execution_recovery_poll=lambda: setattr(
+                first, "recovery_polls", first.recovery_polls + 1
+            ),
+        )
+        self.assertTrue(consumer.resubmit_outbox(transport, scene))
+        self.assertEqual(first.managed, [submission])
+
+        acknowledged, fresh = consumer.record_managed_start_ack(outbox, "b" * 64)
+        self.assertTrue(fresh)
+        consumer.persist_outbox(scene, acknowledged)
+        second = SimpleNamespace(managed=[], recovery_polls=0)
+        transport.submit_execution_track_execution_managed_start = (
+            lambda value: second.managed.append(value)
+        )
+        transport.enable_execution_track_execution_recovery_poll = lambda: setattr(
+            second, "recovery_polls", second.recovery_polls + 1
+        )
+        self.assertTrue(consumer.resubmit_outbox(transport, scene))
+        self.assertEqual(second.managed, [])
+        self.assertEqual(second.recovery_polls, 1)
+
+    def test_controller_consumes_progress_and_managed_start_acks_once(self) -> None:
+        request_id = str(uuid.uuid4())
+        progress = {
+            "phase": "baseline_attested",
+            "binding": {"requestId": request_id},
+            "contentSha256": "a" * 64,
+        }
+        stored = consumer.build_active_outbox(progress)
+        controller = companion_module.CompanionController.__new__(
+            companion_module.CompanionController
+        )
+        controller._execution_track_outbox = lambda _request_id=None: deepcopy(stored)
+
+        def persist(value):
+            nonlocal stored
+            stored = deepcopy(value)
+
+        controller._persist_execution_track_outbox = persist
+        controller._start_execution_track_proof = Mock()
+        controller._terminate_execution_track_before_managed = Mock()
+        controller._handle_execution_track_progress_ack(
+            {"requestId": request_id, "progressContentSha256": "a" * 64}
+        )
+        controller._handle_execution_track_progress_ack(
+            {"requestId": request_id, "progressContentSha256": "a" * 64}
+        )
+        controller._start_execution_track_proof.assert_called_once_with()
+        controller._terminate_execution_track_before_managed.assert_not_called()
+
+        progress = {
+            "phase": "commit_intent_recorded",
+            "binding": {"requestId": request_id},
+            "contentSha256": "c" * 64,
+        }
+        submission = {
+            "managedStart": {"contentSha256": "d" * 64},
+            "commitProgress": progress,
+        }
+        stored = {
+            "formatVersion": "2.0.0",
+            "progress": progress,
+            "managedStartSubmission": submission,
+        }
+        controller._execution_track_delivery = {"binding": {"requestId": request_id}}
+        controller._execution_track_managed_commit_token = None
+        controller._fresh_execution_track_lease = Mock(return_value={})
+        controller._validate_execution_track_execution_authority = Mock()
+        controller._terminate_execution_track_managed_indeterminate = Mock()
+        issued_tokens = []
+
+        def execute_managed_commit(*, authorization_token):
+            issued_tokens.append(authorization_token)
+            self.assertTrue(
+                controller.authorize_execution_track_managed_commit(
+                    authorization_token
+                )
+            )
+            self.assertFalse(
+                controller.authorize_execution_track_managed_commit(
+                    authorization_token
+                )
+            )
+            return {"FINISHED"}
+
+        previous_ops = fake_bpy.ops
+        fake_bpy.ops = SimpleNamespace(
+            operating_line=SimpleNamespace(
+                execution_track_managed_commit=execute_managed_commit
+            )
+        )
+        try:
+            message = {
+                "requestId": request_id,
+                "managedStartContentSha256": "d" * 64,
+            }
+            controller._handle_execution_track_managed_start_ack(message)
+            controller._handle_execution_track_managed_start_ack(message)
+        finally:
+            fake_bpy.ops = previous_ops
+
+        self.assertEqual(len(issued_tokens), 1)
+        self.assertEqual(
+            stored["acknowledgedManagedStartContentSha256"], "d" * 64
+        )
+        controller._terminate_execution_track_managed_indeterminate.assert_not_called()
 
     def test_stale_recovery_ack_waits_for_scene_persisted_rotated_ack(self) -> None:
         instance_id = str(uuid.uuid4())
@@ -676,7 +1576,7 @@ process.stdout.write('accepted');
         completed = [*binding["authorizedStartState"]["completedStepIds"], binding["leafId"]]
         receipts = [*binding["authorizedStartState"]["receiptStepIds"], binding["leafId"]]
         report = {
-            "protocolVersion": "1.6.0",
+            "protocolVersion": binding["plan"]["protocolVersion"],
             "reportId": report_id,
             "sequence": details_content["reportSequence"],
             "adapterId": "blender",
@@ -1113,6 +2013,40 @@ companionExecutionTrackExecutionRecoveryAckSchema.parse(JSON.parse(raw));
         ):
             controller.pump()
         report.assert_not_called()
+
+    def test_replacement_lease_does_not_repeat_connected_report_for_same_session(self) -> None:
+        controller = companion_module.CompanionController.__new__(
+            companion_module.CompanionController
+        )
+        controller._timer_registered = False
+        controller._stopping_transports = []
+        controller._connected_session_reported = False
+        controller.proposal_session = None
+        controller.pending_plan = None
+        controller.pending_plan_content_sha256 = None
+        controller.error = ""
+        controller.status = ""
+        controller._transport = SimpleNamespace(incoming=Queue())
+        controller._transport.incoming.put(
+            {"kind": "session_established", "leaseId": str(uuid.uuid4())}
+        )
+        controller._transport.incoming.put(
+            {"kind": "session_established", "leaseId": str(uuid.uuid4())}
+        )
+        report = Mock()
+        controller.report = report
+        with patch.object(
+            controller, "_resubmit_menu_control_terminal_outbox", return_value=False
+        ), patch.object(
+            controller, "_resubmit_execution_track_execution_outbox", return_value=False
+        ), patch.object(
+            package,
+            "get_session",
+            return_value=SimpleNamespace(plan_id=None, revision=None, receipts={}),
+            create=True,
+        ):
+            controller.pump()
+        report.assert_called_once_with("connected")
 
     def test_recovery_ack_scene_write_failure_keeps_outbox_and_pump_alive(self) -> None:
         request_id = str(uuid.uuid4())

@@ -31,6 +31,17 @@ from ..domain import (
     is_action_level_mcp_action,
 )
 from ..domain.provider_authorization import validate_provider_call_authorization
+from ..domain.guided_geometry_leaf_profiles import (
+    GUIDED_GEOMETRY_LEAF_OPERATION_PROFILES,
+    GUIDED_LEAF_OPERATION_OBSERVATION_PROFILES,
+    LIGHT_TRAILS_LEAF_OPERATION_ACTION,
+    LIGHT_TRAILS_LEAF_OPERATION_IDS,
+    LIGHT_TRAILS_LEAF_OPERATION_RECIPE,
+    TRANSFORM_GEOMETRY_LEAF_OPERATION_ACTION,
+    TRANSFORM_GEOMETRY_LEAF_OPERATION_IDS,
+    TRANSFORM_GEOMETRY_LEAF_OPERATION_RECIPE,
+)
+from ..domain.task_tree import validate_candidate_menu_projection_data
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 REPLAN_RUN_STATUSES = frozenset(
@@ -66,6 +77,8 @@ TERMINAL_DIALOGUE_RUN_STATUSES = DIALOGUE_RUN_STATUSES - {
 CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 PORTABLE_AUTHORITY_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*")
 COMPANION_SESSION_CONTRACT_VERSION = "1.1.0"
+NATIVE_UNDO_PROTOCOL_VERSIONS = frozenset({"1.5.0", "1.6.0", "1.7.0"})
+EXECUTION_TRACK_PROTOCOL_VERSIONS = frozenset({"1.6.0", "1.7.0"})
 BLENDER_ADAPTER_CAPABILITIES = {
     "presentation": {
         "taskTree": "native",
@@ -117,6 +130,29 @@ MENU_CONTROL_PROOF_MUTATION_STAGES = (
     "scale_z_set",
     "object_name_set",
 )
+LEAF_OPERATION_AUTHORITY_KEYS = (
+    "formatVersion",
+    "requestId",
+    "replayId",
+    "target",
+    "proposalId",
+    "plan",
+    "planContentSha256",
+    "executionId",
+    "leafId",
+    "stepId",
+    "actionName",
+    "recipeId",
+    "catalogVersion",
+    "interactionCatalogContentSha256",
+    "materializationContentSha256",
+    "mcpTrackContentSha256",
+    "expectedState",
+    "operationIds",
+    "operationOrdinal",
+    "sourceOperationId",
+    "operationParameters",
+)
 
 
 @dataclass(frozen=True)
@@ -131,6 +167,16 @@ class CompanionSessionSnapshot:
     expires_at: str
     next_heartbeat_at: float
     heartbeat_sequence: int
+
+
+@dataclass
+class _LeaseRefreshRequest:
+    """Main-thread request serviced by the transport's sole network thread."""
+
+    minimum_validity_seconds: float
+    completed: threading.Event
+    lease: dict[str, Any] | None = None
+    error: str | None = None
 
 
 def validate_companion_url(value: str) -> str:
@@ -222,10 +268,15 @@ class CompanionTransport:
         self.dialogue_runs: Queue[dict[str, Any]] = Queue()
         self.initial_plan_runs: Queue[dict[str, Any]] = Queue()
         self.action_results: Queue[dict[str, Any]] = Queue()
+        self.leaf_operation_results: Queue[dict[str, Any]] = Queue()
+        self.leaf_operation_recovery_acks: Queue[dict[str, Any]] = Queue()
+        self.poke_compound_results: Queue[dict[str, Any]] = Queue()
+        self.poke_compound_recovery_acks: Queue[dict[str, Any]] = Queue()
         self.execution_track_preflight_creates: Queue[dict[str, Any]] = Queue()
         self.execution_track_preflight_status_requests: Queue[str] = Queue()
         self.execution_track_preflight_results: Queue[dict[str, Any]] = Queue()
         self.execution_track_execution_progress: Queue[dict[str, Any]] = Queue()
+        self.execution_track_execution_managed_starts: Queue[dict[str, Any]] = Queue()
         self.execution_track_execution_results: Queue[dict[str, Any]] = Queue()
         self.execution_track_execution_recovery_acks: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_progress: Queue[dict[str, Any]] = Queue()
@@ -235,6 +286,7 @@ class CompanionTransport:
         self.menu_control_proof_results: Queue[dict[str, Any]] = Queue()
         self.menu_control_proof_history_transitions: Queue[dict[str, Any]] = Queue()
         self.menu_control_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
+        self._lease_refresh_requests: Queue[_LeaseRefreshRequest] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -244,6 +296,10 @@ class CompanionTransport:
         self._session_snapshot: CompanionSessionSnapshot | None = None
         self._seen_replay_current_state_verification_ids: set[str] = set()
         self._seen_action_request_ids: set[str] = set()
+        self._seen_leaf_operation_request_ids: set[str] = set()
+        self._seen_leaf_operation_recovery_ids: set[str] = set()
+        self._seen_poke_compound_request_ids: set[str] = set()
+        self._seen_poke_compound_recovery_ids: set[str] = set()
         self._seen_execution_track_preflight_request_ids: set[str] = set()
         self._seen_execution_track_execution_request_ids: set[str] = set()
         self._inflight_execution_track_execution_request_ids: set[str] = set()
@@ -322,6 +378,59 @@ class CompanionTransport:
             "expiresAt": session.expires_at,
         }
 
+    @staticmethod
+    def _lease_validity_seconds(session: CompanionSessionSnapshot) -> float:
+        expires_at = datetime.fromisoformat(session.expires_at.replace("Z", "+00:00"))
+        return (expires_at - datetime.now(timezone.utc)).total_seconds()
+
+    def document_lease_with_minimum_validity(
+        self,
+        *,
+        minimum_validity_seconds: float = 5.0,
+        timeout: float = 2.0,
+    ) -> dict[str, Any]:
+        """Return a live lease, asking the network thread to heartbeat when needed.
+
+        Blender can retain the GIL while a native UI proof is in progress.  This
+        synchronous handoff releases the GIL while preserving the transport's
+        single-network-thread boundary.
+        """
+
+        if (
+            isinstance(minimum_validity_seconds, bool)
+            or not isinstance(minimum_validity_seconds, (int, float))
+            or minimum_validity_seconds <= 0
+        ):
+            raise ValueError("Minimum lease validity must be positive")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise ValueError("Lease refresh timeout must be positive")
+        session = self._session_snapshot
+        if session is None or not self.running:
+            raise RuntimeError("Companion session is not available for lease refresh")
+        if self._lease_validity_seconds(session) >= minimum_validity_seconds:
+            lease = self.current_document_lease
+            if lease is None:
+                raise RuntimeError("Companion document lease disappeared")
+            return lease
+        if threading.current_thread() is self._thread:
+            self._send_heartbeat()
+            lease = self.current_document_lease
+            if lease is None:
+                raise RuntimeError("Companion document lease disappeared after heartbeat")
+            return lease
+        request = _LeaseRefreshRequest(
+            minimum_validity_seconds=float(minimum_validity_seconds),
+            completed=threading.Event(),
+        )
+        self._lease_refresh_requests.put(request)
+        if not request.completed.wait(float(timeout)):
+            raise TimeoutError("Timed out waiting for a fresh Companion document lease")
+        if request.error is not None:
+            raise RuntimeError(request.error)
+        if request.lease is None:
+            raise RuntimeError("Companion lease refresh returned no document lease")
+        return deepcopy(request.lease)
+
     def start(self) -> None:
         if self.running:
             return
@@ -359,6 +468,29 @@ class CompanionTransport:
             raise ValueError("Action result must be an object")
         self.action_results.put(dict(result))
 
+    def submit_leaf_operation_result(self, result: dict[str, Any]) -> None:
+        """Queue one leaf-operation result after any referenced final report."""
+        if not isinstance(result, dict):
+            raise ValueError("Leaf-operation result must be an object")
+        self.leaf_operation_results.put(deepcopy(result))
+
+    def submit_leaf_operation_recovery_ack(self, ack: dict[str, Any]) -> None:
+        """Queue a read-only reconciliation proof for one recovery challenge."""
+        validated = self._validate_leaf_operation_recovery_ack(ack)
+        self.leaf_operation_recovery_acks.put(validated)
+
+    def submit_poke_compound_result(self, result: dict[str, Any]) -> None:
+        """Queue a persisted three-leaf Poke compound terminal result."""
+        if not isinstance(result, dict):
+            raise ValueError("Poke compound result must be an object")
+        self.poke_compound_results.put(deepcopy(result))
+
+    def submit_poke_compound_recovery_ack(self, ack: dict[str, Any]) -> None:
+        """Queue a replacement-lease Poke compound terminal or quarantine proof."""
+        if not isinstance(ack, dict):
+            raise ValueError("Poke compound recovery acknowledgement must be an object")
+        self.poke_compound_recovery_acks.put(deepcopy(ack))
+
     def create_execution_track_preflight(self, request: dict[str, Any]) -> None:
         """Queue one client-known, zero-side-effect execution-track preflight."""
         if not isinstance(request, dict):
@@ -376,6 +508,14 @@ class CompanionTransport:
         if not isinstance(progress, dict):
             raise ValueError("Execution-track progress must be an object")
         self.execution_track_execution_progress.put(deepcopy(progress))
+
+    def submit_execution_track_execution_managed_start(
+        self, submission: dict[str, Any]
+    ) -> None:
+        """Queue the durable server handshake immediately before managed mutation."""
+        if not isinstance(submission, dict):
+            raise ValueError("Execution-track managed start must be an object")
+        self.execution_track_execution_managed_starts.put(deepcopy(submission))
 
     def submit_execution_track_execution_result(self, result: dict[str, Any]) -> None:
         """Queue one durable v2 execution-track terminal result."""
@@ -475,6 +615,28 @@ class CompanionTransport:
         if cls._execution_track_preflight_result_identity(downgraded) != identity:
             raise ValueError("Execution-track preflight downgrade changed immutable identity")
         return downgraded
+
+    @staticmethod
+    def _leaf_operation_result_requires_session_retry(error: HTTPError) -> bool:
+        """Keep immutable results pending when only the negotiated lease became stale."""
+        runtime_payload = getattr(error, "runtime_payload", None)
+        return (
+            error.code == 409
+            and isinstance(runtime_payload, dict)
+            and runtime_payload.get("error")
+            in {
+                "companion_lease_required",
+                "lease_identity_mismatch",
+                "lease_not_current",
+            }
+        )
+
+    @classmethod
+    def _leaf_operation_recovery_ack_requires_new_challenge(
+        cls, error: HTTPError
+    ) -> bool:
+        """Discard an uncommitted ACK when Runtime rejects its stale live lease."""
+        return cls._leaf_operation_result_requires_session_retry(error)
 
     def submit_shortcut_proof_progress(self, progress: dict[str, Any]) -> None:
         """Queue append-only shortcut receipt progress on its independent channel."""
@@ -704,9 +866,14 @@ class CompanionTransport:
         )
 
     def decide_proposal(self, proposal_id: str, decision: str) -> None:
+        session = self._session_snapshot
         self.submit_proposal_decision(
             {
-                "protocolVersion": PROTOCOL_VERSION,
+                "protocolVersion": (
+                    PROTOCOL_VERSION
+                    if session is None
+                    else session.negotiated_guide_protocol_version
+                ),
                 "decisionId": str(uuid.uuid4()),
                 "proposalId": proposal_id,
                 "adapterId": "blender",
@@ -754,9 +921,17 @@ class CompanionTransport:
         if (
             path.startswith("/api/v1/companion/guide?")
             or path.startswith("/api/v1/companion/action?")
+            or path.startswith("/api/v1/companion/leaf-operation?")
+            or path.startswith("/api/v1/companion/leaf-operation-recovery?")
+            or path.startswith("/api/v1/companion/poke-compound?")
+            or path.startswith("/api/v1/companion/poke-compound-recovery?")
             or path == "/api/v1/companion/state"
             or path == "/api/v1/companion/proposal-decision"
             or path == "/api/v1/companion/action-result"
+            or path == "/api/v1/companion/leaf-operation-result"
+            or path == "/api/v1/companion/leaf-operation-recovery"
+            or path == "/api/v1/companion/poke-compound-result"
+            or path == "/api/v1/companion/poke-compound-recovery"
             or path == "/api/v1/companion/execution-track-preflight"
             or path.startswith("/api/v1/companion/execution-track-preflight?")
             or path == "/api/v1/companion/execution-track-preflight/poll"
@@ -1006,6 +1181,35 @@ class CompanionTransport:
                 heartbeat_sequence=sequence,
             )
 
+    def _service_lease_refresh_requests(self) -> bool:
+        """Service all explicit lease refreshes on the network-owning thread."""
+
+        serviced = False
+        while True:
+            try:
+                request = self._lease_refresh_requests.get_nowait()
+            except Empty:
+                return serviced
+            serviced = True
+            try:
+                session = self._session_snapshot
+                if session is None:
+                    raise RuntimeError("Companion session disappeared before lease refresh")
+                if self._lease_validity_seconds(session) < request.minimum_validity_seconds:
+                    self._send_heartbeat()
+                    session = self._session_snapshot
+                if session is None:
+                    raise RuntimeError("Companion session disappeared during lease refresh")
+                if self._lease_validity_seconds(session) < request.minimum_validity_seconds:
+                    raise RuntimeError(
+                        "Companion heartbeat did not provide enough lease validity"
+                    )
+                request.lease = self.current_document_lease
+            except (HTTPError, HTTPException, OSError, RuntimeError, ValueError) as error:
+                request.error = str(error)
+            finally:
+                request.completed.set()
+
     def _clear_session(self) -> None:
         self._session_snapshot = None
 
@@ -1141,16 +1345,22 @@ class CompanionTransport:
                 )
         self._poll_revision_history()
         self._poll_revision_branches()
-        if session.negotiated_guide_protocol_version in {"1.5.0", "1.6.0"}:
-            self._poll_action_request()
+        if session.negotiated_guide_protocol_version in NATIVE_UNDO_PROTOCOL_VERSIONS:
+            poke_recovery_pending = self._poll_poke_compound_recovery_request()
+            if not poke_recovery_pending:
+                self._poll_poke_compound_request()
+                leaf_recovery_pending = self._poll_leaf_operation_recovery_request()
+                if not leaf_recovery_pending:
+                    self._poll_action_request()
+                    self._poll_leaf_operation_request()
             self._poll_menu_control_proof_request()
             self._poll_shortcut_proof_request()
         if (
-            session.negotiated_guide_protocol_version == "1.6.0"
+            session.negotiated_guide_protocol_version in EXECUTION_TRACK_PROTOCOL_VERSIONS
             and self._execution_track_preflight_poll_enabled
         ):
             self._poll_execution_track_preflight()
-        if session.negotiated_guide_protocol_version == "1.6.0":
+        if session.negotiated_guide_protocol_version in EXECUTION_TRACK_PROTOCOL_VERSIONS:
             self._poll_execution_track_execution()
             if self._execution_track_execution_recovery_poll_enabled:
                 self._poll_execution_track_execution_recovery()
@@ -1252,7 +1462,7 @@ class CompanionTransport:
             "expectedObservations",
             "rollback",
         }
-        allowed = required | {"observationPolicy"}
+        allowed = required | {"observationPolicy", "candidateMenuProjection"}
         actual = set(step)
         if not required.issubset(actual) or not actual.issubset(allowed):
             CompanionTransport._validate_exact_keys(step, required, "Action execution step")
@@ -1305,6 +1515,8 @@ class CompanionTransport:
             step["observationPolicy"], dict
         ):
             raise ValueError("Action execution observation policy must be an object")
+        if "candidateMenuProjection" in step:
+            validate_candidate_menu_projection_data(step["candidateMenuProjection"])
 
     def _validate_action_delivery(self, delivery: Any) -> dict[str, Any]:
         if not isinstance(delivery, dict):
@@ -1405,6 +1617,930 @@ class CompanionTransport:
         self.incoming.put(
             {"kind": "action_execute_request", "request": dict(validated)}
         )
+
+    def _validate_leaf_operation_delivery(self, delivery: Any) -> dict[str, Any]:
+        if not isinstance(delivery, dict):
+            raise ValueError("Leaf-operation delivery must be an object")
+        expected_keys = set(LEAF_OPERATION_AUTHORITY_KEYS) | {
+            "operationBindingSha256",
+            "deliveryId",
+            "requestedAt",
+            "dispatchedAt",
+        }
+        self._validate_exact_keys(
+            delivery, expected_keys, "Leaf-operation delivery"
+        )
+        if delivery["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported leaf-operation format version")
+        for field in (
+            "requestId",
+            "replayId",
+            "proposalId",
+            "executionId",
+            "deliveryId",
+        ):
+            self._validated_required_uuid(
+                delivery[field], f"Leaf-operation {field}"
+            )
+        target = delivery["target"]
+        if not isinstance(target, dict):
+            raise ValueError("Leaf-operation target must be an object")
+        self._validate_exact_keys(
+            target, {"adapterId", "instanceId"}, "Leaf-operation target"
+        )
+        if target != {"adapterId": "blender", "instanceId": self._instance_id}:
+            raise ValueError("Leaf-operation targets a different Blender instance")
+        self._validated_required_uuid(target["instanceId"], "Leaf-operation instance id")
+        plan = delivery["plan"]
+        if not isinstance(plan, dict):
+            raise ValueError("Leaf-operation plan must be an object")
+        self._validate_exact_keys(plan, {"id", "revision"}, "Leaf-operation plan")
+        if not isinstance(plan["id"], str) or not plan["id"]:
+            raise ValueError("Leaf-operation plan id must be non-empty text")
+        if (
+            isinstance(plan["revision"], bool)
+            or not isinstance(plan["revision"], int)
+            or plan["revision"] <= 0
+        ):
+            raise ValueError("Leaf-operation plan revision must be positive")
+        for field in (
+            "planContentSha256",
+            "interactionCatalogContentSha256",
+            "materializationContentSha256",
+            "mcpTrackContentSha256",
+            "operationBindingSha256",
+        ):
+            if (
+                not isinstance(delivery[field], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(delivery[field]) is None
+            ):
+                raise ValueError(f"Leaf-operation {field} is invalid")
+        expected_state = delivery["expectedState"]
+        if not isinstance(expected_state, dict):
+            raise ValueError("Leaf-operation expected state must be an object")
+        self._validate_exact_keys(
+            expected_state, {"reportId", "sequence"}, "Leaf-operation expected state"
+        )
+        self._validated_required_uuid(
+            expected_state["reportId"], "Leaf-operation expected report id"
+        )
+        if (
+            isinstance(expected_state["sequence"], bool)
+            or not isinstance(expected_state["sequence"], int)
+            or expected_state["sequence"] <= 0
+        ):
+            raise ValueError("Leaf-operation expected sequence must be positive")
+        if delivery["leafId"] != delivery["stepId"] or not isinstance(
+            delivery["leafId"], str
+        ) or not delivery["leafId"]:
+            raise ValueError("Leaf-operation leaf and step ids must be the same non-empty id")
+        profile = GUIDED_GEOMETRY_LEAF_OPERATION_PROFILES.get(
+            delivery["actionName"]
+        )
+        if profile is None:
+            raise ValueError("Leaf-operation action is not a fixed guided profile")
+        recipe_id, operation_ids, _parameter_names, _tool_name = profile
+        if delivery["recipeId"] != recipe_id:
+            raise ValueError("Leaf-operation recipe does not match its fixed action profile")
+        if (
+            not isinstance(delivery["catalogVersion"], str)
+            or re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", delivery["catalogVersion"])
+            is None
+        ):
+            raise ValueError("Leaf-operation catalog version is invalid")
+        if delivery["operationIds"] != list(operation_ids):
+            raise ValueError("Leaf-operation ids are not the fixed action sequence")
+        ordinal = delivery["operationOrdinal"]
+        if (
+            isinstance(ordinal, bool)
+            or not isinstance(ordinal, int)
+            or not 1 <= ordinal <= len(operation_ids)
+        ):
+            raise ValueError(
+                f"Leaf-operation ordinal must be between 1 and {len(operation_ids)}"
+            )
+        if delivery["sourceOperationId"] != operation_ids[ordinal - 1]:
+            raise ValueError("Leaf-operation id does not match its ordinal")
+        if not isinstance(delivery["operationParameters"], dict) or not all(
+            isinstance(key, str) and key for key in delivery["operationParameters"]
+        ):
+            raise ValueError("Leaf-operation parameters must be a string-keyed object")
+        authority = {key: deepcopy(delivery[key]) for key in LEAF_OPERATION_AUTHORITY_KEYS}
+        if delivery["operationBindingSha256"] != self._canonical_sha256(authority):
+            raise ValueError("Leaf-operation immutable binding hash changed")
+        self._validate_expiry(delivery["requestedAt"], "Leaf-operation requested time")
+        self._validate_expiry(delivery["dispatchedAt"], "Leaf-operation dispatched time")
+        if datetime.fromisoformat(delivery["requestedAt"].replace("Z", "+00:00")) > datetime.fromisoformat(
+            delivery["dispatchedAt"].replace("Z", "+00:00")
+        ):
+            raise ValueError("Leaf-operation was dispatched before it was requested")
+        return deepcopy(delivery)
+
+    def _poll_leaf_operation_request(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/leaf-operation?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Leaf-operation poll")
+        delivery = response["request"]
+        if delivery is None:
+            return
+        validated = self._validate_leaf_operation_delivery(delivery)
+        request_id = validated["requestId"]
+        if request_id in self._seen_leaf_operation_request_ids:
+            return
+        if len(self._seen_leaf_operation_request_ids) >= 256:
+            self._seen_leaf_operation_request_ids.pop()
+        self._seen_leaf_operation_request_ids.add(request_id)
+        self.incoming.put(
+            {"kind": "leaf_operation_execute_request", "request": validated}
+        )
+
+    def _validate_poke_compound_delivery(self, delivery: Any) -> dict[str, Any]:
+        if not isinstance(delivery, dict):
+            raise ValueError("Poke compound delivery must be an object")
+        expected_keys = {
+            "formatVersion",
+            "requestId",
+            "deliveryId",
+            "deliveryContentSha256",
+            "target",
+            "replayId",
+            "compoundId",
+            "compoundContentSha256",
+            "historyLockTokenSha256",
+            "replay",
+            "decisionReceipt",
+            "trustedDecisionConsumptionEvent",
+            "requestedAt",
+            "dispatchedAt",
+        }
+        self._validate_exact_keys(delivery, expected_keys, "Poke compound delivery")
+        if delivery["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported Poke compound format version")
+        for field in ("requestId", "deliveryId", "replayId", "compoundId"):
+            self._validated_required_uuid(delivery[field], f"Poke compound {field}")
+        for field in (
+            "deliveryContentSha256",
+            "compoundContentSha256",
+            "historyLockTokenSha256",
+        ):
+            if (
+                not isinstance(delivery[field], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(delivery[field]) is None
+            ):
+                raise ValueError(f"Poke compound {field} is invalid")
+        target = delivery["target"]
+        if not isinstance(target, dict):
+            raise ValueError("Poke compound target must be an object")
+        self._validate_exact_keys(target, {"adapterId", "instanceId"}, "Poke compound target")
+        if target != {"adapterId": "blender", "instanceId": self._instance_id}:
+            raise ValueError("Poke compound targets a different Blender instance")
+        replay = delivery["replay"]
+        if not isinstance(replay, dict):
+            raise ValueError("Poke compound replay must be an object")
+        self._validate_exact_keys(
+            replay,
+            {
+                "formatVersion",
+                "planContentSha256",
+                "target",
+                "actionCatalogVersion",
+                "interactionCatalogVersion",
+                "recipe",
+                "currentState",
+                "leafProgress",
+            },
+            "Poke compound replay",
+        )
+        recipe = replay["recipe"]
+        current_state = replay["currentState"]
+        if not isinstance(recipe, dict) or not isinstance(current_state, dict):
+            raise ValueError("Poke compound recipe and current state must be objects")
+        identity_pairs = (
+            (replay["target"], target, "target"),
+            (recipe.get("replayId"), delivery["replayId"], "replay id"),
+            (recipe.get("compoundId"), delivery["compoundId"], "compound id"),
+            (
+                recipe.get("compoundContentSha256"),
+                delivery["compoundContentSha256"],
+                "compound content",
+            ),
+            (
+                recipe.get("historyLockTokenSha256"),
+                delivery["historyLockTokenSha256"],
+                "history lock",
+            ),
+            (current_state.get("replayId"), delivery["replayId"], "current replay id"),
+            (current_state.get("compoundId"), delivery["compoundId"], "current compound id"),
+        )
+        if any(actual != expected for actual, expected, _label in identity_pairs):
+            changed = next(
+                label for actual, expected, label in identity_pairs if actual != expected
+            )
+            raise ValueError(f"Poke compound delivery changed its {changed}")
+        leaf_progress = replay["leafProgress"]
+        if (
+            not isinstance(leaf_progress, list)
+            or len(leaf_progress) != 3
+            or any(
+                not isinstance(progress, dict)
+                or progress.get("intentSha256") is not None
+                or progress.get("receiptSha256") is not None
+                for progress in leaf_progress
+            )
+        ):
+            raise ValueError("Poke compound delivery must start before every leaf intent")
+        decision = delivery["decisionReceipt"]
+        consumption = delivery["trustedDecisionConsumptionEvent"]
+        if not isinstance(decision, dict) or not isinstance(consumption, dict):
+            raise ValueError("Poke compound decision evidence must be objects")
+        if (
+            decision.get("replayId") != delivery["replayId"]
+            or decision.get("target") != target
+            or consumption.get("credentialId") != decision.get("decisionId")
+        ):
+            raise ValueError("Poke compound decision evidence changed its replay authority")
+        requested_at = self._validate_expiry(
+            delivery["requestedAt"], "Poke compound requested time"
+        )
+        dispatched_at = self._validate_expiry(
+            delivery["dispatchedAt"], "Poke compound dispatched time"
+        )
+        if datetime.fromisoformat(requested_at.replace("Z", "+00:00")) > datetime.fromisoformat(
+            dispatched_at.replace("Z", "+00:00")
+        ):
+            raise ValueError("Poke compound was dispatched before it was requested")
+        content = {key: deepcopy(delivery[key]) for key in expected_keys - {"deliveryContentSha256"}}
+        if delivery["deliveryContentSha256"] != self._canonical_sha256(content):
+            raise ValueError("Poke compound immutable delivery content changed")
+        return deepcopy(delivery)
+
+    def _poll_poke_compound_request(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/poke-compound?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Poke compound poll")
+        delivery = response["request"]
+        if delivery is None:
+            return
+        validated = self._validate_poke_compound_delivery(delivery)
+        request_id = validated["requestId"]
+        if request_id in self._seen_poke_compound_request_ids:
+            return
+        if len(self._seen_poke_compound_request_ids) >= 256:
+            self._seen_poke_compound_request_ids.pop()
+        self._seen_poke_compound_request_ids.add(request_id)
+        self.incoming.put({"kind": "poke_compound_execute_request", "request": validated})
+
+    def _validate_poke_compound_recovery_challenge(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("Poke compound recovery challenge must be an object")
+        self._validate_exact_keys(
+            value,
+            {
+                "formatVersion",
+                "recoveryId",
+                "originalDelivery",
+                "replacementSessionFingerprintSha256",
+                "replacementDocumentAuthoritySha256",
+                "requestedAt",
+            },
+            "Poke compound recovery challenge",
+        )
+        if value["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported Poke compound recovery format version")
+        self._validated_required_uuid(value["recoveryId"], "Poke compound recovery id")
+        self._validate_poke_compound_delivery(value["originalDelivery"])
+        for field in (
+            "replacementSessionFingerprintSha256",
+            "replacementDocumentAuthoritySha256",
+        ):
+            if (
+                not isinstance(value[field], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(value[field]) is None
+            ):
+                raise ValueError(f"Poke compound recovery {field} is invalid")
+        self._validate_expiry(value["requestedAt"], "Poke compound recovery requested time")
+        return deepcopy(value)
+
+    def _poll_poke_compound_recovery_request(self) -> bool:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/poke-compound-recovery?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Poke compound recovery poll")
+        challenge = response["request"]
+        if challenge is None:
+            return False
+        validated = self._validate_poke_compound_recovery_challenge(challenge)
+        recovery_id = validated["recoveryId"]
+        if recovery_id not in self._seen_poke_compound_recovery_ids:
+            if len(self._seen_poke_compound_recovery_ids) >= 256:
+                self._seen_poke_compound_recovery_ids.pop()
+            self._seen_poke_compound_recovery_ids.add(recovery_id)
+            self.incoming.put(
+                {"kind": "poke_compound_recovery_request", "request": validated}
+            )
+        return True
+
+    @staticmethod
+    def _validate_leaf_operation_recovery_sha256(value: Any, label: str) -> str:
+        if not isinstance(value, str) or CONTENT_SHA256_PATTERN.fullmatch(value) is None:
+            raise ValueError(f"{label} must be 64 lowercase hex characters")
+        return value
+
+    def _validate_leaf_operation_recovery_prefix(
+        self,
+        value: Any,
+        *,
+        operation_ids: tuple[str, ...],
+        ordinal: int,
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("Leaf-operation recovery prefix must be an object")
+        self._validate_exact_keys(
+            value,
+            {
+                "completedOperationIds",
+                "runId",
+                "bindingSha256",
+                "receiptId",
+                "nextOrdinal",
+                "latestFingerprintSha256",
+            },
+            "Leaf-operation recovery prefix",
+        )
+        expected_ids = list(operation_ids[: ordinal - 1])
+        if value["completedOperationIds"] != expected_ids:
+            raise ValueError("Leaf-operation recovery prefix is not the exact accepted prefix")
+        if value["nextOrdinal"] != ordinal:
+            raise ValueError("Leaf-operation recovery prefix has the wrong next ordinal")
+        identity_fields = ("runId", "bindingSha256", "receiptId")
+        if ordinal == 1:
+            if any(value[field] is not None for field in identity_fields) or value[
+                "latestFingerprintSha256"
+            ] is not None:
+                raise ValueError("An empty leaf-operation recovery prefix must have null identity")
+        else:
+            self._validated_required_uuid(value["runId"], "Leaf-operation recovery run id")
+            self._validated_required_uuid(
+                value["receiptId"], "Leaf-operation recovery receipt id"
+            )
+            self._validate_leaf_operation_recovery_sha256(
+                value["bindingSha256"], "Leaf-operation recovery binding SHA-256"
+            )
+            self._validate_leaf_operation_recovery_sha256(
+                value["latestFingerprintSha256"],
+                "Leaf-operation recovery latest fingerprint SHA-256",
+            )
+        return deepcopy(value)
+
+    def _validate_leaf_operation_recovery_checkpoint(
+        self, value: Any
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("Leaf-operation recovery checkpoint must be an object")
+        self._validate_exact_keys(
+            value,
+            {
+                "reportId",
+                "sequence",
+                "checkpointId",
+                "previousCheckpointId",
+                "operation",
+                "sceneFingerprintSha256",
+                "markerMatched",
+                "sessionSnapshotMatches",
+                "stageVerified",
+                "observedAt",
+            },
+            "Leaf-operation recovery checkpoint",
+        )
+        self._validated_required_uuid(value["reportId"], "Recovery checkpoint report id")
+        self._validated_required_uuid(
+            value["checkpointId"], "Recovery checkpoint id"
+        )
+        if value["previousCheckpointId"] is not None:
+            self._validated_required_uuid(
+                value["previousCheckpointId"], "Recovery previous checkpoint id"
+            )
+        if (
+            isinstance(value["sequence"], bool)
+            or not isinstance(value["sequence"], int)
+            or value["sequence"] <= 0
+        ):
+            raise ValueError("Recovery checkpoint sequence must be positive")
+        if value["operation"] not in {
+            "start",
+            "next",
+            "recheck",
+            "back",
+            "leaf_operation",
+            "leaf_operation_failure",
+        }:
+            raise ValueError("Recovery checkpoint operation is unsupported")
+        if value["sceneFingerprintSha256"] is not None:
+            self._validate_leaf_operation_recovery_sha256(
+                value["sceneFingerprintSha256"],
+                "Recovery checkpoint scene fingerprint SHA-256",
+            )
+        for field in ("markerMatched", "sessionSnapshotMatches", "stageVerified"):
+            if value[field] is not True:
+                raise ValueError(f"Recovery checkpoint {field} must be true")
+        self._validate_expiry(value["observedAt"], "Recovery checkpoint observed time")
+        return deepcopy(value)
+
+    def _validate_leaf_operation_recovery_challenge(
+        self, value: Any
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("Leaf-operation recovery challenge must be an object")
+        self._validate_exact_keys(
+            value,
+            {
+                "formatVersion",
+                "recoveryId",
+                "originalDelivery",
+                "originalSessionFingerprintSha256",
+                "replacementSessionFingerprintSha256",
+                "expectedState",
+                "acceptedPrefix",
+                "authorityProof",
+                "nativeUndoGuard",
+                "mode",
+                "automaticReplay",
+                "requestedAt",
+            },
+            "Leaf-operation recovery challenge",
+        )
+        if value["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported leaf-operation recovery format version")
+        self._validated_required_uuid(value["recoveryId"], "Leaf-operation recovery id")
+        delivery = self._validate_leaf_operation_delivery(value["originalDelivery"])
+        original_fingerprint = self._validate_leaf_operation_recovery_sha256(
+            value["originalSessionFingerprintSha256"],
+            "Original recovery session fingerprint SHA-256",
+        )
+        replacement_fingerprint = self._validate_leaf_operation_recovery_sha256(
+            value["replacementSessionFingerprintSha256"],
+            "Replacement recovery session fingerprint SHA-256",
+        )
+        if original_fingerprint == replacement_fingerprint:
+            raise ValueError("Leaf-operation recovery requires a replacement lease")
+        expected_state = value["expectedState"]
+        if expected_state != delivery["expectedState"]:
+            raise ValueError("Leaf-operation recovery expected state changed")
+        prefix = self._validate_leaf_operation_recovery_prefix(
+            value["acceptedPrefix"],
+            operation_ids=tuple(delivery["operationIds"]),
+            ordinal=delivery["operationOrdinal"],
+        )
+        authority = value["authorityProof"]
+        if not isinstance(authority, dict):
+            raise ValueError("Leaf-operation recovery authority proof must be an object")
+        self._validate_exact_keys(
+            authority,
+            {"reportId", "sequence", "authorizedStartCheckpointId"},
+            "Leaf-operation recovery authority proof",
+        )
+        self._validated_required_uuid(
+            authority["authorizedStartCheckpointId"],
+            "Leaf-operation recovery authorized start checkpoint id",
+        )
+        if (
+            authority["reportId"] != expected_state["reportId"]
+            or authority["sequence"] != expected_state["sequence"]
+        ):
+            raise ValueError("Leaf-operation recovery authority proof changed")
+        guard = value["nativeUndoGuard"]
+        if guard is not None:
+            if not isinstance(guard, dict):
+                raise ValueError("Leaf-operation Native Undo guard must be an object or null")
+            self._validate_exact_keys(
+                guard,
+                {"expectedRestoredCheckpointId", "recoveryTokenSha256"},
+                "Leaf-operation Native Undo guard",
+            )
+            if guard["expectedRestoredCheckpointId"] is not None:
+                self._validated_required_uuid(
+                    guard["expectedRestoredCheckpointId"],
+                    "Expected restored checkpoint id",
+                )
+            self._validate_leaf_operation_recovery_sha256(
+                guard["recoveryTokenSha256"], "Native Undo recovery token SHA-256"
+            )
+        if value["mode"] != "read_only_reconcile" or value["automaticReplay"] is not False:
+            raise ValueError("Leaf-operation recovery must be read-only without replay")
+        requested_at = self._validate_expiry(
+            value["requestedAt"], "Leaf-operation recovery requested time"
+        )
+        if datetime.fromisoformat(requested_at.replace("Z", "+00:00")) < datetime.fromisoformat(
+            delivery["dispatchedAt"].replace("Z", "+00:00")
+        ):
+            raise ValueError("Leaf-operation recovery challenge predates delivery")
+        validated = deepcopy(value)
+        validated["originalDelivery"] = delivery
+        validated["acceptedPrefix"] = prefix
+        return validated
+
+    def _validate_leaf_operation_succeeded_result(
+        self, value: Any, delivery: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("Applied leaf-operation result must be an object")
+        self._validate_exact_keys(
+            value,
+            set(delivery) | {"status", "progress", "error", "occurredAt"},
+            "Applied leaf-operation result",
+        )
+        if any(value.get(key) != expected for key, expected in delivery.items()):
+            raise ValueError("Applied leaf-operation result changed its delivery identity")
+        if value["status"] != "succeeded" or value["error"] is not None:
+            raise ValueError("Applied leaf-operation result must be a success without error")
+        occurred_at = self._validate_expiry(
+            value["occurredAt"], "Applied leaf-operation result time"
+        )
+        if datetime.fromisoformat(occurred_at.replace("Z", "+00:00")) < datetime.fromisoformat(
+            delivery["dispatchedAt"].replace("Z", "+00:00")
+        ):
+            raise ValueError("Applied leaf-operation result predates delivery")
+        progress = value["progress"]
+        if not isinstance(progress, dict):
+            raise ValueError("Applied leaf-operation result requires progress")
+        self._validate_exact_keys(
+            progress,
+            {
+                "runId",
+                "bindingSha256",
+                "stepId",
+                "actionName",
+                "recipeId",
+                "catalogVersion",
+                "operationIds",
+                "completedOperationIds",
+                "nextOrdinal",
+                "latestObservation",
+                "leafCompleted",
+                "finalReport",
+            },
+            "Applied leaf-operation progress",
+        )
+        self._validated_required_uuid(progress["runId"], "Applied leaf-operation run id")
+        self._validate_leaf_operation_recovery_sha256(
+            progress["bindingSha256"], "Applied leaf-operation binding SHA-256"
+        )
+        ordinal = delivery["operationOrdinal"]
+        expected_ids = list(delivery["operationIds"])
+        completed_ids = expected_ids[:ordinal]
+        if (
+            progress["stepId"] != delivery["stepId"]
+            or progress["actionName"] != delivery["actionName"]
+            or progress["recipeId"] != delivery["recipeId"]
+            or progress["catalogVersion"] != delivery["catalogVersion"]
+            or progress["operationIds"] != expected_ids
+            or progress["completedOperationIds"] != completed_ids
+            or progress["nextOrdinal"] != ordinal + 1
+        ):
+            raise ValueError("Applied leaf-operation progress is not the exact delivered prefix")
+        observation = progress["latestObservation"]
+        if not isinstance(observation, dict):
+            raise ValueError("Applied leaf-operation observation must be an object")
+        self._validate_exact_keys(
+            observation,
+            {"kind", "satisfied", "details"},
+            "Applied leaf-operation observation",
+        )
+        details = observation["details"]
+        if not isinstance(details, dict):
+            raise ValueError("Applied leaf-operation observation details must be an object")
+        self._validate_exact_keys(
+            details,
+            {
+                "status",
+                "direction",
+                "operationOrdinal",
+                "operationId",
+                "mutating",
+                "receiptId",
+                "runId",
+                "stepId",
+                "actionName",
+                "recipeId",
+                "catalogVersion",
+                "beforeFingerprintSha256",
+                "afterFingerprintSha256",
+                "evidence",
+            },
+            "Applied leaf-operation observation details",
+        )
+        self._validated_required_uuid(
+            details["receiptId"], "Applied leaf-operation receipt id"
+        )
+        before = self._validate_leaf_operation_recovery_sha256(
+            details["beforeFingerprintSha256"],
+            "Applied leaf-operation before fingerprint SHA-256",
+        )
+        after = self._validate_leaf_operation_recovery_sha256(
+            details["afterFingerprintSha256"],
+            "Applied leaf-operation after fingerprint SHA-256",
+        )
+        evidence = details["evidence"]
+        final = ordinal == len(expected_ids)
+        observation_profile = GUIDED_LEAF_OPERATION_OBSERVATION_PROFILES.get(
+            delivery["actionName"]
+        )
+        if observation_profile is None:
+            raise ValueError("Applied leaf-operation observation profile is unavailable")
+        observation_kind, completion_evidence_key, mutating_ordinals = (
+            observation_profile
+        )
+        expected_mutating = ordinal in mutating_ordinals
+        if (
+            observation["kind"] != observation_kind
+            or observation["satisfied"] is not True
+            or details["status"] != "passed"
+            or details["direction"] != "forward"
+            or details["operationOrdinal"] != ordinal
+            or details["operationId"] != delivery["sourceOperationId"]
+            or details["mutating"] is not expected_mutating
+            or details["runId"] != progress["runId"]
+            or details["stepId"] != progress["stepId"]
+            or details["actionName"] != progress["actionName"]
+            or details["recipeId"] != progress["recipeId"]
+            or details["catalogVersion"] != progress["catalogVersion"]
+            or not isinstance(evidence, dict)
+            or evidence.get("completedOperations") != list(range(1, ordinal + 1))
+            or evidence.get("preconditionsValidated") is not (ordinal == 1)
+            or evidence.get(completion_evidence_key) is not final
+            or (expected_mutating and before == after)
+            or (not expected_mutating and before != after)
+        ):
+            raise ValueError("Applied leaf-operation observation is inconsistent")
+        final_report = progress["finalReport"]
+        if progress["leafCompleted"] is not final:
+            raise ValueError("Applied leaf-operation completion flag is inconsistent")
+        if final:
+            if not isinstance(final_report, dict):
+                raise ValueError("Applied final leaf operation requires its next report")
+            self._validate_exact_keys(
+                final_report, {"reportId", "sequence"}, "Applied final report"
+            )
+            self._validated_required_uuid(
+                final_report["reportId"], "Applied final report id"
+            )
+            if (
+                final_report["reportId"] == delivery["expectedState"]["reportId"]
+                or final_report["sequence"]
+                != delivery["expectedState"]["sequence"] + 1
+            ):
+                raise ValueError("Applied final report does not advance the expected state")
+        elif final_report is not None:
+            raise ValueError("Applied partial leaf operation cannot publish a final report")
+        return deepcopy(value)
+
+    def _validate_leaf_operation_recovery_ack(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("Leaf-operation recovery acknowledgement must be an object")
+        self._validate_exact_keys(
+            value,
+            {
+                "formatVersion",
+                "challenge",
+                "recoveryId",
+                "requestId",
+                "originalDeliveryId",
+                "replacementSessionFingerprintSha256",
+                "outcome",
+                "evidence",
+                "retainsTargetLock",
+                "automaticReplay",
+                "occurredAt",
+            },
+            "Leaf-operation recovery acknowledgement",
+        )
+        challenge = self._validate_leaf_operation_recovery_challenge(value["challenge"])
+        delivery = challenge["originalDelivery"]
+        for actual, expected, label in (
+            (value["recoveryId"], challenge["recoveryId"], "recovery id"),
+            (value["requestId"], delivery["requestId"], "request id"),
+            (value["originalDeliveryId"], delivery["deliveryId"], "delivery id"),
+            (
+                value["replacementSessionFingerprintSha256"],
+                challenge["replacementSessionFingerprintSha256"],
+                "replacement session fingerprint",
+            ),
+        ):
+            if actual != expected:
+                raise ValueError(f"Leaf-operation recovery acknowledgement changed its {label}")
+        if value["automaticReplay"] is not False:
+            raise ValueError("Leaf-operation recovery acknowledgement cannot request replay")
+        evidence = value["evidence"]
+        if not isinstance(evidence, dict):
+            raise ValueError("Leaf-operation recovery evidence must be an object")
+        kind = evidence.get("kind")
+        if value["outcome"] != kind:
+            raise ValueError("Leaf-operation recovery outcome does not match its evidence")
+        if kind == "unresolved_current_state":
+            self._validate_exact_keys(
+                evidence,
+                {"kind", "reason", "leafRun", "currentCheckpoint"},
+                "Unresolved leaf-operation recovery evidence",
+            )
+            if evidence["reason"] not in {
+                "operation_outcome_indeterminate",
+                "native_undo_outcome_indeterminate",
+                "observation_outcome_indeterminate",
+            }:
+                raise ValueError("Unresolved leaf-operation recovery reason is invalid")
+            if evidence["leafRun"] is not None:
+                prefix = self._validate_leaf_operation_recovery_prefix(
+                    evidence["leafRun"],
+                    operation_ids=tuple(delivery["operationIds"]),
+                    ordinal=delivery["operationOrdinal"],
+                )
+                if prefix != challenge["acceptedPrefix"]:
+                    raise ValueError("Unresolved recovery leaf run changed the accepted prefix")
+            if evidence["currentCheckpoint"] is not None:
+                self._validate_leaf_operation_recovery_checkpoint(
+                    evidence["currentCheckpoint"]
+                )
+            if value["retainsTargetLock"] is not True:
+                raise ValueError("Unresolved recovery must retain the target lock")
+        elif kind == "operation_applied":
+            self._validate_exact_keys(
+                evidence,
+                {"kind", "terminalResult", "currentCheckpoint"},
+                "Applied leaf-operation recovery evidence",
+            )
+            if challenge["nativeUndoGuard"] is not None:
+                raise ValueError("Native Undo recovery cannot accept an applied operation")
+            terminal = self._validate_leaf_operation_succeeded_result(
+                evidence["terminalResult"], delivery
+            )
+            checkpoint = self._validate_leaf_operation_recovery_checkpoint(
+                evidence["currentCheckpoint"]
+            )
+            progress = terminal["progress"]
+            final_report = progress["finalReport"]
+            expected_report = (
+                final_report if final_report is not None else challenge["expectedState"]
+            )
+            if (
+                checkpoint["reportId"] != expected_report["reportId"]
+                or checkpoint["sequence"] != expected_report["sequence"]
+                or checkpoint["sceneFingerprintSha256"]
+                != progress["latestObservation"]["details"][
+                    "afterFingerprintSha256"
+                ]
+                or value["retainsTargetLock"] is not False
+            ):
+                raise ValueError("Applied recovery does not prove its terminal Blender state")
+        elif kind == "document_incarnation_retired":
+            self._validate_exact_keys(
+                evidence,
+                {
+                    "kind",
+                    "reason",
+                    "mutationOutcome",
+                    "requiresFreshDocumentIncarnation",
+                },
+                "Retired document-incarnation recovery evidence",
+            )
+            guard = challenge["nativeUndoGuard"]
+            expected_reason = (
+                "native_undo_witness_lost_after_reload"
+                if guard is not None
+                else "runtime_recovery_evidence_lost"
+            )
+            if (
+                evidence["reason"] != expected_reason
+                or evidence["mutationOutcome"] != "indeterminate"
+                or evidence["requiresFreshDocumentIncarnation"] is not True
+                or value["retainsTargetLock"] is not False
+            ):
+                raise ValueError(
+                    "Document-incarnation retirement is not bound to its recovery guard"
+                )
+        elif kind == "prefix_restored":
+            base_keys = {
+                "kind",
+                "expectedState",
+                "leafRun",
+                "currentCheckpoint",
+                "restoration",
+            }
+            actual_keys = set(evidence)
+            if actual_keys not in {frozenset(base_keys), frozenset(base_keys | {"nativeUndoWitness"})}:
+                self._validate_exact_keys(evidence, base_keys, "Restored leaf-operation evidence")
+            if evidence["expectedState"] != challenge["expectedState"]:
+                raise ValueError("Restored recovery expected state changed")
+            prefix = self._validate_leaf_operation_recovery_prefix(
+                evidence["leafRun"],
+                operation_ids=tuple(delivery["operationIds"]),
+                ordinal=delivery["operationOrdinal"],
+            )
+            if prefix != challenge["acceptedPrefix"]:
+                raise ValueError("Restored recovery leaf run changed the accepted prefix")
+            checkpoint = self._validate_leaf_operation_recovery_checkpoint(
+                evidence["currentCheckpoint"]
+            )
+            if (
+                checkpoint["reportId"] != challenge["expectedState"]["reportId"]
+                or checkpoint["sequence"] != challenge["expectedState"]["sequence"]
+                or checkpoint["sceneFingerprintSha256"]
+                != challenge["acceptedPrefix"]["latestFingerprintSha256"]
+            ):
+                raise ValueError("Restored recovery checkpoint does not prove the accepted prefix")
+            if delivery["operationOrdinal"] == 1 and checkpoint[
+                "checkpointId"
+            ] != challenge["authorityProof"]["authorizedStartCheckpointId"]:
+                raise ValueError("Empty-prefix recovery did not restore the authorized start")
+            restoration = evidence["restoration"]
+            witness = evidence.get("nativeUndoWitness")
+            guard = challenge["nativeUndoGuard"]
+            if restoration == "native_undo_restored":
+                if guard is None or not isinstance(witness, dict):
+                    raise ValueError("Native Undo recovery requires its guard-bound witness")
+                self._validate_exact_keys(
+                    witness,
+                    {
+                        "sourceCheckpointId",
+                        "restoredCheckpointId",
+                        "recoveryTokenSha256",
+                        "restoredAt",
+                        "probeSatisfied",
+                    },
+                    "Native Undo recovery witness",
+                )
+                self._validated_required_uuid(
+                    witness["sourceCheckpointId"], "Native Undo source checkpoint id"
+                )
+                if witness["restoredCheckpointId"] is not None:
+                    self._validated_required_uuid(
+                        witness["restoredCheckpointId"],
+                        "Native Undo restored checkpoint id",
+                    )
+                if (
+                    witness["restoredCheckpointId"] != checkpoint["checkpointId"]
+                    or witness["recoveryTokenSha256"] != guard["recoveryTokenSha256"]
+                    or (
+                        guard["expectedRestoredCheckpointId"] is not None
+                        and witness["restoredCheckpointId"]
+                        != guard["expectedRestoredCheckpointId"]
+                    )
+                    or witness["probeSatisfied"] is not True
+                ):
+                    raise ValueError("Native Undo recovery witness does not match its guard")
+                self._validate_expiry(witness["restoredAt"], "Native Undo restored time")
+            elif restoration == "prefix_observed_without_native_undo":
+                if guard is not None or witness is not None:
+                    raise ValueError("Observed-prefix recovery cannot carry Native Undo evidence")
+            else:
+                raise ValueError("Leaf-operation recovery restoration is unsupported")
+            if value["retainsTargetLock"] is not False:
+                raise ValueError("Restored recovery must release the target lock")
+        else:
+            raise ValueError("Leaf-operation recovery evidence kind is unsupported")
+        occurred_at = self._validate_expiry(
+            value["occurredAt"], "Leaf-operation recovery acknowledgement time"
+        )
+        if datetime.fromisoformat(occurred_at.replace("Z", "+00:00")) < datetime.fromisoformat(
+            challenge["requestedAt"].replace("Z", "+00:00")
+        ):
+            raise ValueError("Leaf-operation recovery acknowledgement predates its challenge")
+        validated = deepcopy(value)
+        validated["challenge"] = challenge
+        return validated
+
+    def _poll_leaf_operation_recovery_request(self) -> bool:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/leaf-operation-recovery?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Leaf-operation recovery poll")
+        challenge = response["request"]
+        if challenge is None:
+            return False
+        validated = self._validate_leaf_operation_recovery_challenge(challenge)
+        recovery_id = validated["recoveryId"]
+        if recovery_id not in self._seen_leaf_operation_recovery_ids:
+            if len(self._seen_leaf_operation_recovery_ids) >= 256:
+                self._seen_leaf_operation_recovery_ids.pop()
+            self._seen_leaf_operation_recovery_ids.add(recovery_id)
+            self.incoming.put(
+                {"kind": "leaf_operation_recovery_request", "request": validated}
+            )
+        return True
 
     @staticmethod
     def _canonical_protocol_bytes(value: Any) -> bytes:
@@ -4303,7 +5439,7 @@ class CompanionTransport:
                 f"/api/v1/replan/branches?{query}",
                 abort_on_stop=True,
             )
-            if response.get("protocolVersion") != PROTOCOL_VERSION:
+            if response.get("protocolVersion") not in EXECUTION_TRACK_PROTOCOL_VERSIONS:
                 raise ValueError("Unsupported revision branch protocol version")
             if response.get("planId") != plan_id:
                 raise ValueError("Runtime returned revision branches for the wrong Plan")
@@ -4415,10 +5551,15 @@ class CompanionTransport:
         session_retry_delay = min(max(0.05, self._poll_interval), 5.0)
         pending_report: dict[str, Any] | None = None
         pending_action_result: dict[str, Any] | None = None
+        pending_leaf_operation_result: dict[str, Any] | None = None
+        pending_leaf_operation_recovery_ack: dict[str, Any] | None = None
+        pending_poke_compound_result: dict[str, Any] | None = None
+        pending_poke_compound_recovery_ack: dict[str, Any] | None = None
         pending_execution_track_preflight_create: dict[str, Any] | None = None
         pending_execution_track_preflight_status_request: str | None = None
         pending_execution_track_preflight_result: dict[str, Any] | None = None
         pending_execution_track_execution_progress: dict[str, Any] | None = None
+        pending_execution_track_execution_managed_start: dict[str, Any] | None = None
         pending_execution_track_execution_result: dict[str, Any] | None = None
         pending_execution_track_execution_recovery_ack: dict[str, Any] | None = None
         stale_execution_track_execution_recovery_ack: dict[str, Any] | None = None
@@ -4457,10 +5598,15 @@ class CompanionTransport:
             not self._stop.is_set()
             or pending_report is not None
             or pending_action_result is not None
+            or pending_leaf_operation_result is not None
+            or pending_leaf_operation_recovery_ack is not None
+            or pending_poke_compound_result is not None
+            or pending_poke_compound_recovery_ack is not None
             or pending_execution_track_preflight_create is not None
             or pending_execution_track_preflight_status_request is not None
             or pending_execution_track_preflight_result is not None
             or pending_execution_track_execution_progress is not None
+            or pending_execution_track_execution_managed_start is not None
             or pending_execution_track_execution_result is not None
             or pending_execution_track_execution_recovery_ack is not None
             or pending_shortcut_progress is not None
@@ -4476,10 +5622,15 @@ class CompanionTransport:
             or pending_dialogue_run is not None
             or not self.outgoing.empty()
             or not self.action_results.empty()
+            or not self.leaf_operation_results.empty()
+            or not self.leaf_operation_recovery_acks.empty()
+            or not self.poke_compound_results.empty()
+            or not self.poke_compound_recovery_acks.empty()
             or not self.execution_track_preflight_creates.empty()
             or not self.execution_track_preflight_status_requests.empty()
             or not self.execution_track_preflight_results.empty()
             or not self.execution_track_execution_progress.empty()
+            or not self.execution_track_execution_managed_starts.empty()
             or not self.execution_track_execution_results.empty()
             or not self.execution_track_execution_recovery_acks.empty()
             or not self.shortcut_proof_progress.empty()
@@ -4522,6 +5673,8 @@ class CompanionTransport:
                     and now >= session.next_heartbeat_at
                 ):
                     self._send_heartbeat()
+                    request_succeeded = True
+                if self._service_lease_refresh_requests():
                     request_succeeded = True
                 while True:
                     try:
@@ -5069,6 +6222,256 @@ class CompanionTransport:
                             )
                             pending_action_result = None
                             request_succeeded = True
+                if pending_leaf_operation_result is None:
+                    try:
+                        pending_leaf_operation_result = (
+                            self.leaf_operation_results.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_leaf_operation_result is not None:
+                    final_report = pending_leaf_operation_result.get("progress")
+                    final_report = (
+                        final_report.get("finalReport")
+                        if isinstance(final_report, dict)
+                        else None
+                    )
+                    report_identity = (
+                        (final_report.get("reportId"), final_report.get("sequence"))
+                        if (
+                            isinstance(final_report, dict)
+                            and isinstance(final_report.get("reportId"), str)
+                            and isinstance(final_report.get("sequence"), int)
+                            and not isinstance(final_report.get("sequence"), bool)
+                        )
+                        else None
+                    )
+                    if (
+                        final_report is None
+                        or (
+                            report_identity is not None
+                            and report_identity == self._last_delivered_report_identity
+                            and report_identity[1] == self._last_delivered_sequence
+                        )
+                    ):
+                        request_id = pending_leaf_operation_result.get("requestId")
+                        try:
+                            response = self._request_json(
+                                "POST",
+                                "/api/v1/companion/leaf-operation-result",
+                                pending_leaf_operation_result,
+                            )
+                            self._validate_exact_keys(
+                                response, {"result"}, "Leaf-operation result ack"
+                            )
+                            if response["result"] not in {"accepted", "duplicate"}:
+                                raise ValueError(
+                                    "Runtime rejected or did not acknowledge leaf-operation result"
+                                )
+                        except HTTPError as error:
+                            if self._leaf_operation_result_requires_session_retry(error):
+                                raise
+                            if not 400 <= error.code < 500:
+                                raise
+                            self.incoming.put(
+                                {
+                                    "kind": "leaf_operation_result_rejected",
+                                    "requestId": request_id,
+                                    "message": (
+                                        "Runtime permanently rejected leaf-operation result "
+                                        f"(HTTP {error.code})"
+                                    ),
+                                }
+                            )
+                            pending_leaf_operation_result = None
+                            request_succeeded = True
+                        else:
+                            recovery_required = (
+                                pending_leaf_operation_result.get("status")
+                                == "recovery_required"
+                            )
+                            self.incoming.put(
+                                {
+                                    "kind": "leaf_operation_result_acknowledged",
+                                    "requestId": request_id,
+                                }
+                            )
+                            pending_leaf_operation_result = None
+                            request_succeeded = True
+                            if recovery_required:
+                                # A challenge must be issued to a replacement lease.  Preserve
+                                # the document/session identity while rotating only live authority.
+                                self._clear_session()
+                                continue
+                if pending_leaf_operation_recovery_ack is None:
+                    try:
+                        pending_leaf_operation_recovery_ack = (
+                            self.leaf_operation_recovery_acks.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_leaf_operation_recovery_ack is not None:
+                    request_id = pending_leaf_operation_recovery_ack.get("requestId")
+                    recovery_id = pending_leaf_operation_recovery_ack.get("recoveryId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/leaf-operation-recovery",
+                            pending_leaf_operation_recovery_ack,
+                        )
+                        self._validate_exact_keys(
+                            response,
+                            {"result"},
+                            "Leaf-operation recovery acknowledgement response",
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime did not acknowledge leaf-operation recovery"
+                            )
+                    except HTTPError as error:
+                        if self._leaf_operation_recovery_ack_requires_new_challenge(error):
+                            # Authorization happens before the ACK commit.  This response
+                            # therefore proves the old challenge was not acknowledged; keep
+                            # any Native Undo witness, rotate the lease, and await a fresh
+                            # challenge instead of replaying the stale ACK.
+                            pending_leaf_operation_recovery_ack = None
+                            raise
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put(
+                            {
+                                "kind": "leaf_operation_recovery_rejected",
+                                "requestId": request_id,
+                                "recoveryId": recovery_id,
+                                "message": (
+                                    "Runtime rejected the leaf-operation recovery proof "
+                                    f"(HTTP {error.code})"
+                                ),
+                            }
+                        )
+                        pending_leaf_operation_recovery_ack = None
+                        request_succeeded = True
+                    else:
+                        outcome = pending_leaf_operation_recovery_ack.get("outcome")
+                        self.incoming.put(
+                            {
+                                "kind": "leaf_operation_recovery_acknowledged",
+                                "requestId": request_id,
+                                "recoveryId": recovery_id,
+                                "outcome": outcome,
+                            }
+                        )
+                        pending_leaf_operation_recovery_ack = None
+                        request_succeeded = True
+                        if outcome == "unresolved_current_state":
+                            # The next read-only attempt receives a new challenge on another
+                            # lease; the target remains locked throughout the rotation.
+                            self._clear_session()
+                            continue
+                if pending_poke_compound_result is None:
+                    try:
+                        pending_poke_compound_result = self.poke_compound_results.get_nowait()
+                    except Empty:
+                        pass
+                if pending_poke_compound_result is not None:
+                    request_id = pending_poke_compound_result.get("requestId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/poke-compound-result",
+                            pending_poke_compound_result,
+                        )
+                        self._validate_exact_keys(
+                            response, {"result"}, "Poke compound result acknowledgement"
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime rejected or did not acknowledge Poke compound result"
+                            )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put(
+                            {
+                                "kind": "poke_compound_result_rejected",
+                                "requestId": request_id,
+                                "message": (
+                                    "Runtime permanently rejected Poke compound result "
+                                    f"(HTTP {error.code})"
+                                ),
+                            }
+                        )
+                        pending_poke_compound_result = None
+                        request_succeeded = True
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "poke_compound_result_acknowledged",
+                                "requestId": request_id,
+                            }
+                        )
+                        pending_poke_compound_result = None
+                        request_succeeded = True
+                if pending_poke_compound_recovery_ack is None:
+                    try:
+                        pending_poke_compound_recovery_ack = (
+                            self.poke_compound_recovery_acks.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_poke_compound_recovery_ack is not None:
+                    recovery_id = pending_poke_compound_recovery_ack.get("recoveryId")
+                    challenge = pending_poke_compound_recovery_ack.get("challenge")
+                    delivery = (
+                        challenge.get("originalDelivery")
+                        if isinstance(challenge, dict)
+                        else None
+                    )
+                    request_id = (
+                        delivery.get("requestId") if isinstance(delivery, dict) else None
+                    )
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/poke-compound-recovery",
+                            pending_poke_compound_recovery_ack,
+                        )
+                        self._validate_exact_keys(
+                            response,
+                            {"result"},
+                            "Poke compound recovery acknowledgement response",
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime did not acknowledge Poke compound recovery"
+                            )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put(
+                            {
+                                "kind": "poke_compound_recovery_rejected",
+                                "requestId": request_id,
+                                "recoveryId": recovery_id,
+                                "message": (
+                                    "Runtime rejected the Poke compound recovery proof "
+                                    f"(HTTP {error.code})"
+                                ),
+                            }
+                        )
+                        pending_poke_compound_recovery_ack = None
+                        request_succeeded = True
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "poke_compound_recovery_acknowledged",
+                                "requestId": request_id,
+                                "recoveryId": recovery_id,
+                                "outcome": pending_poke_compound_recovery_ack.get("outcome"),
+                            }
+                        )
+                        pending_poke_compound_recovery_ack = None
+                        request_succeeded = True
                 if pending_execution_track_preflight_create is None:
                     try:
                         pending_execution_track_preflight_create = (
@@ -5230,6 +6633,11 @@ class CompanionTransport:
                             {
                                 "kind": "execution_track_execution_progress_rejected",
                                 "requestId": request_id,
+                                "progressContentSha256": (
+                                    pending_execution_track_execution_progress.get(
+                                        "contentSha256"
+                                    )
+                                ),
                                 "message": (
                                     "Runtime permanently rejected execution-track baseline "
                                     f"progress (HTTP {error.code})"
@@ -5241,10 +6649,72 @@ class CompanionTransport:
                             {
                                 "kind": "execution_track_execution_progress_acknowledged",
                                 "requestId": request_id,
+                                "progressContentSha256": (
+                                    pending_execution_track_execution_progress.get(
+                                        "contentSha256"
+                                    )
+                                ),
                                 "result": response["result"],
                             }
                         )
                     pending_execution_track_execution_progress = None
+                    request_succeeded = True
+                if pending_execution_track_execution_managed_start is None:
+                    try:
+                        pending_execution_track_execution_managed_start = (
+                            self.execution_track_execution_managed_starts.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_execution_track_execution_managed_start is not None:
+                    request_id = pending_execution_track_execution_managed_start.get(
+                        "requestId"
+                    )
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/execution-track-execution/managed-start",
+                            pending_execution_track_execution_managed_start,
+                        )
+                        self._validate_exact_keys(
+                            response, {"result"}, "Execution-track managed-start ack"
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime did not acknowledge execution-track managed start"
+                            )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_execution_managed_start_rejected",
+                                "requestId": request_id,
+                                "managedStartContentSha256": (
+                                    pending_execution_track_execution_managed_start.get(
+                                        "managedStart", {}
+                                    ).get("contentSha256")
+                                ),
+                                "message": (
+                                    "Runtime permanently rejected execution-track managed "
+                                    f"start (HTTP {error.code})"
+                                ),
+                            }
+                        )
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_execution_managed_start_acknowledged",
+                                "requestId": request_id,
+                                "managedStartContentSha256": (
+                                    pending_execution_track_execution_managed_start.get(
+                                        "managedStart", {}
+                                    ).get("contentSha256")
+                                ),
+                                "result": response["result"],
+                            }
+                        )
+                    pending_execution_track_execution_managed_start = None
                     request_succeeded = True
                 if pending_execution_track_execution_result is None:
                     try:
@@ -6022,7 +7492,10 @@ class CompanionTransport:
                 next_session_attempt_at = current_time + session_retry_delay
                 session_retry_delay = min(session_retry_delay * 2, 5.0)
                 message = str(error)
-                if message != last_error:
+                intentional_stop_abort = self._stop.is_set() and isinstance(
+                    error, (HTTPException, OSError)
+                )
+                if not intentional_stop_abort and message != last_error:
                     self.incoming.put({"kind": "error", "message": message})
                     last_error = message
                 next_poll = current_time + self._poll_interval
