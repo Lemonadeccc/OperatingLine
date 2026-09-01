@@ -53,7 +53,7 @@ jobs:
 
       - name: Create or update draft version PR / 创建或更新草稿版本 PR
         if: steps.intent.outputs.has-release-entries == 'true'
-        uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
+        uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
           commit-message: 'chore(release): version packages'
           pr-title: 'chore(release): version packages'
