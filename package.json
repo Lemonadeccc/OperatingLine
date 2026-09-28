@@ -104,7 +104,7 @@
     "@commitlint/config-conventional": "21.2.0",
     "@commitlint/cz-commitlint": "21.2.0",
     "@eslint/js": "10.0.1",
-    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/client": "2.1.0",
     "@operatingline/blender-action-catalog": "workspace:*",
     "@operatingline/blender-mcp-bridge": "workspace:*",
     "@operatingline/cli-planner-provider": "workspace:*",

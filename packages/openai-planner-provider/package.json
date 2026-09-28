@@ -11,6 +11,6 @@
   "dependencies": {
     "@operatingline/planner-provider-sdk": "workspace:*",
     "@operatingline/protocol": "workspace:*",
-    "openai": "7.4.0"
+    "openai": "7.23.0"
   }
 }
