@@ -12,7 +12,7 @@
     "@operatingline/blender-action-catalog": "workspace:*",
     "@operatingline/cli-planner-provider": "workspace:*",
     "@operatingline/orchestrator": "workspace:*",
-    "pino": "10.3.1"
+    "pino": "10.4.0"
   },
   "devDependencies": {
     "tsx": "4.23.5"
